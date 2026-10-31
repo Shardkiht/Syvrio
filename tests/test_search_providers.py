@@ -795,9 +795,13 @@ def test_volcengine_fetch_request_and_mapping():
             json={
                 "ResponseMetadata": {"RequestId": "rid"},
                 "Result": {
-                    "Url": "https://example.com/a",
-                    "Title": "Example Page",
-                    "Content": "正文内容" * 10,
+                    "Data": {
+                        "StatusCode": 200,
+                        "Url": "https://example.com/a",
+                        "RedirectedUrl": "https://example.com/final",
+                        "Title": "Example Page",
+                        "ContentText": "正文内容" * 10,
+                    }
                 },
             },
         )
@@ -810,7 +814,7 @@ def test_volcengine_fetch_request_and_mapping():
     assert request.headers["authorization"] == f"Bearer {KEY}"
     assert json.loads(request.content) == {"Url": "https://example.com/a"}
     assert result.title == "Example Page"
-    assert result.final_url == "https://example.com/a"
+    assert result.final_url == "https://example.com/final"
     assert result.content == "正文内容" * 10
     assert result.truncated is False
 
@@ -819,12 +823,16 @@ def test_volcengine_fetch_truncates_to_max_chars():
     sent, _ = capture(
         lambda request: httpx.Response(
             200,
-            json={"Result": {"Url": "https://example.com/a", "Content": "x" * 500}},
+            json={"Result": {"Data": {
+                "StatusCode": 200, "Url": "https://example.com/a",
+                "RedirectedUrl": None, "ContentText": "x" * 500,
+            }}},
         )
     )
     provider = make(VolcengineFetchProvider, sent)
     result = provider.fetch(FetchQuery("https://example.com/a", 100))
     assert result.content == "x" * 100 and result.truncated is True
+    assert result.final_url == "https://example.com/a"
 
 
 def test_volcengine_fetch_metadata_error_maps_to_auth():
@@ -853,7 +861,7 @@ def test_volcengine_fetch_missing_result_or_content_is_error():
 
     sent, _ = capture(
         lambda request: httpx.Response(
-            200, json={"Result": {"Url": "https://example.com/a", "Content": ""}}
+            200, json={"Result": {"Data": {"StatusCode": 200, "ContentText": None}}}
         )
     )
     provider = make(VolcengineFetchProvider, sent)
@@ -873,3 +881,14 @@ def test_volcengine_fetch_timeout_maps_to_timeout():
     with pytest.raises(ProviderError) as caught:
         provider.fetch(FetchQuery("https://example.com/a", 4000))
     assert caught.value.kind == ProviderErrorKind.TIMEOUT
+
+
+@pytest.mark.parametrize("status", [403, 404, 500])
+def test_volcengine_fetch_rejects_target_http_error(status):
+    sent, _ = capture(
+        lambda request: httpx.Response(200, json={
+            "Result": {"Data": {"StatusCode": status, "ContentText": "Error page"}}
+        })
+    )
+    with pytest.raises(ProviderError, match=f"Target HTTP {status}"):
+        make(VolcengineFetchProvider, sent).fetch(FetchQuery("https://example.com/a", 100))

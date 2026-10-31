@@ -234,6 +234,15 @@ Spark 真实接口合成数据冒烟：流式回复、带时间/地点的记忆�
 - Request-count budget is checked before provider quota accounting. Failed dispatched requests still count conservatively.
 - Official fetch adapters receive search.fetch_timeout; search adapters retain search.timeout. Setup exposes Fetch only for implemented fetch providers.
 - You Contents parses the documented top-level array (https://you.com/docs/api-reference/contents), without livecrawl or additional formats. Search parsing and the shared JSON client remain unchanged.
-- Offline comparison against the starting HEAD preserved all search metrics. Real provider API behavior remains unverified; no paid API requests were made.
+- Offline comparison against the starting HEAD preserved all search metrics. That offline-only pass made no paid requests; the later authorized real API verification is recorded below.
 
 - Validation: affected provider/setup/usage suite 121 passed; full isolated pytest 775 passed. Offline Search Eval unchanged: P@5 0.2364, Success@5/MRR@5 0.7273, NDCG@5 0.8944, false acceptance 0.0606, requests/query 2.303. Temporary baseline removed; evaluation inputs unchanged.
+
+
+## Search / Fetch real API smoke follow-up (2026-11-01)
+
+- Authorized smoke used process-local credentials and disposable empty vaults through normal build_tools / AgentRuntime paths. Five official Search providers returned results; Tavily, Exa, You Contents and open-websearch fetched public page content.
+- Volcengine Fetch returned HTTP 200 but exposed an incorrect assumed response mapping. The official Fetch documentation and live response agree on Result.Data.StatusCode / ContentText / RedirectedUrl / Title. The adapter now reads those fields, rejects target-page HTTP errors, and preserves router URL checks and existing usage accounting.
+- Corrected Volcengine Fetch succeeded through build_tools on a public page. A confirmed Spark Agent run used two model requests, executed Tavily search and fetch_web, then produced a linked answer; the temporary vault contained no memory files. Mock regressions cover the documented response, redirects, truncation, empty content and target HTTP 403/404/500. Official reference: https://docs.volcengine.com/docs/networked-search/doubao-search-web-analysis-fetch?lang=zh
+- Smoke scope does not establish all count limits, Custom search behavior, dynamic-page rendering or every target website. Credentials were read only; no user vault or persistent configuration was changed.
+- Final validation: provider suite 70 passed; full isolated pytest 778 passed (one existing Pydantic warning). Search Eval retained P@5 0.2364, Success@5/MRR@5 0.7273, NDCG@5 0.8944, false acceptance 0.0606 and requests/query 2.303. Evaluation inputs were unchanged; disposable smoke directories were removed.

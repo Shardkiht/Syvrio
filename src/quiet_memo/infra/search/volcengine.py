@@ -157,9 +157,7 @@ class VolcengineSearchProvider:
 class VolcengineFetchProvider:
     """火山引擎网页抓取（/search_api/fetch）：单 URL 抓正文。
 
-    官方公开文档未索引到该端点的字段说明；请求/响应按豆包搜索 API 的
-    同族约定（PascalCase 字段、ResponseMetadata.Error、Result 承载
-    数据）实现，Title/Content 字段名待真实冒烟确认后固化。
+    正文与目标网页状态位于 Result.Data；接口错误仍在 ResponseMetadata。
     """
 
     name = NAME
@@ -186,15 +184,21 @@ class VolcengineFetchProvider:
         result = payload.get("Result")
         if not isinstance(result, dict):
             raise ProviderError(NAME, ProviderErrorKind.BAD_RESPONSE, "Result 字段缺失")
-        content = str(result.get("Content") or "").strip()
+        data = result.get("Data")
+        if not isinstance(data, dict):
+            raise ProviderError(NAME, ProviderErrorKind.BAD_RESPONSE, "Result.Data 字段缺失")
+        status = data.get("StatusCode")
+        if not isinstance(status, int) or not 200 <= status < 300:
+            raise ProviderError(NAME, ProviderErrorKind.BAD_RESPONSE, f"Target HTTP {status}")
+        content = str(data.get("ContentText") or "").strip()
         if not content:
             raise ProviderError(NAME, ProviderErrorKind.BAD_RESPONSE, "未返回正文")
-        url = str(result.get("Url") or "").strip() or query.url
+        url = str(data.get("RedirectedUrl") or data.get("Url") or "").strip() or query.url
         text, truncated = truncate_fetch_content(content, query.max_chars)
         return FetchResult(
             url=query.url,
             final_url=url,
-            title=str(result.get("Title") or "").strip() or url,
+            title=str(data.get("Title") or "").strip() or url,
             content=text,
             truncated=truncated,
         )
