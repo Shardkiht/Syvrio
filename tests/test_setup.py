@@ -776,3 +776,18 @@ def test_search_setup_usage_limit_defaults_to_20(tmp_path, monkeypatch):
 
     data = tomllib.loads(config_path.read_text(encoding="utf-8"))
     assert data["search"]["usage_limits"]["exa"]["max_calls"] == 20
+
+
+def test_baidu_menu_only_offers_search(monkeypatch, tmp_path):
+    from quiet_memo.infra import providers as module
+    from quiet_memo.infra.config import Config
+    menus = []
+    def select(title, choices):
+        menus.append([choice.value for choice in choices])
+        return "baidu_search" if len(menus) == 1 else "back"
+    monkeypatch.setattr(module, "_select", select)
+    monkeypatch.setattr(module, "read_api_key", lambda _: "synthetic-key")
+    monkeypatch.setattr(module.questionary, "password", lambda *a, **kw: type("Answer", (), {"ask": lambda self: ""})())
+    monkeypatch.setattr(module, "ask", lambda _: "")
+    module._configure_search_provider(Config(vault=tmp_path), [])
+    assert "search" in menus[1] and "fetch" not in menus[1]

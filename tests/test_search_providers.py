@@ -719,15 +719,13 @@ def test_you_fetch_request_and_mapping():
     sent, requests = capture(
         lambda request: httpx.Response(
             200,
-            json={
-                "contents": [
+            json=[
                     {
                         "url": "https://example.com/a",
                         "title": "Example Page",
                         "markdown": "正文内容" * 10,
                     }
-                ]
-            },
+                ],
         )
     )
     provider = make(YouFetchProvider, sent)
@@ -747,7 +745,7 @@ def test_you_fetch_request_and_mapping():
 def test_you_fetch_does_not_enable_livecrawl():
     sent, requests = capture(
         lambda request: httpx.Response(
-            200, json={"contents": [{"url": "https://example.com/a", "markdown": "t"}]}
+            200, json=[{"url": "https://example.com/a", "markdown": "t"}]
         )
     )
     provider = make(YouFetchProvider, sent)
@@ -759,7 +757,7 @@ def test_you_fetch_does_not_enable_livecrawl():
 def test_you_fetch_truncates_to_max_chars():
     sent, _ = capture(
         lambda request: httpx.Response(
-            200, json={"contents": [{"url": "https://example.com/a", "markdown": "x" * 500}]}
+            200, json=[{"url": "https://example.com/a", "markdown": "x" * 500}]
         )
     )
     provider = make(YouFetchProvider, sent)
@@ -770,7 +768,7 @@ def test_you_fetch_truncates_to_max_chars():
 def test_you_fetch_missing_markdown_is_error():
     sent, _ = capture(
         lambda request: httpx.Response(
-            200, json={"contents": [{"url": "https://example.com/a", "markdown": ""}]}
+            200, json=[{"url": "https://example.com/a", "markdown": ""}]
         )
     )
     provider = make(YouFetchProvider, sent)

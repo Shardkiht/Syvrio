@@ -238,3 +238,50 @@ def test_build_routers_wire_limiter_from_config(tmp_path):
     )
     loaded = load_config(config_path)
     assert loaded.search.usage_limits["exa"].max_calls == 7
+
+
+def test_request_budget_does_not_charge_unattempted_provider(tmp_path):
+    first, second = _SearchProvider("first"), _SearchProvider("second")
+    limiter = UsageLimiter({name: UsageLimit(max_calls=5) for name in ("first", "second")})
+    router = SearchRouter({"first": first, "second": second}, order=["first", "second"],
+                          max_requests=1, usage_limiter=limiter)
+    router.search(SearchQuery("synthetic query"))
+    assert len(first.calls) == 1 and not second.calls
+    assert limiter.remaining("first") == 4
+    assert limiter.remaining("second") == 5
+
+
+def test_legacy_fetch_keeps_usage_protection():
+    provider = _FetchProvider("exa")
+    limiter = UsageLimiter({"exa": UsageLimit(max_calls=1)})
+    router = SearchRouter({"exa": provider}, usage_limiter=limiter)
+    router.fetch("https://example.com/a")
+    with pytest.raises(ProviderError):
+        router.fetch("https://example.com/a")
+    assert len(provider.calls) == 1
+
+
+@pytest.mark.parametrize("name", ["exa", "tavily"])
+def test_normal_agent_fetch_uses_independent_config(service, monkeypatch, name):
+    from quiet_memo.agent.tools import build_tools
+    from quiet_memo.agent.session import SessionStore
+    from quiet_memo.infra import config as config_module
+    from quiet_memo.infra.search import fetch_router as module
+    provider = _FetchProvider(name)
+    monkeypatch.setattr(config_module, "read_api_key", lambda _: "synthetic-key")
+    seen = []
+    def build(provider_name, key, timeout):
+        seen.append((provider_name, timeout))
+        return provider
+    monkeypatch.setattr(module, "_build_external_fetch_provider", build)
+    service.config.search.enabled = True
+    service.config.search.providers = ["open_websearch"]
+    service.config.search.timeout = 3
+    service.config.search.fetch_timeout = 47
+    service.config.search.usage_limits = {name: UsageLimit(max_calls=1)}
+    service.config.fetch.providers = [name]
+    tools = build_tools(service, SessionStore(service.config.vault).create())
+    assert tools.execute("fetch_web", {"url": "https://example.com/a"}).ok
+    assert not tools.execute("fetch_web", {"url": "https://example.com/a"}).ok
+    assert provider.calls == ["https://example.com/a"]
+    assert seen == [(name, 47)]

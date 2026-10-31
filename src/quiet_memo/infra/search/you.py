@@ -90,8 +90,8 @@ class YouFetchProvider:
     """You.com Contents（ydc-index.io /v1/contents）：单 URL 抓正文。
 
     请求体按官方 Contents API 用 urls + formats=["markdown"]；不启用
-    livecrawl。响应 item 的 markdown/title/url 字段形状来自二手资料，
-    真实响应结构待冒烟确认后固化。
+    livecrawl。官方响应为顶层数组，每项包含 markdown/title/url。
+    https://you.com/docs/api-reference/contents
     """
 
     name = NAME
@@ -111,8 +111,10 @@ class YouFetchProvider:
         body = {"urls": [query.url], "formats": ["markdown"]}
         headers = {"X-API-Key": self._api_key}
         response = self._client.post_json("/v1/contents", body, headers)
-        payload = self._client.parse_json(response)
-        items = payload.get("contents")
+        try:
+            items = response.json()
+        except ValueError as exc:
+            raise ProviderError(NAME, ProviderErrorKind.BAD_RESPONSE, "响应不是合法 JSON") from exc
         if not isinstance(items, list) or not items:
             raise ProviderError(NAME, ProviderErrorKind.BAD_RESPONSE, "contents 结果为空")
         item = items[0] if isinstance(items[0], dict) else {}

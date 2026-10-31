@@ -226,3 +226,14 @@ Spark 真实接口合成数据冒烟：流式回复、带时间/地点的记忆�
 - Active synchronous context preparation/tools finish safely; remaining tools receive cancelled results to keep tool-call pairs valid. Completed writes are not rolled back. UI text remains English.
 
 - Validation: final full isolated suites base/main 632 passed, evolution working tree 672 passed. Installed LiteLLM async stream wiring tested with local mock responses, including repeated requests; cancellation covers first-token waits, partial output, draft preservation and tool-result pairing. No live model/network verification or evaluation-data changes. Evolution retains its pre-existing uncommitted work and memory-specific behavior.
+
+
+## Search / Fetch final wiring fixes
+
+- Normal Agent tool construction builds FetchRouter independently of SearchRouter; explicit legacy router injection remains supported and its fetch compatibility entry shares the usage limiter.
+- Request-count budget is checked before provider quota accounting. Failed dispatched requests still count conservatively.
+- Official fetch adapters receive search.fetch_timeout; search adapters retain search.timeout. Setup exposes Fetch only for implemented fetch providers.
+- You Contents parses the documented top-level array (https://you.com/docs/api-reference/contents), without livecrawl or additional formats. Search parsing and the shared JSON client remain unchanged.
+- Offline comparison against the starting HEAD preserved all search metrics. Real provider API behavior remains unverified; no paid API requests were made.
+
+- Validation: affected provider/setup/usage suite 121 passed; full isolated pytest 775 passed. Offline Search Eval unchanged: P@5 0.2364, Success@5/MRR@5 0.7273, NDCG@5 0.8944, false acceptance 0.0606, requests/query 2.303. Temporary baseline removed; evaluation inputs unchanged.

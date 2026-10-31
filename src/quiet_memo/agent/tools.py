@@ -143,13 +143,14 @@ def build_tools(
                                       {"type": "object", "properties": properties, "required": ["path"], "additionalProperties": False},
                                       wrap_file(handler), timeout=timeout, mutating=name == "import_file"))
     search_config = service.config.search
+    injected_search_router = search_router is not None
     search_router = search_router or (
         build_search_router(search_config, service.config.vault)
         if search_config.enabled
         else None
     )
     # 抓取与搜索的配置相互独立；未显式注入时按 [fetch] 配置构建。
-    if fetch_router is None and search_router is None:
+    if fetch_router is None and not injected_search_router:
         fetch_router = build_fetch_router(service.config.fetch, search_config, service.config.vault)
 
     def recall(arguments: dict) -> ToolOutcome:

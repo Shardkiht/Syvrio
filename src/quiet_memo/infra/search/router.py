@@ -356,19 +356,6 @@ class SearchRouter:
                     return self._final_outcome(
                         failures, pool, analysis, limit, cache_key, name_hint=name
                     )
-                if self.usage_limiter is not None:
-                    # 达到厂商上限即跳过该厂商，交给后续 provider 回退。
-                    if not self.usage_limiter.allows(name):
-                        failures.append(
-                            SearchFailure(
-                                name,
-                                ProviderErrorKind.QUOTA.value,
-                                "已达到本地调用上限，本次跳过该厂商",
-                            )
-                        )
-                        return None
-                    # 请求失败也保守计数：在实际发起前记账。
-                    self.usage_limiter.record(name)
                 if budget["requests"] >= self.max_requests:
                     # 本地请求预算耗尽不是厂商配额问题，用独立分类区分。
                     failures.append(
@@ -382,6 +369,19 @@ class SearchRouter:
                         failures, pool, analysis, limit, cache_key,
                         name_hint=name, budget_exhausted=True,
                     )
+                if self.usage_limiter is not None:
+                    # 达到厂商上限即跳过该厂商，交给后续 provider 回退。
+                    if not self.usage_limiter.allows(name):
+                        failures.append(
+                            SearchFailure(
+                                name,
+                                ProviderErrorKind.QUOTA.value,
+                                "已达到本地调用上限，本次跳过该厂商",
+                            )
+                        )
+                        return None
+                    # 请求失败也保守计数：在实际发起前记账。
+                    self.usage_limiter.record(name)
                 budget["requests"] += 1
                 try:
                     raw = provider.search(
@@ -541,7 +541,7 @@ class SearchRouter:
     def fetch(self, url: str, max_chars: int = 4000) -> FetchResult:
         """抓取搜索结果正文；兼容入口，实际调度委托独立 FetchRouter。"""
         if self._fetch_router is None:
-            self._fetch_router = FetchRouter(self.registry, order=self.order)
+            self._fetch_router = FetchRouter(self.registry, order=self.order, usage_limiter=self.usage_limiter)
         return self._fetch_router.fetch(url, max_chars)
 
     def _cache_key(

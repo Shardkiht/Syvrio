@@ -516,9 +516,9 @@ def _configure_search_provider(config: Config, messages: list[str]) -> None:
                 questionary.Choice(
                     f"{'禁用' if search_on else '启用'} Search", value="search"
                 ),
-                questionary.Choice(
+                *([questionary.Choice(
                     f"{'禁用' if fetch_on else '启用'} Fetch", value="fetch"
-                ),
+                )] if name in {"open_websearch", "exa", "tavily", "you", "volcengine"} else []),
                 questionary.Choice("返回上级", value="back"),
             ],
         )

@@ -118,7 +118,7 @@ def build_fetch_registry(
             if not api_key:
                 # 未配置 Key 的厂商直接跳过：不参与尝试，也不报错。
                 continue
-            registry[name] = _build_external_fetch_provider(name, api_key, search_config.timeout)
+            registry[name] = _build_external_fetch_provider(name, api_key, search_config.fetch_timeout)
     return registry
 
 
