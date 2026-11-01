@@ -186,6 +186,8 @@ def test_source_audit_survives_inference_append_failure(service, monkeypatch, ac
             service.correct(source.id, "合成更正事实")
     lines = (service.config.vault / ".quiet-memo" / "audit.jsonl").read_text(encoding="utf-8").splitlines()
     assert any(json.loads(line)["action"] == action for line in lines)
+    assert service.store.find(source.id).status != "active"
+    assert len(service.store.entries()) == (1 if action == "correct" else 0)
     monkeypatch.setattr(service.inferences, "record", original)
     assert service.list_inferences()[0].status == "superseded"
 

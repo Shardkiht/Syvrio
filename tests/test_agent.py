@@ -1297,3 +1297,20 @@ def test_cancel_preserves_partial_and_tool_pairs(tmp_path, monkeypatch, stop_at)
         assert results[1]["ok"] is False
     runtime.model = FakeChatModel([AssistantTurn(content="next reply")])
     assert runtime.ask("continue", on_delta=lambda _: None).content == "next reply"
+
+
+def test_startup_consolidation_isolates_invalid_session(tmp_path, caplog):
+    runtime, service = build_runtime(tmp_path, FakeChatModel([]),
+        [Candidate(text="Synthetic retained fact", confidence=0.95)], extract_on_exit=True)
+    healthy = runtime.sessions.create()
+    runtime.sessions.append(healthy, {"type":"message", "id":"m-good", "role":"user", "content":"Synthetic fact"})
+    broken = runtime.sessions.create()
+    with broken.path.open("ab") as handle:
+        handle.write(b'\xff\n{"type":"closed"}\n')
+    original = broken.path.read_bytes()
+    result = runtime.consolidate_pending()
+    assert result["consolidated"] == 1
+    assert result["admitted"] == 1
+    assert runtime.sessions.load(healthy.id).user_texts_after_distilled() == []
+    assert broken.id in caplog.text
+    assert broken.path.read_bytes() == original

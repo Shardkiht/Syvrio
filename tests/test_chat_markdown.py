@@ -155,7 +155,9 @@ async def test_stream_restore_resize_and_copy(width, tmp_path):
         assert store.load(session.id).records[-1]["content"] == SAMPLE
         reply.text_select_all()
         await pilot.press("ctrl+c")
-        assert app.clipboard == final
+        # Copy can flush the scrollbar layout after mounting the restored reply.
+        # Compare with the current display width, not its pre-refresh snapshot.
+        assert app.clipboard == reply.get_selection(SELECT_ALL)[0]
         await pilot.resize_terminal(80 if width != 80 else 120, 50)
         await pilot.pause()
         copied = reply.get_selection(SELECT_ALL)[0]

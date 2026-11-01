@@ -3,10 +3,44 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
 from .models import PendingItem
+
+
+@contextmanager
+def rollback_files(paths: list[Path]) -> Iterator[None]:
+    """Compensate failed local writes; caller must serialize writers.
+
+    This is exception recovery, not a durable or cross-process transaction.
+    Only the explicitly affected files are read, and original bytes are kept.
+    """
+    snapshots = {path: path.read_bytes() if path.exists() else None for path in paths}
+    try:
+        yield
+    except Exception as failure:
+        errors: list[Exception] = []
+        for path, original in reversed(list(snapshots.items())):
+            temporary: Path | None = None
+            try:
+                if original is None:
+                    path.unlink(missing_ok=True)
+                elif not path.exists() or path.read_bytes() != original:
+                    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as handle:
+                        temporary = Path(handle.name)
+                        handle.write(original)
+                    os.replace(temporary, path)
+            except Exception as error:
+                errors.append(error)
+            finally:
+                if temporary is not None:
+                    temporary.unlink(missing_ok=True)
+        if errors:
+            raise ExceptionGroup("Write failed and rollback was incomplete", [failure, *errors]) from failure
+        raise
 
 
 class PendingQueue:
@@ -58,11 +92,11 @@ class PendingQueue:
         target = next((item for item in items if item.id == item_id), None)
         if target is None:
             return None
-        self.dir.mkdir(parents=True, exist_ok=True)
-        record = target.model_dump()
-        record.update(status=status, resolved_at=datetime.now().isoformat(timespec="seconds"))
-        with self.resolved_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-        # 先保留处理记录；日志写入失败时不能把候选从唯一待确认列表移除。
-        self._save([item for item in items if item is not target])
+        with rollback_files([self.pending_path, self.resolved_path]):
+            self.dir.mkdir(parents=True, exist_ok=True)
+            record = target.model_dump()
+            record.update(status=status, resolved_at=datetime.now().isoformat(timespec="seconds"))
+            with self.resolved_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+            self._save([item for item in items if item is not target])
         return target

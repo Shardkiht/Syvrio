@@ -2,10 +2,11 @@
 
 ## 当前开发分支与冻结约定（2026-11-01）
 
+- 长期远程仅保留 `main` 与 `feature-memory-evolution`。两个历史分支通过最终验收和祖先检查后删除。历史章节中的 base 开发、自动同步 main、提交前默认全量测试等安排均已失效。常规开发前若位于 main，应切换到 evolution 或从 evolution 派生任务分支；main 保留 GitHub 默认分支身份。
 - **后续默认开发分支：`feature-memory-evolution`**。所有新功能、常规问题修复、实验和相应文档工作从此分支（或从它派生的任务分支）开展。执行前确认当前 branch，不在默认的 `main` 上直接开发。
-- **`main`：最后一轮修复和验收完成后作为简历稳定展示基线冻结**。禁止自动将演进分支、历史 `base/chat-stability` 分支向 `main` 同步或合并；只有本人明确点名授权的必要稳定性/安全修复才可走独立修复与受保护分支 PR 流程。
+- **`main`：本轮最终稳定修复验收后冻结，仅用于简历展示、稳定发布与长期维护**。禁止自动将演进分支、历史 `base/chat-stability` 分支向 `main` 同步或合并；只有本人明确点名授权的必要稳定性/安全修复才可走独立修复与受保护分支 PR 流程。
 - 冻结前源码 Review 基线 `main@b016ccbf`，评审结果和待验收项见 [review-2026-11-01-freeze.md](review-2026-11-01-freeze.md)。此后的文档提交不改变该源码评审基线。历史部分对 `base/chat-stability` 的同步安排均以本节新约定为准。
-- 当前不意味着已经打好最终 portfolio Tag、完成真实 Windows TUI 验收或把最新源码发布到 PyPI。所有这些状态以实际验证/发布结果为准。
+- main 已通过 PR #15 冻结在 `316a03063d396b60b66a91b17fba095ab7676f3a`，Tag `portfolio-2026-11-01` 指向该源码；PR 与合入后 Windows/Ubuntu 的测试、构建和 CLI 检查均通过。未发布 PyPI，原生终端/IME/系统剪贴板仍待人工验收。
 
 
 ## 当前接续入口（2026-10-30）
@@ -389,3 +390,26 @@ Spark 真实接口合成数据冒烟：流式回复、带时间/地点的记忆�
 - Regression coverage at 80/120/160 columns verifies one-line bodies remain one line with no scrollbar, while existing full-text pagination and action tests remain unchanged.
 - AGENTS.md now records compact, content-driven temporary dialogs as a UI invariant, including bounded scrolling and visible action controls.
 - Per user direction, AGENTS.md now requires tests selected by impact instead of automatic full-suite runs before commits/branch synchronization. Pending suite: 12 passed; Markdown suite: 25 passed on rerun. An earlier full run had 850 passed and one Markdown copy/wrapping failure; the repeated full run completed with 851 passed and one existing warning before the cancellation arrived. Subsequent verification is targeted only.
+
+
+## Final stability fixes and freeze acceptance (2026-11-01)
+
+- F1: validate complete JSON record shapes, retain direct-load errors and original bytes, and log per-file batch errors without aborting healthy session listing or consolidation. Existing torn-tail recovery is unchanged.
+- F2: scoped in-memory snapshots compensate ordinary exceptions in manual approve/correct/reject/forget, including partial decision-log writes. Resolution is written before pending removal. Only affected topic/log paths are snapshotted under the existing writer lock; no storage format, durable journal or transaction framework is added. Failed rollback raises both errors. Process kill/power loss and simultaneous writers remain unsupported transaction boundaries, explicitly documented in both READMEs.
+- F3: cross-process quota atomicity remains a documented limitation. F4: optional open-websearch latest fallback remains unpinned; no clean upstream version has been verified in this round, so no guessed pin is introduced. F5: exclusive session file creation closes the exists/write race. F6: portfolio tag identifies source independently of package 0.3.2 and its older Release; evaluation data and historical metrics are untouched.
+- CI runs Windows/Ubuntu tests, build and CLI help, including pushes to evolution. All local verification uses temporary Vaults, static extractors and fake models. Native terminal IME/clipboard appearance remains a manual acceptance item; headless UI checks do not establish it.
+- Build inspection found Hatch's default source archive included an existing untracked local script. The sdist now uses an explicit public project-content allowlist and excludes the entire one-off scripts directory; the local script itself was not opened or changed. Wheel package selection is unchanged.
+- User requested the untracked script be moved outside the repository; it was moved with a matching SHA256, without opening its content. The source-archive allowlist remains as a packaging safeguard.
+- Full validation exposed an existing Markdown copy assertion using a pre-scrollbar-layout snapshot. The assertion now compares clipboard text to the current rendered width after Ctrl+C; rendering and copy behavior are unchanged.
+- Local final acceptance: 871 passed, 4 optional document tests skipped, one existing dependency warning; sync/build and disposable installed-wheel CLI succeeded. Temporary install environments were removed. Manual native terminal checks and remote PR/CI/tag/cleanup remain separate gates.
+- Remote main b2057c4 CI failed only its Windows native-input cursor test: the after-refresh focus callback had not fired before inspecting captured writes. The test now waits for the actual cursor-show event with a bounded timeout and retains focus/active-state/sequence assertions; product cursor code is unchanged.
+- PR Windows CI exposed another test readiness race: the request-active UI flag precedes worker-side session creation. The queue/cancellation test helper now waits for both an active request and an existing runtime session before dereferencing current; production request/queue behavior is unchanged.
+- Dual-platform CLI smoke exposed a real English-Windows redirected-output failure: cp1252 could not encode Chinese help. The CLI entry point configures only non-TTY Windows stdout/stderr to UTF-8 in-process; native console handling and persistent environment stay unchanged. A real subprocess regression forces cp1252:strict and checks UTF-8 help output.
+
+
+## Evolution absorbs the stable main snapshot
+
+- Merged only main -> evolution after the stable main PR and final-SHA CI passed and the portfolio tag was pushed. Retain temporal retrieval, reflection, inference review/fingerprints and dated-session behavior; no evolution features enter main.
+- Conflict resolution preserves inference validation/invalidation in manual correction and soft-delete. Existing evolution tests establish that completed source facts and their audit survive a later inference append failure; subsequent inference reads repair derived status. Accordingly source/audit writes receive main's exception rollback, while inference invalidation remains after that boundary. The existing source-audit failure regression is retained and strengthened; no inference format or commit semantics are changed.
+- Shared queue keeps main's rollback and log-before-removal behavior plus evolution's existing log-failure test. Current branch/freeze instructions replace the obsolete base-first workflow; historical evolution planning remains recorded.
+- Evolution merge validation: memory-evolution/reflection/inference/context/service suite 125 passed; focused TUI queue/pending/cancel/cursor suite 24 passed. Shared session/queue/Agent/CLI/Markdown regressions also passed before resolving the inference commit-boundary difference, and the affected service paths were rerun in the 125-test group. Main is unchanged after tagging; evolution push CI remains the final synchronization gate.

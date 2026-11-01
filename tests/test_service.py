@@ -444,3 +444,53 @@ def test_approve_rejects_secret_and_keeps_pending(tmp_path):
         service.approve(item.id)
     assert service.store.entries() == []
     assert [pending.id for pending in service.pending()] == [item.id]
+
+
+@pytest.mark.parametrize("operation,stage", [
+    ("approve", "status"), ("approve", "resolve"), ("approve", "audit"),
+    ("correct", "status"), ("correct", "audit"),
+    ("reject", "resolve"), ("reject", "audit"), ("forget", "audit"),
+])
+def test_manual_write_failure_rolls_back_and_retry_is_consistent(tmp_path, monkeypatch, operation, stage):
+    service = make_service(tmp_path, [])
+    old = service.note("Synthetic original fact", topic="preferences")
+    item = PendingItem.from_candidate(Candidate(text="Synthetic replacement fact", topic="other"),
+                                      "test", "conflict", conflict_with=old.id)
+    service.queue.add(item)
+    service.audit.write("synthetic-baseline")
+    paths = [service.store.topic_path("preferences"), service.store.topic_path("other"),
+             service.queue.pending_path, service.queue.resolved_path, service.audit.path]
+    before = {path: path.read_bytes() if path.exists() else None for path in paths}
+    def execute():
+        if operation == "approve":
+            return service.approve(item.id)
+        if operation == "correct":
+            return service.correct(old.id, "Synthetic replacement fact")
+        if operation == "reject":
+            return service.reject(item.id)
+        return service.forget(old.id)
+    obj, name = {"status": (service.store, "set_status"),
+                 "resolve": (service.queue, "resolve"), "audit": (service.audit, "write")}[stage]
+    original = getattr(obj, name)
+    def fail_after_write(*args, **kwargs):
+        original(*args, **kwargs)
+        raise OSError("synthetic write failure")
+    with monkeypatch.context() as patch:
+        patch.setattr(obj, name, fail_after_write)
+        with pytest.raises(OSError, match="synthetic write failure"):
+            execute()
+    assert {path: path.read_bytes() if path.exists() else None for path in paths} == before
+    assert service.store.entries() == [old]
+    assert service.pending() == [item]
+    execute()
+    active = service.store.entries()
+    assert len(active) == (0 if operation == "forget" else 1)
+    assert service.pending() == ([] if operation in ("approve", "reject") else [item])
+    logs = [json.loads(line) for line in service.audit.path.read_text(encoding="utf-8").splitlines()]
+    assert [row["action"] for row in logs] == ["synthetic-baseline", operation]
+    if operation in ("approve", "correct"):
+        assert len(service.store.entries(include_inactive=True)) == 2
+        assert active[0].supersedes == old.id
+        assert service.store.find(old.id).status == "superseded"
+    if operation in ("approve", "reject"):
+        assert len(service.queue.resolved_path.read_text(encoding="utf-8").splitlines()) == 1

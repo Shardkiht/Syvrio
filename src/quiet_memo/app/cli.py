@@ -539,6 +539,12 @@ def serve(
 
 
 def main() -> None:
+    # Windows pipes use the locale code page, which may not encode CLI help.
+    # Keep native console handling intact; JSON/MCP and redirected CLI use UTF-8.
+    if sys.platform == "win32":
+        for stream in (sys.stdout, sys.stderr):
+            if not stream.isatty() and hasattr(stream, "reconfigure"):
+                stream.reconfigure(encoding="utf-8")
     app()
 
 

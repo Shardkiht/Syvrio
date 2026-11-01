@@ -2236,19 +2236,21 @@ def test_fixed_tui_text_is_english():
 
 
 async def test_native_input_cursor_tracks_editing_and_cleans_up(tmp_path, monkeypatch):
+    import asyncio
+
     app = build_app(tmp_path, [])
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         widget = app.query_one("#input", BarInput)
         writes = []
-        # 只捕获光标控制序列：帧渲染也会写 driver，全量捕获会在负载下污染 writes[-1] 断言。
-        monkeypatch.setattr(
-            app._driver,
-            "write",
-            lambda data: writes.append(data)
-            if data in ("\x1b[5 q\x1b[?25h", "\x1b[?25l\x1b[0 q")
-            else None,
-        )
+        cursor_shown = asyncio.Event()
+        # Focus schedules cursor output after refresh, which may lag a pilot pause.
+        def capture_cursor(data):
+            if data in ("\x1b[5 q\x1b[?25h", "\x1b[?25l\x1b[0 q"):
+                writes.append(data)
+                if data == "\x1b[5 q\x1b[?25h":
+                    cursor_shown.set()
+        monkeypatch.setattr(app._driver, "write", capture_cursor)
         monkeypatch.setattr(BarInput, "_uses_native_cursor", property(lambda self: True))
         widget._restart_blink()
         widget._show_native_cursor()
@@ -2266,8 +2268,10 @@ async def test_native_input_cursor_tracks_editing_and_cleans_up(tmp_path, monkey
         writes.clear()
         widget._hide_native_cursor()
         assert not writes
+        cursor_shown.clear()
         widget.focus()
-        await pilot.pause()
+        await asyncio.wait_for(cursor_shown.wait(), timeout=5)
+        assert widget.has_focus and widget._native_cursor_active
         assert writes[-1] == "\x1b[5 q\x1b[?25h"
 
 
@@ -2311,7 +2315,8 @@ class GatedChatModel:
 async def _wait_ask_started(app, pilot, limit=200):
     for _ in range(limit):
         await pilot.pause()
-        if app._ask_active:
+        # The UI flag precedes worker-side session creation on slower runners.
+        if app._ask_active and app.runtime.has_session:
             return
     raise AssertionError("请求未开始")
 

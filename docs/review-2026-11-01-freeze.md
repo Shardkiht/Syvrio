@@ -75,3 +75,14 @@
 ## 评审结论
 
 `main@b016ccbf` 可作为稳定展示基线的候选，质量基础已较充分。**不等同于已经通过最终打包/真实终端验收，也不意味着风险为零。** 后续 Agent 应优先处理 F1 和 F2 这两个直接涉及数据可靠性的收尾项，完成验收后冻结。
+
+
+## Local implementation and acceptance update
+
+The final stability task independently reproduced F1/F2. Record validation and per-file diagnostics now isolate invalid sessions while direct load still fails and raw bytes stay unchanged. F2 uses scoped exception compensation for manual operations, with fault injection after state/log writes and retry checks, including cross-topic approval. It is deliberately not a durable transaction: forced termination, power loss, concurrent writers and rollback failure remain explicit limitations. F3 (cross-process quota atomicity) and F4 (optional latest upstream fallback) are accepted documented limits, without a new subsystem or unverified dependency pin. F5 now uses exclusive file creation, tested against an injected create-time race. F6 retains package version 0.3.2 and separates the portfolio source tag from the older release and historical evaluation cohorts; no evaluation inputs or metric values changed.
+
+A build inspection also found default sdist inclusion of a pre-existing untracked local script. The archive now has a project-content allowlist; user-directed relocation preserved the original script outside the repository. Archive listings exclude local scripts/data/caches, and wheel CLI installation was checked in a disposable environment with locked dependencies. No real credentials, personal Vault, paid API or model calls were used. A flaky Markdown copy assertion was corrected to compare against the rendered width at copy time after scrollbar layout, rather than a stale snapshot.
+
+Local validation: affected session/queue/service/Agent suite 155 passed; queue suite including explicit rollback-error reporting 8 passed; Markdown suite 25 passed; final default full suite 871 passed, 4 optional document tests skipped, one existing dependency warning. `uv sync --frozen` and `uv build` succeeded. Real Windows terminal/IME/OS clipboard interaction remains unaccepted manually; headless tests are not presented as manual verification. Remote PR, dual-platform CI, stable source SHA/tag and branch deletion are separate gates and must be recorded from actual results.
+
+The pre-existing main Windows CI failure (run 41284275480) was independently inspected: native cursor refocus was asserted before its after-refresh event. The regression now awaits the captured cursor-show event and still checks active focus and cleanup. Product cursor behavior is unchanged; related input cases pass locally.

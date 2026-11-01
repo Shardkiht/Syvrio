@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import secrets
 from dataclasses import dataclass, field
@@ -10,6 +11,8 @@ from typing import Any
 
 from ..infra.tokens import estimate_tokens
 from ..memory.detect import redact_secrets
+
+_LOG = logging.getLogger(__name__)
 
 SESSION_ID_RE = re.compile(r"^s-\d{8}-\d{6}-[0-9a-f]{4}$")
 
@@ -31,6 +34,37 @@ def _redact_record(value: Any) -> Any:
     if isinstance(value, list):
         return [_redact_record(item) for item in value]
     return value
+
+
+def _validate_record(record: Any) -> None:
+    # Syntactically valid JSON may still be unusable session data. Do not
+    # classify such complete records as torn tails or coerce historical data.
+    if not isinstance(record, dict) or not isinstance(record.get("type"), str):
+        raise ValueError("Session record must be an object with a string type")
+    for key in ("id", "at", "started_at", "title", "role", "up_to"):
+        if key in record and not isinstance(record[key], str):
+            raise ValueError(f"Invalid session field: {key}")
+    if "content" in record and not isinstance(record["content"], str):
+        if record["type"] != "assistant" or record["content"] is not None:
+            raise ValueError("Invalid session content")
+    if record["type"] == "message" and "content" not in record:
+        raise ValueError("Missing session message content")
+    if "covered_records" in record:
+        count = record["covered_records"]
+        if type(count) is not int or count < 0:
+            raise ValueError("Invalid session summary boundary")
+    if "distilled_ids" in record:
+        ids = record["distilled_ids"]
+        if not isinstance(ids, list) or any(not isinstance(item, str) for item in ids):
+            raise ValueError("Invalid session distilled IDs")
+    calls = record.get("tool_calls")
+    if calls is not None and (
+        not isinstance(calls, list) or any(
+            not isinstance(call, dict) or not isinstance(call.get("name", ""), str)
+            for call in calls
+        )
+    ):
+        raise ValueError("Invalid session tool calls")
 
 
 @dataclass
@@ -188,17 +222,20 @@ class SessionStore:
         self.root.mkdir(parents=True, exist_ok=True)
         session_id = f"s-{stamp:%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
         path = self.root / f"{session_id}.jsonl"
-        # 同秒创建可能撞 16 位后缀：撞了重摇，不能覆盖已有会话文件。
-        while path.exists():
-            session_id = f"s-{stamp:%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
-            path = self.root / f"{session_id}.jsonl"
-        meta = {
-            "type": "meta",
-            "id": session_id,
-            "started_at": stamp.isoformat(timespec="seconds"),
-            "cwd": str(Path.cwd()),
-        }
-        path.write_text(json.dumps(meta, ensure_ascii=False) + "\n", encoding="utf-8")
+        # Exclusive creation also protects the collision window between processes.
+        while True:
+            meta = {
+                "type": "meta", "id": session_id,
+                "started_at": stamp.isoformat(timespec="seconds"), "cwd": str(Path.cwd()),
+            }
+            try:
+                with path.open("x", encoding="utf-8") as handle:
+                    handle.write(json.dumps(meta, ensure_ascii=False) + "\n")
+                break
+            except FileExistsError:
+                session_id = f"s-{stamp:%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
+                path = self.root / f"{session_id}.jsonl"
+
         return Session(id=session_id, started_at=meta["started_at"], path=path, records=[meta])
 
     def exists(self, session_id: str) -> bool:
@@ -220,6 +257,7 @@ class SessionStore:
             except (json.JSONDecodeError, UnicodeDecodeError) as exc:
                 errors[number] = exc
                 continue
+            _validate_record(record)
             records.append(record)
             if record.get("type") == "recovery":
                 ignored = record.get("ignored_line")
@@ -288,7 +326,8 @@ class SessionStore:
         if cached is None or cached[0] != signature:
             try:
                 session = self.load(path.stem)
-            except (json.JSONDecodeError, KeyError):
+            except (ValueError, KeyError, OSError) as exc:
+                _LOG.warning("Unable to list session %s (%s)", path.stem, type(exc).__name__)
                 return None
             row = {
                 "id": session.id,
@@ -306,7 +345,8 @@ class SessionStore:
             if with_tokens and row.get("tokens") is None:
                 try:
                     row["tokens"] = self.load(path.stem).estimated_tokens()
-                except (json.JSONDecodeError, KeyError):
+                except (ValueError, KeyError, OSError) as exc:
+                    _LOG.warning("Unable to list session %s (%s)", path.stem, type(exc).__name__)
                     return None
         result = dict(row)
         if not with_tokens:
@@ -353,13 +393,15 @@ class SessionStore:
                     continue
                 try:
                     session = self.load(path.stem)
-                except (json.JSONDecodeError, KeyError):
+                except (ValueError, KeyError, OSError) as exc:
+                    _LOG.warning("Unable to scan session %s (%s)", path.stem, type(exc).__name__)
                     continue
                 found.append((session.updated_at, session))
                 continue
             try:
                 session = self.load(path.stem)
-            except (json.JSONDecodeError, KeyError):
+            except (ValueError, KeyError, OSError) as exc:
+                _LOG.warning("Unable to scan session %s (%s)", path.stem, type(exc).__name__)
                 continue
             count = len(session.user_texts_after_distilled())
             self._undistilled_cache[path.stem] = (signature, count)

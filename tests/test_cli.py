@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+import sys
 
 pytestmark = pytest.mark.cli
 
@@ -268,3 +269,17 @@ def test_cli_correct_rejects_inactive_entry(tmp_path):
     result = invoke(["correct", entry.id, "试图更正已删除的记忆", "--vault", str(vault)])
     assert result.exit_code == 1
     assert "不能更正" in result.output
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows redirected stream encoding")
+def test_cli_help_with_western_pipe_encoding():
+    import os
+    import subprocess
+
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "cp1252:strict"
+    result = subprocess.run([sys.executable, "-m", "quiet_memo.app.cli", "--help"],
+                            capture_output=True, env=env, timeout=30)
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    assert "Usage:" in result.stdout.decode("utf-8")
+    assert "记忆" in result.stdout.decode("utf-8")
