@@ -246,3 +246,9 @@ Spark 真实接口合成数据冒烟：流式回复、带时间/地点的记忆�
 - Corrected Volcengine Fetch succeeded through build_tools on a public page. A confirmed Spark Agent run used two model requests, executed Tavily search and fetch_web, then produced a linked answer; the temporary vault contained no memory files. Mock regressions cover the documented response, redirects, truncation, empty content and target HTTP 403/404/500. Official reference: https://docs.volcengine.com/docs/networked-search/doubao-search-web-analysis-fetch?lang=zh
 - Smoke scope does not establish all count limits, Custom search behavior, dynamic-page rendering or every target website. Credentials were read only; no user vault or persistent configuration was changed.
 - Final validation: provider suite 70 passed; full isolated pytest 778 passed (one existing Pydantic warning). Search Eval retained P@5 0.2364, Success@5/MRR@5 0.7273, NDCG@5 0.8944, false acceptance 0.0606 and requests/query 2.303. Evaluation inputs were unchanged; disposable smoke directories were removed.
+
+
+## Search review fixes (2026-11-01)
+
+- Explicit search limits override the configured default up to 15. Cached result hints are recomputed using the same query analysis, retaining low-relevance warnings without changing cache storage. Regression tests use synthetic providers and verify no second upstream request on cache hits.
+- Validation: search suite 242 passed, full base suite 782 passed. Search Eval unchanged. Normal build_tools live smoke returned 15 You results and repeated search used cache without another request; fetch succeeded. Spark Agent completed search/fetch and a linked answer in two model requests. Three You requests were added (five including prior smoke), temporary vault removed; no user vault or persistent credentials changed.

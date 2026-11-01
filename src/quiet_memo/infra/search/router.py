@@ -255,7 +255,7 @@ class SearchRouter:
         text = query.query.strip()
         if not text:
             raise ValueError("搜索关键词为空")
-        limit = max(1, min(query.limit or self.max_results, self.max_results))
+        limit = max(1, min(query.limit or self.max_results, 15))
         engine = (query.engine or "auto").strip()
         names = [engine] if engine != "auto" else self.order
         # 缓存必须区分实际使用的上游引擎，否则改配置后会命中旧引擎的结果。
@@ -273,11 +273,16 @@ class SearchRouter:
             cached = self.cache.get(cache_key)
             if cached is not None:
                 results, provider = cached
+                hint = "未找到相关结果。"
+                if results:
+                    hint = weak_share_hint(results, analysis)
+                    if not any(has_core_hit(result, analysis) for result in results):
+                        hint = "候补引擎未找到与查询核心词直接相关的结果，以下为各引擎返回的候选。"
                 return SearchOutcome(
                     results=results,
                     provider=provider,
                     cached=True,
-                    hint="" if results else "未找到相关结果。",
+                    hint=hint,
                 )
 
         failures: list[SearchFailure] = []
