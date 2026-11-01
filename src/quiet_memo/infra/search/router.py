@@ -190,10 +190,9 @@ def build_search_router(
     if vault is not None:
         if config.cache_ttl > 0:
             cache = SearchCache(vault / ".quiet-memo" / "search-cache.json", config.cache_ttl)
-        if config.usage_limits:
-            from .usage import USAGE_FILENAME, UsageLimiter
+        from .usage import USAGE_FILENAME, UsageLimiter
 
-            limiter = UsageLimiter(config.usage_limits, vault / ".quiet-memo" / USAGE_FILENAME)
+        limiter = UsageLimiter(config.usage_limits, vault / ".quiet-memo" / USAGE_FILENAME)
     return SearchRouter(
         build_registry(config),
         order=config.providers,
@@ -376,17 +375,16 @@ class SearchRouter:
                     )
                 if self.usage_limiter is not None:
                     # 达到厂商上限即跳过该厂商，交给后续 provider 回退。
-                    if not self.usage_limiter.allows(name):
+                    if not self.usage_limiter.acquire(name):
                         failures.append(
                             SearchFailure(
                                 name,
                                 ProviderErrorKind.QUOTA.value,
-                                "已达到本地调用上限，本次跳过该厂商",
+                                self.usage_limiter.reason(name),
                             )
                         )
                         return None
                     # 请求失败也保守计数：在实际发起前记账。
-                    self.usage_limiter.record(name)
                 budget["requests"] += 1
                 try:
                     raw = provider.search(
@@ -401,6 +399,8 @@ class SearchRouter:
                         )
                     )
                 except ProviderError as exc:
+                    if self.usage_limiter is not None:
+                        self.usage_limiter.note_error(name, exc)
                     failures.append(SearchFailure.from_error(exc))
                     # 请求级失败（超时/网络/限流）：换下一个引擎，不再变体。
                     break

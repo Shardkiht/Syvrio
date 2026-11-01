@@ -67,19 +67,20 @@ class FetchRouter:
                 continue
             if self.usage_limiter is not None:
                 # 达到厂商上限即跳过该 provider，继续回退下一家。
-                if not self.usage_limiter.allows(name):
+                if not self.usage_limiter.acquire(name):
                     failures.append(
                         SearchFailure(
                             name,
                             ProviderErrorKind.QUOTA.value,
-                            "已达到本地调用上限，本次跳过该厂商",
+                            self.usage_limiter.reason(name),
                         )
                     )
                     continue
-                self.usage_limiter.record(name)
             try:
                 result = provider.fetch(FetchQuery(text, max_chars))
             except ProviderError as exc:
+                if self.usage_limiter is not None:
+                    self.usage_limiter.note_error(name, exc)
                 failures.append(SearchFailure.from_error(exc))
                 continue
             except Exception as exc:
@@ -151,7 +152,7 @@ def build_fetch_router(
     vault: Any | None = None,
 ) -> FetchRouter:
     limiter = None
-    if vault is not None and search_config.usage_limits:
+    if vault is not None:
         from .usage import USAGE_FILENAME, UsageLimiter
 
         limiter = UsageLimiter(

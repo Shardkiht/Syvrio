@@ -582,7 +582,6 @@ def test_search_setup_saves_key_and_enables_search_and_fetch(tmp_path, monkeypat
             "tavily",
             "sk-tavily-placeholder",  # password 输入
             "search",  # 启用 Search
-            "5",  # 每日调用上限
             "fetch",  # 启用 Fetch（上限已设置，不再询问）
             "back",
             "done",
@@ -717,7 +716,7 @@ def test_llm_setup_flow_unchanged(tmp_path, monkeypatch):
     assert result["key_saved"] is False
 
 
-def test_search_setup_sets_daily_usage_limit_on_enable(tmp_path, monkeypatch):
+def test_search_setup_can_edit_daily_and_monthly_limits(tmp_path, monkeypatch):
     """启用官方厂商时询问每日上限；留空回退默认 20。"""
     import tomllib
 
@@ -733,9 +732,10 @@ def test_search_setup_sets_daily_usage_limit_on_enable(tmp_path, monkeypatch):
             "providers",
             "tavily",
             "",  # 不更新 Key
-            "search",  # 启用 Search → 触发上限询问
-            "7",  # 每日上限
+            "search",
             "back",
+            "usage", "tavily", "daily", "7",
+            "tavily", "monthly", "900", None,
             "done",
         ],
     )
@@ -745,13 +745,13 @@ def test_search_setup_sets_daily_usage_limit_on_enable(tmp_path, monkeypatch):
     assert result["search_providers"] == ["open_websearch", "tavily"]
     data = tomllib.loads(config_path.read_text(encoding="utf-8"))
     assert data["search"]["usage_limits"]["tavily"] == {
-        "period": "daily",
-        "max_calls": 7,
+        "daily": 7,
+        "monthly": 900,
     }
-    assert any("7 次" in message for message in result["messages"])
 
 
-def test_search_setup_usage_limit_defaults_to_20(tmp_path, monkeypatch):
+
+def test_search_setup_uses_exa_monthly_default(tmp_path, monkeypatch):
     from quiet_memo.infra import providers as providers_module
 
     config_path = tmp_path / "quiet-memo.toml"
@@ -765,7 +765,6 @@ def test_search_setup_usage_limit_defaults_to_20(tmp_path, monkeypatch):
             "exa",
             "",
             "search",
-            "",  # 留空 → 默认 20
             "back",
             "done",
         ],
@@ -775,7 +774,7 @@ def test_search_setup_usage_limit_defaults_to_20(tmp_path, monkeypatch):
     import tomllib
 
     data = tomllib.loads(config_path.read_text(encoding="utf-8"))
-    assert data["search"]["usage_limits"]["exa"]["max_calls"] == 20
+    assert data["search"]["usage_limits"]["exa"] == {"daily": 0, "monthly": 1000}
 
 
 def test_baidu_menu_only_offers_search(monkeypatch, tmp_path):
@@ -791,3 +790,25 @@ def test_baidu_menu_only_offers_search(monkeypatch, tmp_path):
     monkeypatch.setattr(module, "ask", lambda _: "")
     module._configure_search_provider(Config(vault=tmp_path), [])
     assert "search" in menus[1] and "fetch" not in menus[1]
+
+
+
+def test_usage_menu_zero_reset_and_resume(tmp_path, monkeypatch, capsys):
+    from quiet_memo.infra import providers as module
+    from quiet_memo.infra.config import Config, UsageLimit, load_config
+    from quiet_memo.infra.search.usage import UsageLimiter
+    config = Config(vault=tmp_path / "vault")
+    limiter = UsageLimiter(config.search.usage_limits, config.vault / ".quiet-memo/usage.json")
+    limiter.record("exa")
+    limiter.pause("exa", "NO_MORE_CREDITS")
+    path = tmp_path / "config.toml"
+    _script_answers(monkeypatch, ["usage", "exa", "monthly", "0", "exa", "resume",
+                                  "tavily", "daily", "7", "tavily", "defaults", None, "done"])
+    module.run_search_setup(config, path)
+    loaded = load_config(path)
+    assert loaded.search.usage_limits["exa"].monthly == 0
+    assert (loaded.search.usage_limits["tavily"].daily, loaded.search.usage_limits["tavily"].monthly) == (0, 800)
+    state = UsageLimiter(loaded.search.usage_limits, config.vault / ".quiet-memo/usage.json").status("exa")
+    assert not state["paused"] and state["monthly"]["used"] == 1
+    output = capsys.readouterr().out
+    assert "NO_MORE_CREDITS" in output and "不限" in output

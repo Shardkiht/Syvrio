@@ -423,25 +423,64 @@ SEARCH_KEY_ENVS = {
 
 
 def _ensure_usage_limit(config: Config, name: str, messages: list[str]) -> None:
-    """启用官方厂商时设置有限调用上限（默认每日 20 次）。"""
-    if name in config.search.usage_limits:
-        return
-    raw = ask(
-        questionary.text(
-            f"{SEARCH_PROVIDER_LABELS[name]} 每日调用上限（Search/Fetch 共用；留空默认 20）",
-            default="20",
-        )
-    )
-    try:
-        max_calls = int(str(raw).strip())
-    except (TypeError, ValueError):
-        max_calls = 0
-    if max_calls <= 0:
-        max_calls = 20
-    from .config import UsageLimit
+    from .config import default_usage_limits
 
-    config.search.usage_limits[name] = UsageLimit(period="daily", max_calls=max_calls)
-    messages.append(f"{name} 的每日调用上限设为 {max_calls} 次（本地计数，非账单上限）。")
+    if name not in config.search.usage_limits:
+        default = default_usage_limits().get(name)
+        if default is not None:
+            config.search.usage_limits[name] = default
+
+
+def _manage_usage(config: Config) -> None:
+    from .config import UsageLimit, default_usage_limits
+    from .search.usage import UsageLimiter, USAGE_FILENAME
+
+    defaults = default_usage_limits()
+    limiter = UsageLimiter(config.search.usage_limits, config.vault / ".quiet-memo" / USAGE_FILENAME)
+    while True:
+        for name, default in defaults.items():
+            effective = config.search.usage_limits.get(name, default)
+            state = limiter.status(name)
+            def display(value):
+                return str(value) if value else "不限"
+            def remaining(value):
+                return "不限" if value is None else str(value)
+            console.print(f"{name}: 默认 daily={display(default.daily)}, monthly={display(default.monthly)}; "
+                          f"生效 daily={display(effective.daily)}, monthly={display(effective.monthly)}; "
+                          f"已使用/剩余 daily={state['daily']['used']}/{remaining(state['daily']['remaining'])}, "
+                          f"monthly={state['monthly']['used']}/{remaining(state['monthly']['remaining'])}; "
+                          f"官方暂停={state['paused'] or '无'}; 历史未知周期={state['legacy_unknown_period'] or '无'}")
+        name = _select("额度管理：选择厂商（本地请求次数不是厂商余额）", [
+            *[questionary.Choice(label, value=name) for name, label in SEARCH_PROVIDER_LABELS.items()],
+            questionary.Choice("返回", value=None),
+        ])
+        if name is None:
+            return
+        action = _select("额度操作", [
+            questionary.Choice("修改每日上限（0 不限）", value="daily"),
+            questionary.Choice("修改每月上限（0 不限）", value="monthly"),
+            questionary.Choice("恢复默认上限", value="defaults"),
+            questionary.Choice("解除官方暂停（不清空计数）", value="resume"),
+            questionary.Choice("返回", value=None),
+        ])
+        if action in ("daily", "monthly"):
+            raw = ask(questionary.text("请求次数上限（非负整数，0 不限）"))
+            if raw is None:
+                continue
+            try:
+                value = int(str(raw).strip())
+                if value < 0:
+                    raise ValueError
+            except ValueError:
+                console.print("请输入非负整数。")
+                continue
+            old = config.search.usage_limits.get(name, defaults.get(name, UsageLimit()))
+            values = {"daily": old.daily, "monthly": old.monthly, action: value}
+            config.search.usage_limits[name] = UsageLimit(**values)
+        elif action == "defaults":
+            config.search.usage_limits[name] = defaults[name]
+        elif action == "resume":
+            limiter.resume(name)
 
 
 def _toggle_provider(names: list[str], name: str, enable: bool) -> None:
@@ -577,6 +616,7 @@ def run_search_setup(config: Config, path: Path) -> dict:
             "搜索与网页抓取配置",
             [
                 questionary.Choice("选择厂商：配置 Key / 启用停用", value="providers"),
+                questionary.Choice("调用额度与官方暂停管理", value="usage"),
                 questionary.Choice("调整 Search 优先级", value="search_order"),
                 questionary.Choice("调整 Fetch 优先级", value="fetch_order"),
                 questionary.Choice("保存并返回", value="done"),
@@ -586,6 +626,8 @@ def run_search_setup(config: Config, path: Path) -> dict:
             break
         if action == "providers":
             _configure_search_provider(config, messages)
+        elif action == "usage":
+            _manage_usage(config)
         elif action == "search_order":
             _adjust_order(config.search.providers, "Search")
         elif action == "fetch_order":

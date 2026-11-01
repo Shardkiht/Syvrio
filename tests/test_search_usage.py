@@ -285,3 +285,135 @@ def test_normal_agent_fetch_uses_independent_config(service, monkeypatch, name):
     assert not tools.execute("fetch_web", {"url": "https://example.com/a"}).ok
     assert provider.calls == ["https://example.com/a"]
     assert seen == [(name, 47)]
+
+
+@pytest.mark.parametrize("name,daily,monthly", [
+    ("baidu_search", 50, 0), ("tavily", 0, 800), ("exa", 0, 1000),
+    ("you", 0, 1500), ("volcengine", 0, 450), ("open_websearch", 0, 0),
+])
+def test_runtime_defaults_without_setup(tmp_path, name, daily, monthly):
+    from quiet_memo.infra.config import load_config
+    path = tmp_path / "config.toml"
+    path.write_text(f"[search]\nproviders = ['{name}']\n", encoding="utf-8")
+    limit = load_config(path).search.usage_limits[name]
+    assert (limit.daily, limit.monthly) == (daily, monthly)
+
+
+def test_explicit_zero_and_legacy_override_defaults(tmp_path):
+    from quiet_memo.infra.config import load_config
+    path = tmp_path / "config.toml"
+    path.write_text('[search.usage_limits.tavily]\ndaily=0\nmonthly=0\n'
+                    '[search.usage_limits.exa]\nperiod="daily"\nmax_calls=7\n', encoding="utf-8")
+    limits = load_config(path).search.usage_limits
+    assert (limits["tavily"].daily, limits["tavily"].monthly) == (0, 0)
+    assert (limits["exa"].daily, limits["exa"].monthly) == (7, 0)
+
+
+def test_dual_windows_and_restart(tmp_path):
+    from datetime import datetime
+    now = [datetime(2025, 1, 15, 12).timestamp()]
+    path = tmp_path / "usage.json"
+    limits = {"exa": UsageLimit(daily=1, monthly=2)}
+    limiter = UsageLimiter(limits, path, clock=lambda: now[0])
+    assert limiter.acquire("exa") and not limiter.acquire("exa")
+    now[0] += 86400
+    restarted = UsageLimiter(limits, path, clock=lambda: now[0])
+    assert restarted.acquire("exa")
+    now[0] += 86400
+    assert not restarted.acquire("exa")  # month exhausted despite a new day
+    now[0] = datetime(2025, 2, 1, 12).timestamp()
+    assert restarted.acquire("exa")
+
+
+@pytest.mark.parametrize("window,period", [("2025-01-15", "daily"), ("2025-01", "monthly")])
+def test_legacy_usage_preserves_known_period(tmp_path, window, period):
+    from datetime import datetime
+    path = tmp_path / "usage.json"
+    path.write_text(json.dumps({"exa": {"window": window, "count": 6}}), encoding="utf-8")
+    limiter = UsageLimiter({"exa": UsageLimit(daily=10, monthly=20)}, path,
+                           clock=lambda: datetime(2025, 1, 15, 12).timestamp())
+    state = limiter.status("exa")
+    other = "monthly" if period == "daily" else "daily"
+    assert state[period]["used"] == 6 and state[other]["used"] == 0
+    assert state["legacy_unknown_period"] == other
+    assert limiter.acquire("exa")
+    assert UsageLimiter(limiter._limits, path, clock=limiter._clock).status("exa")[period]["used"] == 7
+
+
+def test_concurrent_instances_cannot_exceed_limit(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    path = tmp_path / "usage.json"
+    limits = {"exa": UsageLimit(daily=7, monthly=10)}
+    instances = [UsageLimiter(limits, path) for _ in range(4)]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        accepted = list(pool.map(lambda i: instances[i % 4].acquire("exa"), range(50)))
+    assert sum(accepted) == 7
+    assert instances[0].status("exa")["monthly"]["used"] == 7
+
+
+def test_pause_restart_expiry_and_manual_resume(tmp_path):
+    now = [1000.0]
+    path = tmp_path / "usage.json"
+    limiter = UsageLimiter({}, path, clock=lambda: now[0])
+    limiter.pause("exa", "balance")
+    restarted = UsageLimiter({}, path, clock=lambda: now[0])
+    assert not restarted.acquire("exa")
+    restarted.resume("exa")
+    assert restarted.acquire("exa")
+    restarted.pause("exa", "confirmed_reset", 1100.0)
+    assert not limiter.acquire("exa")
+    now[0] = 1100
+    assert limiter.acquire("exa")
+    assert limiter.status("exa")["daily"]["used"] == 2
+
+
+def test_build_tools_official_pause_shared_across_search_fetch(service, monkeypatch):
+    from quiet_memo.agent.tools import build_tools
+    from quiet_memo.agent.session import SessionStore
+    from quiet_memo.infra import config as config_module
+    from quiet_memo.infra.search import router as search_module, fetch_router as fetch_module
+    from quiet_memo.infra.search.base import FetchQuery
+    search = _SearchProvider("exa", error=ProviderError("exa", "quota", "NO_MORE_CREDITS",
+                            code="NO_MORE_CREDITS", pause_reason="NO_MORE_CREDITS"))
+    fallback = _SearchProvider("fallback", [SearchResult("Synthetic entity", "https://example.com", "")])
+    fetch = _FetchProvider("exa")
+    monkeypatch.setattr(search_module, "build_registry", lambda config: {"exa": search, "fallback": fallback})
+    monkeypatch.setattr(fetch_module, "build_fetch_registry", lambda *args: {"exa": fetch})
+    service.config.search.providers = ["exa", "fallback"]
+    service.config.fetch.providers = ["exa"]
+    session = SessionStore(service.config.vault).create()
+    tools = build_tools(service, session)
+    assert tools.execute("search", {"query": "Synthetic entity"}).ok
+    assert len(search.calls) == 1 and len(fallback.calls) == 1
+    assert not tools.execute("fetch_web", {"url": "https://example.com"}).ok
+    assert not fetch.calls
+    from quiet_memo.infra.search.router import build_search_router
+    rebuilt = build_search_router(service.config.search, service.config.vault)
+    outcome = rebuilt.search(SearchQuery("Synthetic entity", engine="exa"))
+    assert not outcome.results and outcome.failed[0].kind == "quota"
+    assert len(search.calls) == 1 and len(fallback.calls) == 1
+
+
+
+def test_search_cache_does_not_charge_or_dispatch(tmp_path):
+    from quiet_memo.infra.search.cache import SearchCache
+    provider = _SearchProvider("exa", [SearchResult("Synthetic entity", "https://example.com/a", "")])
+    limiter = UsageLimiter({"exa": UsageLimit(daily=1, monthly=2)}, tmp_path / "usage.json")
+    router = SearchRouter({"exa": provider}, cache=SearchCache(tmp_path / "cache.json", 60), usage_limiter=limiter)
+    assert router.search(SearchQuery("Synthetic entity")).results
+    limiter.pause("exa", "balance")
+    assert router.search(SearchQuery("Synthetic entity")).cached
+    assert len(provider.calls) == 1 and limiter.status("exa")["daily"]["used"] == 1
+
+
+def test_fetch_official_pause_blocks_future_search(tmp_path):
+    error = ProviderError("exa", "quota", "NO_MORE_CREDITS", pause_reason="NO_MORE_CREDITS")
+    fetch = _FetchProvider("exa", error=error)
+    path = tmp_path / "usage.json"
+    router = FetchRouter({"exa": fetch}, usage_limiter=UsageLimiter({}, path))
+    with pytest.raises(ProviderError):
+        router.fetch("https://example.com/a")
+    search = _SearchProvider("exa")
+    other = SearchRouter({"exa": search}, usage_limiter=UsageLimiter({}, path))
+    result = other.search(SearchQuery("synthetic"))
+    assert not search.calls and "Official quota pause" in result.failed[0].detail

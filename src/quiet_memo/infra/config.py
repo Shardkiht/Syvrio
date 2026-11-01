@@ -118,7 +118,7 @@ class SearchConfig:
     # 一次搜索跨所有 provider 共享的请求次数上限；超出即返回当前最佳候选。
     max_requests: int = 9
     # 每厂商调用上限（Search/Fetch 共池）；键为 provider 名。
-    usage_limits: dict[str, UsageLimit] = field(default_factory=dict)
+    usage_limits: dict[str, UsageLimit] = field(default_factory=lambda: default_usage_limits())
 
 
 def read_api_key(env_name: str) -> str:
@@ -136,10 +136,28 @@ def read_api_key(env_name: str) -> str:
 
 @dataclass(slots=True)
 class UsageLimit:
-    """单厂商调用上限；本地计数不等于服务商账单上限。"""
+    daily: int = 0
+    monthly: int = 0
+    # Constructor compatibility for existing callers; TOML writers emit new fields.
+    period: str | None = None
+    max_calls: int = 0
 
-    period: str = "daily"  # daily / monthly
-    max_calls: int = 0  # <=0 表示不限制
+    def __post_init__(self) -> None:
+        if self.period is None and self.max_calls:
+            self.period = "daily"
+        if self.period in ("daily", "monthly"):
+            setattr(self, self.period, max(0, self.max_calls))
+
+
+DEFAULT_USAGE_LIMITS = {
+    "baidu_search": (50, 0), "tavily": (0, 800), "exa": (0, 1000),
+    "you": (0, 1500), "volcengine": (0, 450), "open_websearch": (0, 0),
+}
+
+
+def default_usage_limits() -> dict[str, UsageLimit]:
+    return {name: UsageLimit(daily=day, monthly=month)
+            for name, (day, month) in DEFAULT_USAGE_LIMITS.items()}
 
 
 @dataclass(slots=True)
@@ -322,20 +340,31 @@ def load_config(path: Path | str | None = None) -> Config:
         ),
     )
     search_raw = data.get("search", {})
-    usage_limits: dict[str, UsageLimit] = {}
+    usage_limits = default_usage_limits()
     usage_raw = search_raw.get("usage_limits", {})
     if isinstance(usage_raw, dict):
         for name, item in usage_raw.items():
             if not isinstance(item, dict):
                 continue
-            period = str(item.get("period", "daily"))
-            if period not in ("daily", "monthly"):
-                period = "daily"
-            try:
-                max_calls = int(item.get("max_calls", 0))
-            except (TypeError, ValueError):
-                max_calls = 0
-            usage_limits[str(name)] = UsageLimit(period=period, max_calls=max_calls)
+            if "daily" in item or "monthly" in item:
+                default = usage_limits.get(name, UsageLimit())
+                try:
+                    daily = int(item.get("daily", default.daily))
+                    monthly = int(item.get("monthly", default.monthly))
+                except (TypeError, ValueError) as exc:
+                    raise ConfigError("usage limits must be nonnegative integers") from exc
+                if daily < 0 or monthly < 0:
+                    raise ConfigError("usage limits must be nonnegative integers")
+                usage_limits[str(name)] = UsageLimit(daily=daily, monthly=monthly)
+            elif "max_calls" in item:
+                period = str(item.get("period", "daily"))
+                if period not in ("daily", "monthly"):
+                    period = "daily"
+                try:
+                    count = max(0, int(item["max_calls"]))
+                except (TypeError, ValueError):
+                    count = 0
+                usage_limits[str(name)] = UsageLimit(period=period, max_calls=count)
     providers = search_raw.get("providers", ["open_websearch"])
     if not isinstance(providers, list):
         providers = ["open_websearch"]
@@ -393,8 +422,8 @@ def usage_limits_toml(limits: dict[str, "UsageLimit"]) -> str:
     for name, limit in limits.items():
         parts.append(
             f"\n[search.usage_limits.{name}]"
-            f'\nperiod = "{limit.period}"'
-            f"\nmax_calls = {limit.max_calls}\n"
+            f"\ndaily = {limit.daily}"
+            f"\nmonthly = {limit.monthly}\n"
         )
     return "".join(parts)
 
@@ -463,8 +492,8 @@ max_requests = 9
 # 每厂商调用上限（Search/Fetch 共用同一计数池）；按需取消注释并修改。
 # 本地计数不等于服务商实际账单上限。
 # [search.usage_limits.tavily]
-# period = "daily"  # daily / monthly
-# max_calls = 20
+# daily = 0  # 0 means no local request-count cap
+# monthly = 800
 
 [fetch]
 # 网页抓取的 provider 顺序；与搜索的 providers 相互独立。

@@ -142,7 +142,11 @@ class ProviderErrorKind(str, Enum):
 
 
 class ProviderError(Exception):
-    def __init__(self, provider: str, kind: ProviderErrorKind | str, detail: str = ""):
+    def __init__(self, provider: str, kind: ProviderErrorKind | str, detail: str = "",
+                 *, code: str = "", pause_reason: str = "", resume_at: float | None = None):
+        self.code = code
+        self.pause_reason = pause_reason
+        self.resume_at = resume_at
         self.provider = provider
         self.kind = kind if isinstance(kind, ProviderErrorKind) else ProviderErrorKind(kind)
         self.detail = detail

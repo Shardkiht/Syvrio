@@ -37,6 +37,7 @@ class YouSearchProvider:
         client_factory: Callable[[], httpx.Client] | None = None,
     ):
         self._client = JsonApiClient(NAME, base_url, timeout, client_factory)
+        self._client.error_mapper = _api_error
         self._api_key = api_key
 
     def search(self, query: SearchQuery) -> list[SearchResult]:
@@ -105,6 +106,7 @@ class YouFetchProvider:
         client_factory: Callable[[], httpx.Client] | None = None,
     ):
         self._client = JsonApiClient(NAME, base_url, timeout, client_factory)
+        self._client.error_mapper = _api_error
         self._api_key = api_key
 
     def fetch(self, query: FetchQuery) -> FetchResult:
@@ -130,3 +132,9 @@ class YouFetchProvider:
             content=text,
             truncated=truncated,
         )
+
+
+def _api_error(status: int, payload: dict) -> ProviderError | None:
+    if status == 402 and payload.get("detail") == "Insufficient credits":
+        return ProviderError(NAME, ProviderErrorKind.QUOTA, "Insufficient credits", code="402", pause_reason="insufficient_credits")
+    return None

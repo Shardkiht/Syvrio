@@ -20,7 +20,7 @@ from .base import (
     SearchResult,
     truncate_fetch_content,
 )
-from .http_client import JsonApiClient
+from .http_client import JsonApiClient, safe_error_code
 
 NAME = "volcengine"
 DEFAULT_BASE_URL = "https://open.feedcoopapi.com"
@@ -47,7 +47,8 @@ def _error_from_metadata(payload: dict[str, Any]) -> ProviderError | None:
         kind = ProviderErrorKind.QUOTA
     else:
         kind = ProviderErrorKind.BAD_RESPONSE
-    return ProviderError(NAME, kind, f"{code}: {message}")
+    safe_code = safe_error_code({"code": error.get("Code") or error.get("CodeN")})
+    return ProviderError(NAME, kind, safe_code, code=safe_code)
 
 
 def _checked_query(text: str) -> str:
@@ -171,6 +172,7 @@ class VolcengineFetchProvider:
         client_factory: Callable[[], httpx.Client] | None = None,
     ):
         self._client = JsonApiClient(NAME, base_url, timeout, client_factory)
+        self._client.error_mapper = _api_error
         self._api_key = api_key
 
     def fetch(self, query: FetchQuery) -> FetchResult:
@@ -202,3 +204,16 @@ class VolcengineFetchProvider:
             content=text,
             truncated=truncated,
         )
+
+
+def _api_error(status: int, payload: dict) -> ProviderError | None:
+    if status in (401, 403) or status >= 500:
+        return None
+    metadata = payload.get("ResponseMetadata") or {}
+    error = metadata.get("Error") if isinstance(metadata, dict) else None
+    if not isinstance(error, dict):
+        return None
+    code = str(error.get("CodeN") or error.get("Code") or "")
+    if code in {"10406", "10412"}:
+        return ProviderError(NAME, ProviderErrorKind.QUOTA, code, code=code, pause_reason="official_quota_" + code)
+    return None

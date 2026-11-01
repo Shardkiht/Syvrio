@@ -37,6 +37,7 @@ class TavilySearchProvider:
         client_factory: Callable[[], httpx.Client] | None = None,
     ):
         self._client = JsonApiClient(NAME, base_url, timeout, client_factory)
+        self._client.error_mapper = _api_error
         self._api_key = api_key
         self._depth = depth if depth in ("basic", "advanced") else "basic"
 
@@ -84,6 +85,7 @@ class TavilyFetchProvider:
         client_factory: Callable[[], httpx.Client] | None = None,
     ):
         self._client = JsonApiClient(NAME, base_url, timeout, client_factory)
+        self._client.error_mapper = _api_error
         self._api_key = api_key
 
     def fetch(self, query: FetchQuery) -> FetchResult:
@@ -137,3 +139,10 @@ def _map_result(item: Any) -> SearchResult | None:
         published=str(published).strip() if published else None,
         provider=NAME,
     )
+
+
+def _api_error(status: int, payload: dict) -> ProviderError | None:
+    if status in (432, 433):
+        reason = "plan_usage_limit" if status == 432 else "pay_as_you_go_limit"
+        return ProviderError(NAME, ProviderErrorKind.QUOTA, reason, code=str(status), pause_reason=reason)
+    return None
