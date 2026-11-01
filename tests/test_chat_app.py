@@ -2181,7 +2181,8 @@ class GatedChatModel:
 async def _wait_ask_started(app, pilot, limit=200):
     for _ in range(limit):
         await pilot.pause()
-        if app._ask_active:
+        # The UI flag precedes worker-side session creation on slower runners.
+        if app._ask_active and app.runtime.has_session:
             return
     raise AssertionError("请求未开始")
 
