@@ -366,3 +366,11 @@ Spark 真实接口合成数据冒烟：流式回复、带时间/地点的记忆�
 - Validation: UI suite 128 passed; focused final Markdown suite 25 passed; full isolated pytest 842 passed with one existing dependency warning. Truecolor Textual screenshots explicitly override process-local NO_COLOR for visual inspection only; 80/120/160-column SVGs confirm slate heading color and no literal emphasis markers in the sample. CJK and existing assistant selection/Ctrl+C tests pass; stored Markdown remains byte-for-byte unchanged. No user configuration, Vault, credentials or APIs were accessed.
 
 - Markdown merge validation: evolution full isolated pytest 905 passed with one existing dependency warning. Reply Markdown rendering/theme match main/base 3dd03ca, while evolution retains its existing command-panel and memory functionality. Local README edits remain outside the merge commit; no real API calls were made for this merge.
+
+## Full pending review content (2026-11-01)
+
+- Pending action review no longer truncates the item to 44 characters. PickScreen accepts optional plain-text detail in an independently scrollable area; the expanded card uses up to 90% width / 85% height with a bounded width. Approval/edit/rejection actions remain below the body.
+- Detail mode supports mouse-wheel scrolling and PgUp/PgDn without moving the action selection; other pickers retain their existing layout and bindings. Markup-like content is literal. Pending list rows remain concise summaries; review and edit receive the full original text.
+- Synthetic UI regressions cover 80x24, 120x40 and 160x50 layouts, pagination, cancellation, full-text approval, full-text edit defaults and rejection. No API calls, user-vault access or memory/session format changes.
+- Validation: focused pending suite 9 passed; full isolated base suite 848 passed with one existing dependency warning. Synthetic rendered SVG checks at all three sizes confirm mouse-wheel scrolling, the final body line and visible action labels. No real APIs or user data were used.
+- Pending merge validation: full isolated evolution suite 911 passed with one existing dependency warning. Existing README changes remain unstaged; no real API calls were made.

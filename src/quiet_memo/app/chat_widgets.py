@@ -246,24 +246,43 @@ class PickScreen(ModalScreen):
     BINDINGS = [
         ("escape", "cancel", "Cancel"),
         ("down", "focus_list", "Select"),
+        Binding("pageup", "read_detail(-1)", show=False, priority=True),
+        Binding("pagedown", "read_detail(1)", show=False, priority=True),
     ]
 
     def __init__(
-        self, title: str, options: list[tuple], on_result, searchable: bool = False
+        self, title: str, options: list[tuple], on_result, searchable: bool = False,
+        *, detail: str | None = None
     ) -> None:
         super().__init__()
         self._title = title
         self._options = list(options)
         self._on_result = on_result
         self._searchable = searchable
+        self._detail = detail
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        if action == "read_detail":
+            return self._detail is not None
+        return super().check_action(action, parameters)
+
+    def action_read_detail(self, direction: int) -> None:
+        panel = self.query_one("#pick-detail", VerticalScroll)
+        if direction < 0:
+            panel.scroll_page_up(animate=False)
+        else:
+            panel.scroll_page_down(animate=False)
 
     @staticmethod
     def _items(options: list[tuple]) -> list[OptionItem]:
         return [OptionItem(*option) for option in options]
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="pick-card"):
+        with Vertical(id="pick-card", classes="has-detail" if self._detail is not None else ""):
             yield Static(self._title, classes="pick-title")
+            if self._detail is not None:
+                with VerticalScroll(id="pick-detail", classes="thin-scroll"):
+                    yield Static(self._detail, markup=False, id="pick-detail-text")
             if self._searchable:
                 yield Input(placeholder="Search models…", id="pick-search")
             yield ListView(*self._items(self._options), id="pick-list", classes="thin-scroll")
@@ -272,6 +291,8 @@ class PickScreen(ModalScreen):
                 if self._searchable
                 else "↑↓ select · Enter confirm · ESC cancel"
             )
+            if self._detail is not None:
+                hint = "PgUp/PgDn read · " + hint
             yield Static(hint, classes="pick-hint")
 
     def on_mount(self) -> None:

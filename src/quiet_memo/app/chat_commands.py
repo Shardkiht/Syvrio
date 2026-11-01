@@ -160,7 +160,8 @@ class ChatCommandsMixin:
             ("Edit and approve", ("edit", item_id, None)),
             ("Reject", ("reject", item_id, None)),
         ]
-        self.push_screen(PickScreen(f"[{item.topic}] {self._truncate(item.text, 44)}", options, self._pending_action))
+        self.push_screen(PickScreen(escape(f"Pending [{item.topic}]"), options,
+                                    self._pending_action, detail=item.text))
 
     def _pending_action(self, value) -> None:
         if value is None:
