@@ -44,7 +44,9 @@ def test_new_fact_does_not_restart_entire_reflection_corpus(service):
 def test_profile_rebuilds_from_sources_and_only_injects_confirmed_related_inferences(service):
     source = service.note("合成阅读偏好", topic="preferences")
     other = service.note("合成其他事实")
-    result = service.reflection.run("profile", model=proposal)
+    result = service.reflection.run("profile", model=lambda *_: [
+        ReflectionProposal(text="可能偏好安静的合成活动", source_ids=[source.id])
+    ])
     assert result.proposed == 1
     items = service.reflection.profile()
     assert {item.kind for item in items} == {"fact", "inference"}

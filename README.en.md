@@ -556,3 +556,5 @@ Automatic memory recall is gated by personal context and follow-up questions. Ge
 TUI interface text is English; chat content keeps its original language. Automatic engine fallback rules are described in [Web search](#web-search); explicit engine choices are honored. Engine failures are not reported or cached as empty results.
 
 Interactive Windows input uses a native bar cursor for IME composition; preedit cursor behavior depends on the terminal and input method.
+
+An explicit search limit overrides the max_results default; Agent search returns at most 15 results. Cache hits preserve low-relevance candidate warnings.

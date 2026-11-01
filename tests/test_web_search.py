@@ -611,7 +611,7 @@ def test_url_normalization_and_dedupe_limit():
         ]
     )
     router = SearchRouter({"fake": provider}, order=["fake"], max_results=2)
-    outcome = router.search(SearchQuery("q", limit=5))
+    outcome = router.search(SearchQuery("q", limit=2))
 
     assert len(outcome.results) == 2
     assert outcome.results[0].url == "https://example.com/path"

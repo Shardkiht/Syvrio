@@ -15,6 +15,7 @@ from quiet_memo.infra.search.base import (
     SearchResult,
 )
 from quiet_memo.infra.search.quality import analyze_query, result_relevance
+from quiet_memo.infra.search.cache import SearchCache
 from quiet_memo.infra.search.router import SearchRouter
 
 
@@ -692,3 +693,23 @@ def test_budget_exhausted_distinct_from_provider_quota():
     kinds = [item.kind for item in outcome.failed]
     assert "quota" in kinds and "budget_exhausted" in kinds
     assert not second.calls
+
+
+@pytest.mark.parametrize("requested,expected", [(5, 5), (15, 15), (100, 15)])
+def test_explicit_limit_overrides_default_with_hard_cap(requested, expected):
+    provider = NamedProvider("fake", [
+        SearchResult(f"Synthetic entity {i}", f"https://example.com/{i}", "")
+        for i in range(20)
+    ])
+    router = SearchRouter({"fake": provider}, max_results=5)
+    assert len(router.search(SearchQuery("Synthetic entity", limit=requested)).results) == expected
+
+
+def test_cached_low_relevance_keeps_warning(tmp_path):
+    provider = NamedProvider("fake", [SearchResult("Unrelated", "https://example.com/a", "")])
+    router = SearchRouter({"fake": provider}, cache=SearchCache(tmp_path / "cache.json", 60))
+    first = router.search(SearchQuery("uniqueentity"))
+    calls = len(provider.calls)
+    second = router.search(SearchQuery("uniqueentity"))
+    assert second.cached and second.hint == first.hint and second.hint
+    assert len(provider.calls) == calls

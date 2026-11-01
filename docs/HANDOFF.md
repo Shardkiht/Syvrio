@@ -331,3 +331,12 @@ Spark 真实接口合成数据冒烟：流式回复、带时间/地点的记忆�
 - Committed the reflection UI English labels previously present only in the local working tree; normalized the status line punctuation. No reflection logic or user/model content changed.
 - Validation used a disposable archive of the committed evolution tree with only this source fix overlaid, excluding all unrelated local README and reflection-test edits: full pytest 841 passed, one existing dependency warning. The archive was removed after testing.
 - Search result-count clamping and loss of low-relevance hints on cache hits were reproduced with synthetic providers during review; left unchanged pending user review. No live API calls or user-vault access.
+
+## Search review fixes (2026-11-01)
+
+- Explicit search limits override the configured default up to 15. Cached result hints are recomputed using the same query analysis, retaining low-relevance warnings without changing cache storage. Regression tests use synthetic providers and verify no second upstream request on cache hits.
+- Validation: search suite 242 passed, full base suite 782 passed. Search Eval unchanged. Normal build_tools live smoke returned 15 You results and repeated search used cache without another request; fetch succeeded. Spark Agent completed search/fetch and a linked answer in two model requests. Three You requests were added (five including prior smoke), temporary vault removed; no user vault or persistent credentials changed.
+
+
+- Evolution review follow-up also pins the profile-test proposal to its intended source ID instead of depending on randomly ordered IDs.
+- Final evolution validation: full isolated suite 845 passed, one existing dependency warning; this tested the exact source/test contents prepared for commit, with unrelated README edits stashed. Evolution live build_tools smoke also returned 15 You results, reused cache without another request, and fetched the public example page. Across both environments this follow-up used five You requests (seven including prior smoke) and two Spark model requests. Search Eval unchanged; temporary smoke vaults removed.
