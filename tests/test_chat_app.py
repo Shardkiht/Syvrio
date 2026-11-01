@@ -168,7 +168,6 @@ async def test_undo_restores_last_message_for_editing(tmp_path):
         ]
         assert raw_texts == ["原始提问", "编辑后的提问"]
 
-
 @pytest.mark.parametrize("action", ["new", "resume"])
 async def test_session_switch_drops_previous_context_usage(tmp_path, action):
     app = build_app(tmp_path, [AssistantTurn(content="合成回复")])
@@ -766,7 +765,6 @@ async def test_model_picker_shortcuts_work_from_search(tmp_path, monkeypatch, sh
         await pilot.press(shortcut)
         await pilot.pause()
         assert selected == [(sentinel, "")]
-
 
 @pytest.mark.parametrize("size", [(80, 24), (120, 40)])
 async def test_model_picker_keeps_shortcut_hint_visible(tmp_path, size):
@@ -2716,3 +2714,79 @@ async def test_escape_closes_palette_before_stopping(tmp_path):
         await pilot.press("escape")
         assert app._cancel_generation.is_set()
         app._end_ask()
+
+
+@pytest.mark.parametrize("size", [(80, 24), (120, 40), (160, 50)])
+async def test_pending_long_text_scrolls_without_hiding_actions(tmp_path, size):
+    from textual.containers import VerticalScroll
+    from textual.widgets import ListView
+    from quiet_memo.app.chat_widgets import PickScreen
+    from quiet_memo.memory.models import Candidate, PendingItem
+    app = build_app(tmp_path, [])
+    text = "Synthetic [bold] literal 中文 \n" * 100 + "END OF FULL PENDING TEXT"
+    item = PendingItem.from_candidate(Candidate(text=text, topic="preferences", confidence=0.5),
+                                      "chat", "low confidence")
+    app.service.queue.add(item)
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+        app._pending_picked(item.id)
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, PickScreen)
+        assert str(screen.query_one("#pick-detail-text", Static).content) == text
+        panel = screen.query_one("#pick-detail", VerticalScroll)
+        listing = screen.query_one("#pick-list", ListView)
+        assert panel.max_scroll_y > 0
+        assert listing.has_focus
+        await pilot.press("pagedown")
+        await pilot.pause()
+        assert panel.scroll_y > 0 and listing.index == 0
+        await pilot.press("pageup")
+        await pilot.pause()
+        assert panel.scroll_y == 0
+        panel.scroll_end(animate=False)
+        await pilot.pause()
+        assert panel.scroll_y == panel.max_scroll_y
+        assert listing.region.bottom <= size[1]
+        assert screen.query_one("#pick-card").size.width > 64
+        assert [child.label for child in listing.children] == ["Approve", "Edit and approve", "Reject"]
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.service.pending()[0].text == text
+        assert app.query_one("#input", Input).has_focus
+
+
+@pytest.mark.parametrize("action", ["approve", "edit", "reject"])
+async def test_long_pending_review_actions_keep_full_text(tmp_path, action):
+    from textual.containers import VerticalScroll
+    from quiet_memo.app.chat_widgets import TextInputScreen
+    from quiet_memo.memory.models import Candidate, PendingItem
+    app = build_app(tmp_path, [])
+    text = "Synthetic pending full text 中文 \n" * 30 + "LAST LINE"
+    item = PendingItem.from_candidate(Candidate(text=text, confidence=0.5), "chat", "low confidence")
+    app.service.queue.add(item)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._pending_picked(item.id)
+        await pilot.pause()
+        app.screen.query_one("#pick-detail", VerticalScroll).scroll_end(animate=False)
+        await pilot.pause()
+        if action == "edit":
+            await pilot.press("down", "enter")
+            await pilot.pause()
+            assert isinstance(app.screen, TextInputScreen)
+            assert app.screen.query_one("#pick-input", Input).value == text
+            app.screen.query_one("#pick-input", Input).value = "Synthetic final edited text"
+            await pilot.press("enter")
+        elif action == "reject":
+            await pilot.press("down", "down", "enter")
+        else:
+            await pilot.press("enter")
+        await pilot.pause()
+        assert not app.service.pending()
+        entries = app.service.store.entries()
+        if action == "reject":
+            assert not entries
+        else:
+            expected = "Synthetic final edited text" if action == "edit" else " ".join(text.split())
+            assert [entry.text for entry in entries] == [expected]

@@ -131,5 +131,10 @@ APP_CSS = """
     /* 模型列表独立滚动，为小窗口的搜索框和快捷键提示保留空间。 */
     ModelPickerScreen #pick-card { height: 80%; max-height: 90%; max-width: 95%; }
     ModelPickerScreen #pick-list { height: 1fr; min-height: 1; }
+    /* Full pending text scrolls independently; decision actions stay visible. */
+    #pick-card.has-detail { width: 90%; max-width: 112; height: 85%; max-height: 90%; }
+    #pick-detail { height: 1fr; min-height: 1; margin-bottom: 1; padding: 0 1; background: $bg; }
+    #pick-detail-text { height: auto; width: 1fr; color: #d0d1d5; }
+    #pick-card.has-detail #pick-list { height: auto; max-height: 6; min-height: 3; }
     .pick-hint { color: #83848c; margin-top: 1; }
     """

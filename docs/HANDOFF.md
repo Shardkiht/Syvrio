@@ -274,3 +274,11 @@ Spark 真实接口合成数据冒烟：流式回复、带时间/地点的记忆�
 - The Content conversion remains the single rendering/selection source. Copy still means rendered display text, including display wrapping, not original Markdown. Exact duplicate ChatReply updates reuse the visual; stream coalescing and session storage are unchanged. No new rendering dependency, model/API call or user-vault access.
 - Local visual validation includes Textual SVG screenshots and equivalent Rich before/after PNGs for 80/120/160 columns (reply widths 47/87/127). The synthetic sample uses 39→35 lines at 80 columns, 38→34 at 120/160. Terminal fonts, italic support, soft-wrapped code copying and link activation remain terminal-dependent; no new link interaction or copy mode was added.
 - Validation: UI suite 128 passed; focused final Markdown suite 25 passed; full isolated pytest 842 passed with one existing dependency warning. Truecolor Textual screenshots explicitly override process-local NO_COLOR for visual inspection only; 80/120/160-column SVGs confirm slate heading color and no literal emphasis markers in the sample. CJK and existing assistant selection/Ctrl+C tests pass; stored Markdown remains byte-for-byte unchanged. No user configuration, Vault, credentials or APIs were accessed.
+
+
+## Full pending review content (2026-11-01)
+
+- Pending action review no longer truncates the item to 44 characters. PickScreen accepts optional plain-text detail in an independently scrollable area; the expanded card uses up to 90% width / 85% height with a bounded width. Approval/edit/rejection actions remain below the body.
+- Detail mode supports mouse-wheel scrolling and PgUp/PgDn without moving the action selection; other pickers retain their existing layout and bindings. Markup-like content is literal. Pending list rows remain concise summaries; review and edit receive the full original text.
+- Synthetic UI regressions cover 80x24, 120x40 and 160x50 layouts, pagination, cancellation, full-text approval, full-text edit defaults and rejection. No API calls, user-vault access or memory/session format changes.
+- Validation: focused pending suite 9 passed; full isolated base suite 848 passed with one existing dependency warning. Synthetic rendered SVG checks at all three sizes confirm mouse-wheel scrolling, the final body line and visible action labels. No real APIs or user data were used.
