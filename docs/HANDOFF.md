@@ -374,3 +374,10 @@ Spark 真实接口合成数据冒烟：流式回复、带时间/地点的记忆�
 - Synthetic UI regressions cover 80x24, 120x40 and 160x50 layouts, pagination, cancellation, full-text approval, full-text edit defaults and rejection. No API calls, user-vault access or memory/session format changes.
 - Validation: focused pending suite 9 passed; full isolated base suite 848 passed with one existing dependency warning. Synthetic rendered SVG checks at all three sizes confirm mouse-wheel scrolling, the final body line and visible action labels. No real APIs or user data were used.
 - Pending merge validation: full isolated evolution suite 911 passed with one existing dependency warning. Existing README changes remain unstaged; no real API calls were made.
+
+## Compact pending confirmation (2026-11-01)
+
+- Replaced fixed 85% dialog height with content-driven sizing. Width is capped at 76 columns / 90% of the terminal; the body grows with content up to 30% of terminal height, then scrolls independently. Short confirmations no longer reserve a large empty area; action controls remain visible.
+- Regression coverage at 80/120/160 columns verifies one-line bodies remain one line with no scrollbar, while existing full-text pagination and action tests remain unchanged.
+- AGENTS.md now records compact, content-driven temporary dialogs as a UI invariant, including bounded scrolling and visible action controls.
+- Per user direction, AGENTS.md now requires tests selected by impact instead of automatic full-suite runs before commits/branch synchronization. Pending suite: 12 passed; Markdown suite: 25 passed on rerun. An earlier full run had 850 passed and one Markdown copy/wrapping failure; the repeated full run completed with 851 passed and one existing warning before the cancellation arrived. Subsequent verification is targeted only.
