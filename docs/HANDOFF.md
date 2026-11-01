@@ -324,3 +324,10 @@ Spark 真实接口合成数据冒烟：流式回复、带时间/地点的记忆�
 - The paused merge was snapshotted and rebuilt against the latest base. Original local README, reflection UI and reflection-test changes remain outside the merge commit. The original preservation stash remains available.
 - Adapted the corrupt-profile recall test to use an explicit personal question under the automatic-recall gate; its corruption and fact-retrieval assertions remain unchanged.
 - Final isolated full suites: main 778 passed; evolution working tree with retained local edits 841 passed. Both Search Eval runs retain the same quality and request metrics. One intermittent native-cursor test failed during a prior run, passed its focused retry and the final full suite; no product change was made for it. No live API calls or evaluation-data changes were made for synchronization.
+
+
+## Review follow-up: committed English reflection UI (2026-11-01)
+
+- Committed the reflection UI English labels previously present only in the local working tree; normalized the status line punctuation. No reflection logic or user/model content changed.
+- Validation used a disposable archive of the committed evolution tree with only this source fix overlaid, excluding all unrelated local README and reflection-test edits: full pytest 841 passed, one existing dependency warning. The archive was removed after testing.
+- Search result-count clamping and loss of low-relevance hints on cache hits were reproduced with synthetic providers during review; left unchanged pending user review. No live API calls or user-vault access.

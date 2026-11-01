@@ -45,7 +45,7 @@ class ChatReflectionMixin:
             result = self.service.reflection.run(mode, 1, cancel_event=token)
             self.call_from_thread(self._after_auto_reflection, result, None)
         except Exception:
-            self.call_from_thread(self._after_auto_reflection, None, "自动回顾失败，已保留进度。")
+            self.call_from_thread(self._after_auto_reflection, None, "Automatic reflection failed; progress preserved.")
 
     def _after_auto_reflection(self, result, error: str | None) -> None:
         self._reflection_pending = False
@@ -54,7 +54,7 @@ class ChatReflectionMixin:
             self._reflection_remaining -= result.requests
             error = result.error
             if result.proposed:
-                self.notify(f"后台回顾新增 {result.proposed} 条推断，可用 /inferences 审查。")
+                self.notify(f"Background reflection proposed {result.proposed} inferences. Review with /inferences.")
         else:
             self._reflection_remaining -= 1
         if error:
@@ -63,7 +63,7 @@ class ChatReflectionMixin:
     def _reflection_command(self, mode: str, argument: str) -> None:
         if argument == "resume":
             self._reflection_paused = False
-            self.add_card("自动回顾已恢复，空闲后继续。")
+            self.add_card("Automatic reflection resumed; it will continue when idle.")
             return
         if argument == "cancel":
             self._reflection_paused = True
@@ -71,18 +71,18 @@ class ChatReflectionMixin:
             if token is not None:
                 token.set()
             self.service.reflection.cancel()
-            self.add_card("已请求取消；正在发送的模型请求返回后停止，不再提交该轮候选。")
+            self.add_card("Cancellation requested; stopping after the active request returns without publishing its candidates.")
             return
         if argument == "status":
-            running = "运行中" if getattr(self, "_reflection_pending", False) else "空闲"
+            running = "running" if getattr(self, "_reflection_pending", False) else "idle"
             enabled = self.service.config.chat.auto_reflect and not getattr(self, "_reflection_paused", False)
-            self.add_card(f"回顾{running}；自动回顾{'启用' if enabled else '暂停/关闭'}；本次启动剩余请求预算 {getattr(self, '_reflection_remaining', 0)}。")
+            self.add_card(f"Reflection {running}; automatic reflection {'enabled' if enabled else 'paused/disabled'}; remaining request budget {getattr(self, '_reflection_remaining', 0)}.")
             return
         if mode == "profile" and not argument:
             self.run_worker(self._profile_work, thread=True, group="profile-view", exit_on_error=False)
             return
         if mode == "profile" and argument.split()[0] != "refresh":
-            self.add_card("查看画像用 /profile；调用模型提炼请用 /profile refresh [0–20]。")
+            self.add_card("Use /profile to view the profile; /profile refresh [0–20] generates proposals.")
             return
         value = argument.removeprefix("refresh").strip() if mode == "profile" else argument
         try:
@@ -90,39 +90,39 @@ class ChatReflectionMixin:
             if not 0 <= budget <= 20:
                 raise ValueError
         except ValueError:
-            self.add_card("用法：/dream [0–20|cancel|status]，/profile [refresh [0–20]|cancel|status]")
+            self.add_card("Usage: /dream [0–20|cancel|status], /profile [refresh [0–20]|cancel|status]")
             return
         if getattr(self, "_reflection_pending", False):
-            self.add_card("已有回顾任务运行中，可输入 /dream cancel 取消。")
+            self.add_card("Reflection is already running. Use /dream cancel to cancel.")
             return
         self._reflection_cancel = threading.Event()
         self._reflection_pending = True
-        self.add_card(f"已启动后台回顾，本次最多 {budget} 次模型请求；可以继续聊天或切换会话。")
+        self.add_card(f"Background reflection started: at most {budget} model requests. You can continue chatting or switch sessions.")
         self.run_worker(partial(self._reflection_work, mode, budget, self._reflection_cancel),
                         thread=True, group="reflection", exit_on_error=False)
 
     def _profile_work(self) -> None:
         try:
             items = self.service.reflection.profile()
-            labels = {"active": "事实", "hypothesis": "待确认推断", "confirmed": "已确认推断"}
-            text = "\n".join(f"[{labels.get(item.status, item.status)}] {item.text}\n来源：{', '.join(item.source_ids)}" for item in items)
-            text = text or "暂无画像。保存偏好、目标或习惯后可查看；/profile refresh 可生成待审查推断。"
-            text += "\n事实可通过现有更正/忘记操作调整；推断可在 /inferences 审查。"
+            labels = {"active": "Fact", "hypothesis": "Proposed inference", "confirmed": "Confirmed inference"}
+            text = "\n".join(f"[{labels.get(item.status, item.status)}] {item.text}\nSources: {', '.join(item.source_ids)}" for item in items)
+            text = text or "No profile yet. Save preferences, goals or habits; /profile refresh can generate proposals."
+            text += "\nCorrect or forget facts using the existing controls; review inferences in /inferences."
         except Exception:
-            text = "画像读取失败，请检查本地记忆与推断日志。"
+            text = "Could not read the profile. Check local memory and inference logs."
         self.call_from_thread(self.add_card, escape(text))
 
     def _reflection_work(self, mode: str, budget: int, token: threading.Event) -> None:
         try:
             result = self.service.reflection.run(mode, budget, cancel_event=token)
-            message = (f"回顾{'已取消' if result.cancelled else '结束'}：请求 {result.requests} 次，"
-                       f"新增推断 {result.proposed} 条，剩余 {result.remaining} 批。")
+            message = (f"Reflection {'cancelled' if result.cancelled else 'complete'}: requests {result.requests}, "
+                       f"proposed {result.proposed}, remaining {result.remaining} batches.")
             if result.error:
                 message += f"\n{result.error}"
             if result.proposed:
-                message += "\n可在 /inferences 查看与审查。"
+                message += "\nView and review with /inferences."
         except Exception:
-            message = "回顾失败，已保留本地进度；请检查任务日志后重试。"
+            message = "Reflection failed; local progress preserved. Check the job log before retrying."
         self.call_from_thread(self._after_reflection, message)
 
     def _after_reflection(self, message: str) -> None:
