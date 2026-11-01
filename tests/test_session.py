@@ -308,3 +308,53 @@ def test_distilled_high_water_mark_does_not_move_backwards(tmp_path):
     store.append(session, {"type": "distilled", "up_to": "m1"})
     store.append(session, {"type": "distilled", "up_to": "m0"})
     assert store.load(session.id).user_texts_after_distilled() == ["陈述2"]
+
+
+@pytest.mark.parametrize("bad", [
+    b'\xff', b'[]', b'null', b'42', b'{"type":"title","title":[]}',
+    b'{"type":"message","role":"user","content":{}}',
+    b'{"type":"summary","covered_records":"bad"}',
+    b'{"type":"summary","distilled_ids":[{}]}',
+    b'{"type":"assistant","tool_calls":[null]}',
+    b'{"type":"meta","at":12}',
+])
+def test_bad_session_is_reported_without_blocking_healthy_files(tmp_path, caplog, bad):
+    store, healthy = make_store(tmp_path)
+    store.append(healthy, {"type": "message", "id": "m-good", "role": "user", "content": "Synthetic fact"})
+    broken = store.create()
+    with broken.path.open("ab") as handle:
+        handle.write(bad + b'\n{"type":"closed"}\n')
+    original = broken.path.read_bytes()
+    with pytest.raises(ValueError):
+        store.load(broken.id)
+    for with_tokens in (False, True):
+        assert [row["id"] for row in store.list(with_tokens=with_tokens)] == [healthy.id]
+        assert [row.id for row in store.unconsolidated()] == [healthy.id]
+    assert broken.id in caplog.text
+    assert broken.path.read_bytes() == original
+
+
+def test_complete_nonobject_tail_is_not_treated_as_torn_write(tmp_path):
+    store, session = make_store(tmp_path)
+    with session.path.open("ab") as handle:
+        handle.write(b'[]\n')
+    original = session.path.read_bytes()
+    with pytest.raises(ValueError, match="Session record"):
+        store.load(session.id)
+    assert session.path.read_bytes() == original
+
+
+def test_create_retries_exclusive_open_race(tmp_path, monkeypatch):
+    from pathlib import Path
+    original_open = Path.open
+    collided = []
+    def race(path, mode="r", *args, **kwargs):
+        if mode == "x" and not collided:
+            collided.append(path)
+            with original_open(path, "wb") as handle:
+                handle.write(b"synthetic competing session\n")
+        return original_open(path, mode, *args, **kwargs)
+    monkeypatch.setattr(Path, "open", race)
+    created = SessionStore(tmp_path).create()
+    assert created.path != collided[0]
+    assert collided[0].read_bytes() == b"synthetic competing session\n"

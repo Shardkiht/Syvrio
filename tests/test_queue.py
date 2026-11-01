@@ -74,3 +74,47 @@ def test_resolve_only_removes_the_targeted_duplicate(tmp_path):
 
     # 历史数据若出现同 ID，只处理目标那一条，不能把另一条一并抹掉。
     assert len(queue.all()) == 1
+
+
+@pytest.mark.parametrize("stage", ["log", "pending"])
+def test_resolve_write_failure_keeps_item_and_retry_logs_once(tmp_path, monkeypatch, stage):
+    from pathlib import Path
+    queue = PendingQueue(tmp_path)
+    queue.add(make_item())
+    before = queue.pending_path.read_bytes()
+    with monkeypatch.context() as patch:
+        if stage == "log":
+            original = Path.open
+            def fail_log(path, mode="r", *args, **kwargs):
+                if path == queue.resolved_path and mode == "a":
+                    raise OSError("synthetic log failure")
+                return original(path, mode, *args, **kwargs)
+            patch.setattr(Path, "open", fail_log)
+        else:
+            def fail_save(*args):
+                raise OSError("synthetic pending failure")
+            patch.setattr(queue, "_save", fail_save)
+        with pytest.raises(OSError, match="synthetic"):
+            queue.resolve("p-1", "approved")
+    assert queue.pending_path.read_bytes() == before
+    assert not queue.resolved_path.exists()
+    queue.resolve("p-1", "approved")
+    assert queue.all() == []
+    assert len(queue.resolved_path.read_text(encoding="utf-8").splitlines()) == 1
+
+
+def test_rollback_failure_remains_explicit(tmp_path, monkeypatch):
+    from quiet_memo.memory import queue as queue_module
+    path = tmp_path / "synthetic.txt"
+    path.write_bytes(b"original")
+    def fail_replace(*args):
+        raise OSError("synthetic rollback failure")
+    with pytest.raises(ExceptionGroup) as caught:
+        with queue_module.rollback_files([path]):
+            path.write_bytes(b"changed")
+            monkeypatch.setattr(queue_module.os, "replace", fail_replace)
+            raise OSError("synthetic original failure")
+    assert len(caught.value.exceptions) == 2
+    assert "original failure" in str(caught.value.exceptions[0])
+    assert "rollback failure" in str(caught.value.exceptions[1])
+    assert not [item for item in tmp_path.iterdir() if item.name != path.name]

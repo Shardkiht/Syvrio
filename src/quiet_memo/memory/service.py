@@ -27,7 +27,7 @@ from .extractor import ImportExtractor, LLMExtractor
 from .inference import InferenceStore
 from .models import Candidate, Entry, Inference, InferenceKind, PendingItem
 from .policy import decide
-from .queue import PendingQueue
+from .queue import PendingQueue, rollback_files
 from .store import (
     STATUS_ACTIVE,
     STATUS_DELETED,
@@ -400,23 +400,24 @@ class MemoryService:
                 raise ValueError(f"记忆当前状态为 {old.status}，不能更正。")
             if contains_secret(text):
                 raise ValueError("检测到密钥或敏感信息，已拦截写入。")
-            entry = self.store.append(
-                old.topic,
-                text.strip(),
-                source="correction",
-                confidence=1.0,
-                supersedes=entry_id,
-            )
-            self.store.set_status(entry_id, STATUS_SUPERSEDED)
-            self.audit.write(
-                "correct",
-                old_entry=entry_id,
-                new_entry=entry.id,
-                reason=reason,
-                old_text=old.text,
-                new_text=entry.text,
-            )
-            return entry
+            with rollback_files([self.store.topic_path(old.topic), self.audit.path]):
+                entry = self.store.append(
+                    old.topic,
+                    text.strip(),
+                    source="correction",
+                    confidence=1.0,
+                    supersedes=entry_id,
+                )
+                self.store.set_status(entry_id, STATUS_SUPERSEDED)
+                self.audit.write(
+                    "correct",
+                    old_entry=entry_id,
+                    new_entry=entry.id,
+                    reason=reason,
+                    old_text=old.text,
+                    new_text=entry.text,
+                )
+                return entry
 
     def forget(self, entry_id: str, reason: str = "") -> Entry:
         with self.write_lock:
@@ -425,9 +426,10 @@ class MemoryService:
                 raise KeyError(f"记忆不存在：{entry_id}")
             if old.status != STATUS_ACTIVE:
                 raise ValueError(f"记忆当前状态为 {old.status}，无需删除。")
-            self.store.set_status(entry_id, STATUS_DELETED)
-            self.audit.write("forget", entry=entry_id, reason=reason, text=old.text)
-            return old.model_copy(update={"status": STATUS_DELETED})
+            with rollback_files([self.store.topic_path(old.topic), self.audit.path]):
+                self.store.set_status(entry_id, STATUS_DELETED)
+                self.audit.write("forget", entry=entry_id, reason=reason, text=old.text)
+                return old.model_copy(update={"status": STATUS_DELETED})
 
     def recall(self, query: str, limit: int = 10) -> list[SearchHit]:
         return self.retriever.search(query, limit)
@@ -493,37 +495,43 @@ class MemoryService:
             if old is None or old.status != STATUS_ACTIVE:
                 raise ValueError("原记忆已删除或不存在，请重新审阅候选。")
             supersedes = old.id
-        entry = self.store.append(
-            item.topic,
-            text,
-            source=f"{item.source}+approved",
-            confidence=item.confidence,
-            note="人工确认" if text_override is None else "人工改写后确认",
-            title=item.title,
-            extra={"session": item.session_id or "", "message": item.message_id or ""},
-            # 改写正文后旧上下文未必适用，不沿用原候选的日期、地点与情绪。
-            context=item.context if text_override is None else None,
-            supersedes=supersedes,
-        )
+        paths = [self.store.topic_path(item.topic), self.queue.pending_path,
+                 self.queue.resolved_path, self.audit.path]
         if supersedes:
-            self.store.set_status(supersedes, STATUS_SUPERSEDED)
-        self.queue.resolve(item_id, "approved")
-        override_fields = {"text_override": text} if text_override is not None else {}
-        self.audit.write(
-            "approve", item=item_id, entry=entry.id, supersedes=supersedes or "", **override_fields
-        )
-        return entry
+            paths.append(self.store.topic_path(old.topic))
+        with rollback_files(paths):
+            entry = self.store.append(
+                item.topic,
+                text,
+                source=f"{item.source}+approved",
+                confidence=item.confidence,
+                note="人工确认" if text_override is None else "人工改写后确认",
+                title=item.title,
+                extra={"session": item.session_id or "", "message": item.message_id or ""},
+                # 改写正文后旧上下文未必适用，不沿用原候选的日期、地点与情绪。
+                context=item.context if text_override is None else None,
+                supersedes=supersedes,
+            )
+            if supersedes:
+                self.store.set_status(supersedes, STATUS_SUPERSEDED)
+            self.queue.resolve(item_id, "approved")
+            override_fields = {"text_override": text} if text_override is not None else {}
+            self.audit.write(
+                "approve", item=item_id, entry=entry.id, supersedes=supersedes or "", **override_fields
+            )
+            return entry
 
     def reject(self, item_id: str) -> PendingItem:
         with self.write_lock:
             return self._reject_locked(item_id)
 
     def _reject_locked(self, item_id: str) -> PendingItem:
-        item = self.queue.resolve(item_id, "rejected")
-        if item is None:
-            raise KeyError(f"待确认项不存在：{item_id}")
-        self.audit.write("reject", item=item_id, text=item.text)
-        return item
+        with rollback_files([self.queue.pending_path, self.queue.resolved_path, self.audit.path]):
+            item = self.queue.resolve(item_id, "rejected")
+            if item is None:
+                raise KeyError(f"待确认项不存在：{item_id}")
+            self.audit.write("reject", item=item_id, text=item.text)
+            return item
 
     def topics(self) -> list[dict]:
         return [topic.model_dump() for topic in self.store.topics()]
