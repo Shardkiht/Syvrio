@@ -1,9 +1,4 @@
-"""轻量 API 调用额度限制：按厂商记录 Search/Fetch 请求次数并按周期重置。
-
-只做计数、持久化与上限判断，达到上限即跳过该厂商并允许正常回退；
-不做预留/结算/退款，也不是服务商账单上限——同一厂商的 Search 与
-Fetch 共用一个计数池（按 provider 名）。
-"""
+"""Local request protection; calendar counters are not provider billing balances."""
 from __future__ import annotations
 
 import json
@@ -11,111 +6,135 @@ import os
 import time
 from datetime import datetime
 from pathlib import Path
+from threading import RLock
 from typing import Callable
 
-# 状态文件名；放在 vault 的 .quiet-memo 下，属派生数据可删除重建。
 USAGE_FILENAME = "usage.json"
+_LOCKS: dict[str, RLock] = {}
+_LOCKS_GUARD = RLock()
 
 
 def window_key(period: str, now: float) -> str:
-    """计费周期标识：daily 用日期，monthly 用年月（本地时区）。"""
     moment = datetime.fromtimestamp(now)
     return moment.strftime("%Y-%m-%d") if period == "daily" else moment.strftime("%Y-%m")
 
 
 class UsageLimiter:
-    """内存计数 + JSON 原子落盘；limits 为空或 max_calls<=0 表示不限制。"""
-
-    def __init__(
-        self,
-        limits: dict,
-        path: Path | None = None,
-        clock: Callable[[], float] = time.time,
-    ):
-        self._limits = {
-            name: limit
-            for name, limit in limits.items()
-            if limit.period in ("daily", "monthly") and limit.max_calls > 0
-        }
+    def __init__(self, limits: dict, path: Path | None = None,
+                 clock: Callable[[], float] = time.time):
+        self._limits = limits
         self._path = path
         self._clock = clock
         self._counts: dict[str, dict] = {}
-        self._mtime: float | None = None
-        self._load()
+        with _LOCKS_GUARD:
+            self._lock = _LOCKS.setdefault(os.path.normcase(str(path.resolve())), RLock()) if path else RLock()
+        with self._lock:
+            self._load()
 
     def _load(self) -> None:
-        if self._path is None or not self._path.exists():
-            return
-        try:
-            data = json.loads(self._path.read_text(encoding="utf-8"))
-            self._mtime = self._path.stat().st_mtime
-        except (OSError, ValueError):
-            # 损坏的计数文件当作空计数重建，不阻断搜索。
-            return
-        if isinstance(data, dict):
-            self._counts = {
-                name: entry
-                for name, entry in data.items()
-                if isinstance(entry, dict) and isinstance(entry.get("count"), int)
-            }
-
-    def _reload_if_changed(self) -> None:
-        """同一计数文件可能被 Search/Fetch 两个路由实例写，读前检查 mtime。"""
         if self._path is None:
             return
         try:
-            mtime = self._path.stat().st_mtime
-        except OSError:
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
             return
-        if mtime != self._mtime:
-            self._load()
+        if isinstance(data, dict):
+            self._counts = {name: value for name, value in data.items() if isinstance(value, dict)}
 
     def _save(self) -> None:
         if self._path is None:
             return
-        # 先写临时文件再原子替换，避免中断截断计数。
         self._path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._path.with_name(self._path.name + ".tmp")
-        tmp.write_text(
-            json.dumps(self._counts, ensure_ascii=False), encoding="utf-8"
-        )
+        tmp.write_text(json.dumps(self._counts, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, self._path)
 
-    def _limit_for(self, provider: str) -> tuple[str, int] | None:
-        limit = self._limits.get(provider)
-        if limit is None:
-            return None
-        return limit.period, limit.max_calls
+    def _entry(self, provider: str) -> dict:
+        entry = self._counts.setdefault(provider, {})
+        # Old records identify their one known period by the window shape.
+        old_window = entry.get("window", "")
+        if isinstance(old_window, str) and isinstance(entry.get("count"), int):
+            period = "daily" if len(old_window) == 10 else "monthly" if len(old_window) == 7 else None
+            if period and period not in entry:
+                entry[period] = {"window": old_window, "count": entry["count"]}
+                entry["legacy_unknown_period"] = "monthly" if period == "daily" else "daily"
+        for period in ("daily", "monthly"):
+            key = window_key(period, self._clock())
+            counter = entry.get(period)
+            if not isinstance(counter, dict) or counter.get("window") != key:
+                entry[period] = {"window": key, "count": 0}
+            elif not isinstance(counter.get("count"), int):
+                counter["count"] = 0
+        paused = entry.get("paused")
+        if isinstance(paused, dict) and isinstance(paused.get("resume_at"), (int, float)):
+            if self._clock() >= paused["resume_at"]:
+                entry.pop("paused", None)
+        return entry
+
+    def status(self, provider: str) -> dict:
+        with self._lock:
+            self._load()
+            entry = self._entry(provider)
+            limit = self._limits.get(provider)
+            result = {"paused": dict(entry.get("paused") or {}),
+                      "legacy_unknown_period": entry.get("legacy_unknown_period")}
+            for period in ("daily", "monthly"):
+                maximum = getattr(limit, period, 0)
+                count = entry[period]["count"]
+                result[period] = {"limit": maximum, "used": count,
+                                  "remaining": max(0, maximum - count) if maximum > 0 else None}
+            return result
 
     def remaining(self, provider: str) -> int | None:
-        """剩余可调用次数；None 表示该厂商未设置上限。"""
-        self._reload_if_changed()
-        limit = self._limit_for(provider)
-        if limit is None:
-            return None
-        period, max_calls = limit
-        entry = self._counts.get(provider)
-        if not isinstance(entry, dict) or entry.get("window") != window_key(
-            period, self._clock()
-        ):
-            return max_calls
-        return max(0, max_calls - int(entry.get("count", 0)))
+        status = self.status(provider)
+        if status["paused"]:
+            return 0
+        values = [status[p]["remaining"] for p in ("daily", "monthly")
+                  if status[p]["remaining"] is not None]
+        return min(values) if values else None
 
     def allows(self, provider: str) -> bool:
         remaining = self.remaining(provider)
         return remaining is None or remaining > 0
 
+    def reason(self, provider: str) -> str:
+        status = self.status(provider)
+        if status["paused"]:
+            return "Official quota pause: " + str(status["paused"].get("reason", "quota exhausted"))
+        return "已达到本地调用上限，本次跳过该厂商"
+
+    def acquire(self, provider: str) -> bool:
+        """Atomic in-process check + conservative accounting before dispatch."""
+        with self._lock:
+            if not self.allows(provider):
+                return False
+            self.record(provider)
+            return True
+
     def record(self, provider: str) -> None:
-        """记一次实际请求；失败请求同样保守计数。"""
-        self._reload_if_changed()
-        limit = self._limit_for(provider)
-        if limit is None:
-            return
-        period, _ = limit
-        window = window_key(period, self._clock())
-        entry = self._counts.get(provider)
-        if not isinstance(entry, dict) or entry.get("window") != window:
-            entry = {"window": window, "count": 0}
-        entry["count"] = int(entry.get("count", 0)) + 1
-        self._counts[provider] = entry
-        self._save()
+        with self._lock:
+            self._load()
+            entry = self._entry(provider)
+            for period in ("daily", "monthly"):
+                entry[period]["count"] += 1
+            # Preserve the old shape for callers still inspecting legacy records.
+            limit = self._limits.get(provider)
+            if getattr(limit, "period", None) in ("daily", "monthly"):
+                entry.update(entry[limit.period])
+            self._save()
+
+    def pause(self, provider: str, reason: str, resume_at: float | None = None) -> None:
+        with self._lock:
+            self._load()
+            self._entry(provider)["paused"] = {"reason": reason, "resume_at": resume_at}
+            self._save()
+
+    def note_error(self, provider: str, error) -> None:
+        if error.pause_reason:
+            self.pause(provider, error.pause_reason, error.resume_at)
+
+    def resume(self, provider: str) -> None:
+        with self._lock:
+            self._load()
+            self._entry(provider).pop("paused", None)
+            self._save()

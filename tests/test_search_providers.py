@@ -892,3 +892,52 @@ def test_volcengine_fetch_rejects_target_http_error(status):
     )
     with pytest.raises(ProviderError, match=f"Target HTTP {status}"):
         make(VolcengineFetchProvider, sent).fetch(FetchQuery("https://example.com/a", 100))
+
+
+@pytest.mark.parametrize("cls,status,payload,paused,kind", [
+    (BaiduSearchProvider, 429, {"code": "QUOTA_USER_DAILY_REQUEST"}, True, "quota"),
+    (BaiduSearchProvider, 429, {"code": "QUOTA_USER_DAILY_FREE"}, True, "quota"),
+    (BaiduSearchProvider, 429, {"code": "BILLING_INSUFFICIENT_BALANCE"}, True, "quota"),
+    (BaiduSearchProvider, 429, {"code": "RATE_LIMIT_SEARCH_QPS"}, False, "rate_limit"),
+    (BaiduSearchProvider, 429, {"message": "quota limit"}, False, "rate_limit"),
+    (BaiduSearchProvider, 401, {"code": "QUOTA_USER_DAILY_FREE"}, False, "auth"),
+    (TavilySearchProvider, 432, {}, True, "quota"),
+    (TavilySearchProvider, 433, {}, True, "quota"),
+    (TavilySearchProvider, 429, {}, False, "rate_limit"),
+    (ExaSearchProvider, 402, {"tag": "NO_MORE_CREDITS"}, True, "quota"),
+    (ExaSearchProvider, 402, {"tag": "API_KEY_BUDGET_EXCEEDED"}, True, "quota"),
+    (ExaSearchProvider, 402, {"tag": "TEAM_BUDGET_EXCEEDED"}, True, "quota"),
+    (ExaSearchProvider, 402, {"tag": "X402_PAYMENT_REQUIRED"}, False, "quota"),
+    (YouSearchProvider, 402, {"detail": "Insufficient credits"}, True, "quota"),
+    (YouSearchProvider, 402, {"detail": "Payment required"}, False, "quota"),
+    (VolcengineFetchProvider, 200, {"ResponseMetadata": {"Error": {"CodeN": 10406}}}, True, "quota"),
+    (VolcengineFetchProvider, 200, {"ResponseMetadata": {"Error": {"CodeN": 10412}}}, True, "quota"),
+    (ExaSearchProvider, 500, {"tag": "NO_MORE_CREDITS"}, False, "unavailable"),
+])
+def test_documented_quota_errors_only(cls, status, payload, paused, kind):
+    payload["sensitive_debug"] = "must-not-be-echoed"
+    sent, _ = capture(lambda request: httpx.Response(status, json=payload))
+    with pytest.raises(ProviderError) as caught:
+        provider = make(cls, sent)
+        if "fetch" in provider.capabilities:
+            provider.fetch(FetchQuery("https://example.com/a", 100))
+        else:
+            provider.search(SearchQuery("synthetic"))
+    assert bool(caught.value.pause_reason) is paused
+    assert caught.value.kind.value == kind
+    assert "must-not-be-echoed" not in str(caught.value)
+    assert caught.value.resume_at is None  # no invented reset date
+
+
+
+def test_volcengine_preserves_safe_business_code_without_raw_message():
+    sent, _ = capture(lambda request: httpx.Response(200, json={
+        "ResponseMetadata": {"Error": {
+            "Code": "InvalidAuthorization", "Message": "auth failed must-not-be-echoed"
+        }}
+    }))
+    with pytest.raises(ProviderError) as caught:
+        make(VolcengineSearchProvider, sent).search(SearchQuery("synthetic"))
+    assert caught.value.code == "InvalidAuthorization"
+    assert "must-not-be-echoed" not in str(caught.value)
+    assert not caught.value.pause_reason

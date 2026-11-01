@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import httpx
@@ -31,6 +32,13 @@ def _status_kind(status: int) -> ProviderErrorKind | None:
     return ProviderErrorKind.BAD_RESPONSE
 
 
+def safe_error_code(payload: dict) -> str:
+    error = payload.get("error")
+    nested = error if isinstance(error, dict) else {}
+    code = str(payload.get("code") or payload.get("tag") or nested.get("code") or "")
+    return code if re.fullmatch(r"[A-Za-z0-9_.]{1,64}", code) else ""
+
+
 class JsonApiClient:
     """同步 JSON POST 客户端；client_factory 可注入 MockTransport 测试。"""
 
@@ -41,6 +49,7 @@ class JsonApiClient:
         timeout: float = 10.0,
         client_factory: Any = None,
     ):
+        self.error_mapper = None
         self.provider_name = provider_name
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
@@ -75,10 +84,23 @@ class JsonApiClient:
             raise ProviderError(self.provider_name, ProviderErrorKind.NETWORK, str(exc)) from exc
         except httpx.HTTPError as exc:
             raise ProviderError(self.provider_name, ProviderErrorKind.NETWORK, str(exc)) from exc
+        payload = {}
+        if self.error_mapper is not None or response.status_code >= 300:
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = {}
+        if self.error_mapper is not None:
+            if isinstance(payload, dict):
+                error = self.error_mapper(response.status_code, payload)
+                if error is not None:
+                    raise error
         kind = _status_kind(response.status_code)
         if kind is not None:
-            # 只回状态码，不回响应体：错误页可能包含不该进会话的内容。
-            raise ProviderError(self.provider_name, kind, f"HTTP {response.status_code}")
+            # Only a bounded machine code is exposed, never the raw error body.
+            code = safe_error_code(payload) if isinstance(payload, dict) else ""
+            detail = f"HTTP {response.status_code}" + (f" code={code}" if code else "")
+            raise ProviderError(self.provider_name, kind, detail, code=code)
         return response
 
     def parse_json(self, response: httpx.Response) -> dict[str, Any]:

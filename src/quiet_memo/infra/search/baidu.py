@@ -11,7 +11,7 @@ from typing import Any, Callable
 import httpx
 
 from .base import ProviderError, ProviderErrorKind, SearchQuery, SearchResult
-from .http_client import JsonApiClient
+from .http_client import JsonApiClient, safe_error_code
 
 NAME = "baidu_search"
 DEFAULT_BASE_URL = "https://qianfan.baidubce.com"
@@ -40,6 +40,7 @@ class BaiduSearchProvider:
         client_factory: Callable[[], httpx.Client] | None = None,
     ):
         self._client = JsonApiClient(NAME, base_url, timeout, client_factory)
+        self._client.error_mapper = _api_error
         self._api_key = api_key
         self._edition = edition if edition in ("standard", "lite") else "standard"
         # 官方文档写 Authorization，同一页面的 cURL 示例却写
@@ -67,7 +68,7 @@ class BaiduSearchProvider:
         code = payload.get("code")
         if code is not None:
             message = str(payload.get("message") or "")
-            raise ProviderError(NAME, _business_kind(code, message), f"code={code}: {message}")
+            raise ProviderError(NAME, _business_kind(code, message), f"code={safe_error_code(payload)}", code=safe_error_code(payload))
         references = payload.get("references")
         if references is None:
             return []
@@ -95,3 +96,17 @@ def _map_reference(item: Any) -> SearchResult | None:
         published=str(item.get("date") or "").strip() or None,
         provider=NAME,
     )
+
+
+def _api_error(status: int, payload: dict) -> ProviderError | None:
+    code = str(payload.get("code") or "")
+    if status in (401, 403) or status >= 500:
+        return None
+    pauses = {"QUOTA_USER_DAILY_REQUEST": "daily_request_quota",
+              "QUOTA_USER_DAILY_FREE": "daily_free_quota",
+              "BILLING_INSUFFICIENT_BALANCE": "insufficient_balance"}
+    if code in pauses:
+        return ProviderError(NAME, ProviderErrorKind.QUOTA, code, code=code, pause_reason=pauses[code])
+    if code in {"RATE_LIMIT_TOTAL_QPS", "RATE_LIMIT_SEARCH_TOTAL_QPS", "RATE_LIMIT_SEARCH_QPS"}:
+        return ProviderError(NAME, ProviderErrorKind.RATE_LIMIT, code, code=code)
+    return None

@@ -37,6 +37,7 @@ class ExaSearchProvider:
         client_factory: Callable[[], httpx.Client] | None = None,
     ):
         self._client = JsonApiClient(NAME, base_url, timeout, client_factory)
+        self._client.error_mapper = _api_error
         self._api_key = api_key
 
     def search(self, query: SearchQuery) -> list[SearchResult]:
@@ -109,6 +110,7 @@ class ExaFetchProvider:
         client_factory: Callable[[], httpx.Client] | None = None,
     ):
         self._client = JsonApiClient(NAME, base_url, timeout, client_factory)
+        self._client.error_mapper = _api_error
         self._api_key = api_key
 
     def fetch(self, query: FetchQuery) -> FetchResult:
@@ -133,3 +135,10 @@ class ExaFetchProvider:
             content=text,
             truncated=truncated,
         )
+
+
+def _api_error(status: int, payload: dict) -> ProviderError | None:
+    code = str(payload.get("tag") or "")
+    if status == 402 and code in {"NO_MORE_CREDITS", "API_KEY_BUDGET_EXCEEDED", "TEAM_BUDGET_EXCEEDED"}:
+        return ProviderError(NAME, ProviderErrorKind.QUOTA, code, code=code, pause_reason=code)
+    return None
