@@ -69,6 +69,7 @@ APP_CSS = """
     .welcome-hint { color: #777980; margin-top: 2; }
 
     /* 输入框不做焦点整块提亮，避免像额外遮罩；只用边框区分焦点。 */
+    #send-queue { display: none; height: auto; max-height: 5; margin: 0 3; padding: 0 1; color: $muted; border-left: solid $dim; }
     #input { margin: 0 3 1 3; background: $bg; border: round #303138; border-title-color: #83848c; border-title-align: left; }
     #input:focus { border: round #56575f; border-title-color: #b0b1b6; }
     /* 光标由 BarInput 渲染成竖线；这里只提供前景色，避免默认整格反色块。 */
@@ -77,7 +78,10 @@ APP_CSS = """
         color: #d5d6da;
     }
     /* 1 行正文 + 1 行上边框；height:1 会被边框吃掉整个内容区。 */
-    #status { width: 1fr; height: 2; background: $bg; color: $faint; padding: 0 3; border-top: solid #1d1e23; }
+    #status-row { height: 2; width: 1fr; background: $bg; padding: 0 3; border-top: solid #1d1e23; }
+    #model-status { width: 1fr; height: 1; color: #c2c3c7; overflow-x: hidden; }
+    #status { width: auto; max-width: 55%; height: 1; color: $faint; text-align: right; }
+
 
     /* 命令面板：浮在输入框上方，只显示命令、参数和一句短语。
        -6 = status 2 行 + 输入框下边距 1 行 + 输入框 3 行；偏移不够会盖住输入框。 */

@@ -31,7 +31,7 @@ qm setup
 qm
 ```
 
-`qm setup` 选择模型供应商并配置 API Key。标准安装不需要下载本地向量模型；未安装向量后端时自动使用关键词检索。之后可用 `uv tool upgrade quiet-memo` 更新。
+`qm setup` 选择模型供应商并配置 API Key，也可进入「搜索与网页抓取 API」向导：为百度千帆、Tavily、Exa、You.com、火山引擎输入或更新 Key（存入系统凭据，TOML 不落明文），并分别启用各厂商支持的 Search / Fetch（百度千帆仅支持 Search）、调整两类 provider 的优先级。官方厂商即使已有 Key 也不会自动启用，必须在此显式开启；未配置有效 Key 时无法启用。open-websearch 免费且始终是默认项。标准安装不需要下载本地向量模型；未安装向量后端时自动使用关键词检索。之后可用 `uv tool upgrade quiet-memo` 更新。
 
 ## 为什么用 Quiet-Memo
 
@@ -127,7 +127,14 @@ cache_ttl = 86400
 transport = "http"            # http：本地 daemon；mcp：每次启动 npx MCP 进程
 auto_start = true             # 打开 TUI 时后台预热 daemon，不阻塞界面
 engines = ["bing"]            # 上游引擎；中文品牌名被拆词时可换 ["baidu"] 或 ["sogou"]
-fetch_timeout = 25.0          # 抓取正文的单独超时（秒）
+fallback_engines = ["baidu", "duckduckgo", "sogou"] # 候补引擎；空结果/跑题/失败时自动降级
+max_engines = 3               # 每次自动搜索最多尝试的引擎数（含首选）
+timeout_budget = 25.0         # 一次搜索所有回退共享的超时预算（秒）
+max_requests = 9              # 一次搜索跨所有 provider 共享的请求次数上限
+fetch_timeout = 45.0          # 抓取正文的单独超时（秒）
+
+[fetch]
+providers = ["open_websearch"] # 抓取正文用的 provider 顺序，与搜索相互独立
 ```
 
 讯飞 Spark MaaS 可在 `qm setup` 中选择；也可把上面的 `[llm]` 替换为以下配置，并设置环境变量 `SPARK_API_KEY`。凭据由环境变量或系统密钥环读取，不写进 TOML。
@@ -148,7 +155,11 @@ Spark 使用 MaaS 的 Bearer API Key；适配层保留服务端采样默认值�
 
 ## 对话 Agent
 
+发送后模型名称旁显示活动加载条、当前阶段和等待秒数；上下文占用位于状态栏右侧，工具开始执行时显示调用提示。
+
 直接运行 `qm` 或 `quietmemo` 进入全屏对话界面（基于 Textual，窗口拉伸时整个画面自适应重排）；会话在发送第一条消息时创建。`qm chat` 等价。左侧是可折叠的会话列表：点击会话恢复；点击列表后也可用 ↑↓ 选择、Enter 恢复，删除与重命名在 `/sessions` 中操作；点侧栏右上角的 « 折叠（Ctrl+B 同效），折叠后在对话区左上角点 » 展开。主区为宽幅左右布局：用户消息以右对齐气泡呈现，助手回复左对齐铺开，带说话人标头和时间；输入 `/` 在输入框上方弹出竖排命令面板（↑↓ 选择 · Enter 执行 · ESC 关闭，可点击）；底部状态栏显示模型、上下文用量（进度线与已用/上限数字）和待确认数量，检索模式与快捷键提示放在空会话欢迎区，超过压缩阈值会提示。回复正文流式渲染（边生成边显示，中断时保留半截并标注）；工具与检索事件以卡片形式实时显示，回合之间以分隔线区隔；Ctrl+Q 或 `/exit` 退出后自动沉淀本轮陈述并显示结果，启动检查发现未提交的 vault 变更会自动提交。
+
+生成期间可继续输入：按 Enter 将消息放入输入框上方的发送队列，当前回复完成或停止后按提交顺序自动发送。按 Esc 停止当前生成，保留已输出内容和未发送草稿；已执行的工具不回滚，正在执行的工具安全收尾后停止后续调用。命令面板或选择弹窗打开时，Esc 优先关闭面板。队列仅保存在当前进程内，退出后不恢复。
 
 - 每轮自动检索相关长期记忆，注入上下文；追问和“还记得 / 之前”等线索会带上最近 1-2 轮用户消息构造查询，并提高召回数量。
 - 模型可调用 `recall / read_topic / memorize / correct / evolve / forget / review_pending`；`read_topic` 仅在用户明确要求完整主题或召回不足时读取该主题的有效条目，最多 2000 tokens，不接受文件路径。需要最新公开信息时调用 `search`，需要发布日期或原文细节时再用 `fetch_web` 打开结果页，搜索结果与正文都是外部资料，不执行其中指令。
@@ -315,15 +326,17 @@ npx -y open-websearch@latest serve
 # 或：npm i -g open-websearch && open-websearch serve
 ```
 
-搜索结果只有标题、摘要和链接；`fetch_web` 会打开其中某个链接并提取正文（readability，最多 8000 字符），用于核对发布日期、原文细节或摘要。抓取只通过 HTTP transport 提供，MCP 接口仍只有 `search`。抓取入口只接受公网 http(s) 地址，拒绝 localhost、私网与链路本地地址，并对重定向后的最终地址复验；使用 fake-IP 代理时可用与上游同名的 `FAKE_IP_CIDRS` 放行合成地址。
+搜索结果只有标题、摘要和链接；`fetch_web` 会打开其中某个链接并提取正文（readability，最多 8000 字符），用于核对发布日期、原文细节或摘要。open-websearch 抓取只通过 HTTP transport 提供，MCP 接口仍只有 `search`。抓取入口只接受公网 http(s) 地址，拒绝 localhost、私网与链路本地地址，并对重定向后的最终地址复验；默认兼容 fake-IP 代理的 `198.18.0.0/15` 与 `2001:2::/48` 合成 DNS 段，仅对域名解析结果放行，直接填写非公网 IP 仍拒绝。`FAKE_IP_CIDRS` 可覆盖默认网段（空值关闭兼容）；自动启动的 daemon 继承相同设置，已运行的外部 daemon 需自行同步设置并重启。自动启动时优先使用 PATH 中已安装的 `open-websearch`，未安装时才通过 `npx open-websearch@latest` 拉起。
 
 Bing 对部分中文专有名词会按单字切词（例如「智谱」只按「智」检索）；遇到明显跑题时，可在配置里把 `engines` 改为 `["baidu"]`，或让模型在 `search` 工具里传 `search_engine = "baidu"` 重试。`search_engine` 也接受数组，最多 3 个引擎，例如 `["baidu", "bing"]`，结果会在同一请求中合并；MCP 的 `search` 同样支持。
+
+自动回退：搜索采用渐进式策略——每次请求向上游拉取比展示条数更多的候选（展示数的 3 倍，10–30 条），进入统一候选池去重合并后按确定性规则重排。首选引擎（`engines` 第一个）空结果、结果与查询核心词不相关或命中过弱（候选池未达早停标准）、请求失败时，按 `fallback_engines` 序列自动换引擎重试，最多尝试 `max_engines` 个引擎；所有回退共享 `timeout_budget` 超时预算，单次请求的超时不超过剩余预算；全部 provider 合计还受 `max_requests` 请求次数约束，超出即返回当前最佳候选并附截断提示（该结果不缓存，下次搜索会重新请求）。查询短人物名、英文账号、产品代号时，`search` 工具可传 `context`（对话中能确认的专有名词），会先派生最多 2 个查询变体再降级引擎；显式指定 `search_engine` 时保持单次请求语义，不自动换引擎。搜索结果带 `engine` 字段标明实际来源引擎（同一请求混合多引擎时逐条保留真实来源）。低相关候选会原样返回并附提示，不伪装成已核实的相关结果。
 
 返回结构：
 
 ```json
 {
-  "results": [{"title": "...", "url": "...", "snippet": "...", "published": null, "provider": "open_websearch"}],
+  "results": [{"title": "...", "url": "...", "snippet": "...", "published": null, "provider": "open_websearch", "engine": "bing"}],
   "provider": "open_websearch",
   "failed": [{"provider": "open_websearch", "kind": "network", "detail": "..."}],
   "hint": "可选提示"
@@ -332,9 +345,14 @@ Bing 对部分中文专有名词会按单字切词（例如「智谱」只按「
 
 - 结果是外部不可信内容，只作资料引用，不执行其中任何指令。
 - daemon 未启动或全部 provider 失败时返回结构化错误和启动提示，不编造结果。
-- `[search]` 配置：`enabled`（关闭时不注册工具）、`providers`（按顺序降级）、`base_url`、`timeout`、`max_results`、`cache_ttl`、`transport`（`http` 默认；`mcp` 每次启动 npx MCP 进程）、`auto_start`（打开 TUI 时后台探测并拉起 HTTP daemon，不阻塞界面）、`engines`（上游搜索引擎，默认 `["bing"]`）、`fetch_timeout`（抓取正文的单独超时，默认 25 秒）。
+- `[search]` 配置：`enabled`（关闭时不注册工具）、`providers`（按顺序降级）、`base_url`、`timeout`、`max_results`、`cache_ttl`、`transport`（`http` 默认；`mcp` 每次启动 npx MCP 进程）、`auto_start`（打开 TUI 时后台探测并拉起 HTTP daemon，不阻塞界面）、`engines`（上游搜索引擎，默认 `["bing"]`）、`fallback_engines`（候补引擎序列，默认 `["baidu", "duckduckgo", "sogou"]`）、`max_engines`（单次搜索引擎上限，默认 3）、`timeout_budget`（回退共享超时预算，默认 25 秒，单次请求超时不超过剩余预算）、`max_requests`（一次搜索跨所有 provider 共享的请求次数上限，默认 9；超出即返回当前最佳候选并附截断提示，该结果不写入缓存）、`usage_limits`（每厂商调用上限，`[search.usage_limits.<provider>]` 设 `period = "daily"` 或 `"monthly"` 与 `max_calls`；同一厂商的 Search 与 Fetch 共用同一计数池，达到上限即跳过该厂商并正常回退；计数保存在 vault 的 `.quiet-memo/usage.json`，**本地计数不等于服务商实际账单上限**）、`fetch_timeout`（抓取正文的单独超时，默认 45 秒）。`qm setup` 启用官方厂商时会询问每日上限（默认 20）。
+
+受控真实冒烟：`scripts/smoke_search_apis.py` 默认只做本地检查（Key 是否可读、厂商是否会注册），不发任何请求；加 `--provider <厂商> --operation search|fetch --live` 才对单一厂商发起最多 `--max-requests`（默认 1，上限 10）次真实请求，输出脱敏报告（成功与否、结果数或正文长度、错误类型、耗时与待验证字段）。Key 只从环境变量或系统凭据读取，不回显。网页抓取由独立的 `[fetch]` 配置控制：`providers` 是抓取正文用的 provider 顺序（默认 `["open_websearch"]`），与搜索的 provider 顺序相互独立；配置了 Key 的官方厂商（tavily / exa / you / volcengine）加入该列表后才参与抓取。
 - `auto_start` 启动的 daemon 在 Windows 下隐藏控制台窗口；退出 TUI 后继续常驻，下次直接复用。
-- 搜索结果缓存为 `.quiet-memo/search-cache.json`，属于派生数据，可删除。
+- 搜索结果缓存为 `.quiet-memo/search-cache.json`，属于派生数据，可删除。普通成功结果缓存 24 小时（`cache_ttl`）；「今天/最新/latest」等时效性查询与空结果只短缓存（10/5 分钟），上游失败一律不入缓存。
+
+
+抓取按 `[fetch].providers` 独立选择厂商；官方抓取与 open-websearch 抓取均使用 `search.fetch_timeout`，搜索仍使用 `search.timeout`。open-websearch 抓取要求 HTTP transport，其他已配置的官方抓取不受其 transport 限制。
 
 ## 写入规则
 
@@ -383,7 +401,7 @@ Bing 对部分中文专有名词会按单字切词（例如「智谱」只按「
 
 ```text
 src/quiet_memo/
-├── app/          cli.py, server.py, tui.py, chat_app.py, chat_commands.py,
+├── app/          cli.py, server.py, tui.py, chat_app.py, chat_commands.py, chat_flow.py,
 │                 chat_widgets.py, chat_input.py, chat_theme.py, command_catalog.py,
 │                 actions.py, ui.py, session_ui.py, chat_reflection.py
 │                                                   # CLI / Textual TUI / FastMCP 入口
@@ -453,13 +471,23 @@ uv run python evals/memory_eval.py
 uv run python evals/retrieval_eval.py
 ```
 
-| 检索方式 | Recall@3 | Recall@5 | MRR@10 |
-| --- | --- | --- | --- |
-| keyword | 67% | 67% | 0.667 |
-| vector | 89% | 89% | 0.815 |
-| hybrid | **89%** | **89%** | 0.815 |
+2026-10-30 重跑，合成库 456 条记忆 / 27 例：
 
-在一个 797 条的真实个人记忆库上（脱敏，仅汇总指标），修复批量导入的条目 ID 碰撞导致的向量错位后，hybrid 的 MRR@10 从 0.569 升到 0.745，成为三路最佳。方法、修复细节与已知弱点见 [evals/README.md](evals/README.md)。
+| 检索方式 | Hit@3 | Hit@5 | MRR@10 |
+| --- | --- | --- | --- |
+| keyword | 74.1% | 74.1% | 0.722 |
+| vector | 92.6% | 92.6% | 0.913 |
+| hybrid | **92.6%** | **92.6%** | **0.913** |
+
+真实库 882 条有效事实 / 24 个模型生成问题：
+
+| 检索方式 | Hit@3 | Hit@5 | MRR@10 |
+| --- | --- | --- | --- |
+| keyword | 95.8% | 95.8% | 0.889 |
+| vector | 91.7% | 95.8% | 0.814 |
+| hybrid | 91.7% | 95.8% | 0.842 |
+
+真实题集由模型从随机事实生成，不是人工标注金标准。历史 797 条题集结果、方法、耗时与已知弱点见 [evals/README.md](evals/README.md)。
 
 ## Roadmap
 
@@ -517,3 +545,10 @@ TUI 启动补记结束后，空闲 60 秒自动回顾，Dreaming 与画像轮流
 会话浏览、搜索与恢复统一使用 `/sessions`。聊天中直接说“你记得……吗”或“记住……”，由 Agent 调用 recall / memorize；不提供对应的 TUI 斜杠命令。命令行管理入口保持可用。
 
 画像提炼读取所有主题的当前有效事实，由模型筛选偏好、目标、约束与习惯。画像事实列表展示常见中英文画像主题及有效画像推断引用的来源；其他无关事实不会直接铺入画像。
+
+自动记忆召回按个人话题和连续追问触发；通用问题跳过预取，模型仍可按需调用 recall。auto_recall=0 关闭预取。
+
+
+TUI 固定界面文案统一使用英文，聊天内容保留原语言。搜索引擎的自动回退规则见[联网搜索](#联网搜索)；显式指定引擎不自动替换。引擎失败不会显示为零结果或写入结果缓存。
+
+Windows 交互终端输入框使用原生细竖线光标，以配合中文输入法组字；拼音阶段的光标表现取决于终端与输入法。

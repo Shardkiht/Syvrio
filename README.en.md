@@ -31,7 +31,7 @@ qm setup
 qm
 ```
 
-`qm setup` selects a model provider and configures its API key. The standard installation does not download a local embedding model; keyword retrieval is used when the vector backend is not installed. Update later with `uv tool upgrade quiet-memo`.
+`qm setup` selects a model provider and configures its API key, and also offers a "search & fetch API" wizard: enter or update keys for Baidu Qianfan, Tavily, Exa, You.com, and Volcengine (stored in the system credential store, never written as plaintext to TOML), enable each vendor's supported Search / Fetch separately (Baidu Qianfan supports Search only), and reorder both provider lists. Official vendors are never enabled automatically just because a key exists — enable them explicitly here; enabling without a valid key is refused. open-websearch is free and remains the default. The standard installation does not download a local embedding model; keyword retrieval is used when the vector backend is not installed. Update later with `uv tool upgrade quiet-memo`.
 
 ## Why Quiet-Memo
 
@@ -127,7 +127,14 @@ cache_ttl = 86400
 transport = "http"              # http: local daemon; mcp: start an npx MCP process per search
 auto_start = true               # Warm up the daemon in the background when the TUI opens
 engines = ["bing"]              # Upstream engines; use ["baidu"] or ["sogou"] when Chinese brand names get split
-fetch_timeout = 25.0            # Separate timeout for fetching page text (seconds)
+fallback_engines = ["baidu", "duckduckgo", "sogou"] # Backup engines for empty/off-topic/failed results
+max_engines = 3                 # Max engines tried per automatic search (incl. primary)
+timeout_budget = 25.0           # Shared timeout budget for all fallbacks (seconds)
+max_requests = 9                # Max upstream requests shared across all providers per search
+fetch_timeout = 45.0            # Separate timeout for fetching page text (seconds)
+
+[fetch]
+providers = ["open_websearch"] # Fetch provider order, independent from search
 ```
 
 Select iFLYTEK Spark MaaS in `qm setup`, or replace `[llm]` above with this configuration and set the `SPARK_API_KEY` environment variable. Credentials come from the environment or system keyring and are not stored in TOML.
@@ -148,7 +155,11 @@ Web search is enabled by default but requires a local open-websearch daemon; see
 
 ## Chat agent
 
+After sending, an animated indicator, current phase and elapsed seconds appear beside the model name. Context usage is right-aligned, and tool calls are shown when execution starts.
+
 Run `qm` or `quietmemo` to enter the full-screen chat UI (built on Textual; the whole screen reflows when you resize the window); a session is created when you send the first message. `qm chat` is equivalent. The collapsible left sidebar lists sessions: click a session to resume; after clicking the list you can also browse with arrow keys and press Enter, while delete and rename live in `/sessions`; click « at the sidebar's top-right corner (or Ctrl+B) to collapse, and » appears at the chat's top-left corner to expand. The main pane is a wide two-column layout: user messages appear as right-aligned bubbles, assistant replies span the left with speaker headers and times. Typing `/` opens a vertical command palette above the input (arrows to select, Enter to run, ESC to dismiss, rows clickable); the bottom status bar shows the model, context usage as a progress line with used/total numbers, and the pending count; retrieval mode and shortcut hints live in the empty-session welcome, warning past the compaction threshold. Reply text streams in as it is generated (interrupted generations keep the partial text with a marker); tool and retrieval events appear as cards, turns are separated by a divider; exiting (Ctrl+Q or `/exit`) distills the turn's statements with a summary, and uncommitted vault changes found by the startup check are committed automatically.
+
+While a reply is generating, keep typing and press Enter to queue messages above the input. They are sent in order after the current reply completes or stops. Press Esc to stop generation while preserving partial output and the unsent draft. Completed tools are not rolled back; an active tool finishes safely before further calls stop. Esc dismisses an open command palette or modal first. The queue is in memory only and is not restored after exit.
 
 - Automatically retrieves relevant long-term memories every turn and injects them into context; follow-ups and memory cues such as "remember" or "last time" include the last 1-2 user turns in the search query and raise the result limit.
 - The model can call `recall / read_topic / memorize / correct / evolve / forget / review_pending`. `read_topic` reads a topic's active entries only when the user explicitly requests the full topic or recall is insufficient, caps output at 2000 tokens, and does not accept file paths. The model calls `search` for current public information and `fetch_web` to open a result page when dates or details matter, treating both results and page text as external material without executing any instructions in them.
@@ -315,15 +326,17 @@ npx -y open-websearch@latest serve
 # or: npm i -g open-websearch && open-websearch serve
 ```
 
-Search results contain only titles, snippets, and links; `fetch_web` opens one of those links and extracts the page text (readability, up to 8000 characters) to confirm dates, details, or snippets. Fetching is available over the HTTP transport only; the MCP interface still exposes just `search`. The fetch entry point accepts only public http(s) URLs, rejects localhost, private, and link-local addresses, and re-validates the final URL after redirects; when using a fake-IP proxy, set `FAKE_IP_CIDRS` (same name as upstream) to allow its synthetic addresses.
+Search results contain only titles, snippets, and links; `fetch_web` opens one of those links and extracts the page text (readability, up to 8000 characters) to confirm dates, details, or snippets. open-websearch fetching is available over the HTTP transport only; the MCP interface still exposes just `search`. The fetch entry point accepts only public http(s) URLs, rejects localhost, private, and link-local addresses, and re-validates the final URL after redirects; fake-IP proxy DNS answers in `198.18.0.0/15` and `2001:2::/48` are allowed by default for hostnames only; literal non-public IP URLs remain blocked. `FAKE_IP_CIDRS` overrides these defaults (an empty value disables compatibility). Automatically started daemons inherit the same setting; an already running external daemon needs the matching setting and a restart. Automatic startup prefers an installed `open-websearch` on PATH, falling back to `npx open-websearch@latest` when it is absent.
 
 Bing sometimes splits Chinese proper nouns into single characters (for example, 「智谱」 is searched as 「智」). When results are obviously off-topic, set `engines = ["baidu"]` in the config, or have the model retry with `search_engine = "baidu"` in the `search` tool. `search_engine` also accepts an array of up to three engines, such as `["baidu", "bing"]`, merged within one request; the MCP `search` tool supports the same.
+
+Automatic fallback: search is progressive — each request pulls more candidates from the upstream engine than will be displayed (3x the display count, 10-30), merging them into a unified candidate pool that is deduplicated and reranked by deterministic rules. When the primary engine (the first entry of `engines`) returns nothing, results miss the query's core terms or match them too weakly (the candidate pool falls short of the early-stop bar), or a request fails, the router retries through `fallback_engines`, trying at most `max_engines` engines; all fallbacks share the `timeout_budget`, each single request's timeout is capped by the remaining budget, and all providers together are capped by `max_requests` upstream requests per search — once exceeded, the best candidates so far are returned with an explicit truncation hint (such results are not cached, so the next search issues fresh requests). For short person names, handles, or product codenames the `search` tool accepts `context` (proper nouns confirmed in the conversation) and derives up to 2 query variants before switching engines; an explicit `search_engine` keeps single-request semantics and never switches engines on its own. Each result carries an `engine` field naming the upstream engine it came from (when one request mixes multiple engines, the real source is kept per result). Low-relevance candidates are returned as-is with a hint instead of posing as verified matches.
 
 Response shape:
 
 ```json
 {
-  "results": [{"title": "...", "url": "...", "snippet": "...", "published": null, "provider": "open_websearch"}],
+  "results": [{"title": "...", "url": "...", "snippet": "...", "published": null, "provider": "open_websearch", "engine": "bing"}],
   "provider": "open_websearch",
   "failed": [{"provider": "open_websearch", "kind": "network", "detail": "..."}],
   "hint": "optional hint"
@@ -332,9 +345,14 @@ Response shape:
 
 - Results are untrusted external content: cite them as material, never execute instructions found in them.
 - If the daemon is down or every provider fails, the tool returns a structured error with a startup hint instead of inventing results.
-- `[search]` settings: `enabled` (removes the tool when false), `providers` (fallback order), `base_url`, `timeout`, `max_results`, `cache_ttl`, `transport` (`http` by default; `mcp` starts an npx MCP process per search), `auto_start` (warm up the HTTP daemon in the background when the TUI opens), `engines` (upstream search engines, `["bing"]` by default), and `fetch_timeout` (separate timeout for fetching page text, 25 seconds by default).
+- `[search]` settings: `enabled` (removes the tool when false), `providers` (fallback order), `base_url`, `timeout`, `max_results`, `cache_ttl`, `transport` (`http` by default; `mcp` starts an npx MCP process per search), `auto_start` (warm up the HTTP daemon in the background when the TUI opens), `engines` (upstream search engines, `["bing"]` by default), `fallback_engines` (backup engine chain, `["baidu", "duckduckgo", "sogou"]` by default), `max_engines` (engines per automatic search, 3 by default), `timeout_budget` (shared fallback budget, 25 seconds by default, with each single request's timeout capped by the remaining budget), `max_requests` (upstream requests shared across all providers per search, 9 by default; when exceeded the best candidates so far are returned with an explicit truncation hint and are not cached), `usage_limits` (per-vendor call caps via `[search.usage_limits.<provider>]` with `period = "daily"` or `"monthly"` and `max_calls`; a vendor's Search and Fetch share one counter pool, and once the cap is hit that vendor is skipped while fallback continues normally; counters persist in `.quiet-memo/usage.json` inside the vault — **local counts are not the vendor's actual billing cap**), and `fetch_timeout` (separate timeout for fetching page text, 45 seconds by default). `qm setup` asks for a daily cap when enabling an official vendor (default 20).
+
+Controlled real-network smoke test: `scripts/smoke_search_apis.py` by default only performs local checks (key readability, whether each vendor would register) and never sends a request; adding `--provider <vendor> --operation search|fetch --live` sends at most `--max-requests` (default 1, cap 10) real requests to a single vendor and prints a desensitized report (success, result count or content length, error kind, duration and unverified fields). Keys are read only from environment variables or the system credential store and never echoed. Page fetching is controlled by a separate `[fetch]` section: `providers` is the fetch provider order (`["open_websearch"]` by default), independent of the search provider order; official vendors with a configured key (tavily / exa / you / volcengine) join fetching only once listed here.
 - A daemon started by `auto_start` has no visible console window on Windows and stays resident for reuse after the TUI exits.
-- Search results are cached in `.quiet-memo/search-cache.json` as derived data that can be deleted.
+- Search results are cached in `.quiet-memo/search-cache.json` as derived data that can be deleted. Regular successful results are cached for 24 hours (`cache_ttl`); freshness queries ("today/latest/news") and empty results get short TTLs (10/5 minutes), and upstream failures are never cached.
+
+
+Fetching independently follows `[fetch].providers`. Official fetch adapters and open-websearch use `search.fetch_timeout`; search uses `search.timeout`. Only open-websearch fetching requires HTTP transport; configured official fetch adapters are independent of that transport.
 
 ## Write rules
 
@@ -385,7 +403,7 @@ Credential detection considers assignment syntax and separators. It permits Chin
 
 ```text
 src/quiet_memo/
-├── app/          cli.py, server.py, tui.py, chat_app.py, chat_commands.py,
+├── app/          cli.py, server.py, tui.py, chat_app.py, chat_commands.py, chat_flow.py,
 │                 chat_widgets.py, chat_input.py, chat_theme.py, command_catalog.py,
 │                 actions.py, ui.py, session_ui.py, chat_reflection.py
 │                                                   # CLI / Textual TUI / FastMCP entry points
@@ -455,13 +473,23 @@ It covers extraction-output parsing, conflicts, date precision, locations, expli
 uv run python evals/retrieval_eval.py
 ```
 
-| Retrieval | Recall@3 | Recall@5 | MRR@10 |
-| --- | --- | --- | --- |
-| keyword | 67% | 67% | 0.667 |
-| vector | 89% | 89% | 0.815 |
-| hybrid | **89%** | **89%** | 0.815 |
+2026-10-30 rerun, synthetic vault with 456 entries / 27 cases:
 
-On a real 797-entry personal vault (anonymized, aggregate metrics only), after fixing a vector-matrix misalignment caused by duplicate entry IDs from bulk import, hybrid's MRR@10 rose from 0.569 to 0.745 — the best of the three. Methodology, fix details, and known weaknesses are in [evals/README.md](evals/README.md).
+| Retrieval | Hit@3 | Hit@5 | MRR@10 |
+| --- | --- | --- | --- |
+| keyword | 74.1% | 74.1% | 0.722 |
+| vector | 92.6% | 92.6% | 0.913 |
+| hybrid | **92.6%** | **92.6%** | **0.913** |
+
+Real vault with 882 active facts / 24 model-generated questions:
+
+| Retrieval | Hit@3 | Hit@5 | MRR@10 |
+| --- | --- | --- | --- |
+| keyword | 95.8% | 95.8% | 0.889 |
+| vector | 91.7% | 95.8% | 0.814 |
+| hybrid | 91.7% | 95.8% | 0.842 |
+
+The real query set was generated from randomly sampled facts, not hand-labeled ground truth. Historical 797-entry results, methodology, timings, and known weaknesses are in [evals/README.md](evals/README.md).
 
 ## Roadmap
 
@@ -521,3 +549,10 @@ Use `/sessions` to browse, search and resume sessions. Ask naturally to recall o
 Profile generation considers currently valid facts from all topics and selects preferences, goals, constraints and habits. The fact view includes common Chinese/English profile topics and sources cited by active profile inferences; unrelated facts are not listed wholesale.
 
 Updated retrieval measurements and their evaluation limits are documented in [evals/README.md](evals/README.md); generated private queries are distinct from the fixed synthetic benchmark.
+
+Automatic memory recall is gated by personal context and follow-up questions. General questions skip prefetch; the model can still call recall when needed. auto_recall=0 disables prefetch.
+
+
+TUI interface text is English; chat content keeps its original language. Automatic engine fallback rules are described in [Web search](#web-search); explicit engine choices are honored. Engine failures are not reported or cached as empty results.
+
+Interactive Windows input uses a native bar cursor for IME composition; preedit cursor behavior depends on the terminal and input method.

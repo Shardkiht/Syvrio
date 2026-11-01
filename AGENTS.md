@@ -48,7 +48,7 @@ memory/agent → llm → infra
 ## 代码风格
 
 - 实现模块开头使用 `from __future__ import annotations`；公共函数和方法写类型标注。
-- 代码标识符用英文；用户可见文案、CLI 帮助和错误信息用中文。
+- 代码标识符用英文；TUI 固定界面文案、状态、菜单与工具进度统一使用英文；用户消息、模型回答与引用内容保留原语言。CLI 帮助可使用中文。
 - 领域模型用 Pydantic，集中在 `memory/models.py`；轻量内部结果用 dataclass（如 `ToolOutcome`、`ToolSpec`）。
 - 注释只解释非显而易见的约束和原因；TUI 布局、键位、写入裁决等重点位置保留简短注释。
 - 单个源码文件控制在 800 行以内；能放进现有模块就不新建文件，不提前抽象。
@@ -126,6 +126,7 @@ README 面向用户，必须始终与 `src/quiet_memo` 的当前架构一致。�
 
 - 提交信息一律使用英文，沿用现有提交风格：`feat(scope): ...`、`fix(scope): ...`、`refactor(scope): ...`、`style(scope): ...`，主题行简短。
 - 不提交生成物、本地配置或用户数据。
+- 基础修复先在 `base/chat-stability` 开发验证，通过后自动同步到 `main` 和 `feature-memory-evolution`；保留 base 分支，记忆前沿功能不反向合入。目标工作区存在未提交改动时只增量同步，不覆盖或捆绑提交其他改动。
 - 只有明确要求时才执行 `git push`。
 
 ## 边界

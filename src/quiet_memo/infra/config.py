@@ -112,7 +112,44 @@ class SearchConfig:
     auto_start: bool = True  # 打开 TUI 时后台预热 HTTP daemon
     # 上游搜索引擎；空列表表示沿用 daemon 的 DEFAULT_SEARCH_ENGINE（默认 bing）。
     engines: list[str] = field(default_factory=lambda: ["bing"])
-    fetch_timeout: float = 25.0  # 抓取正文单独超时，秒
+    fetch_timeout: float = 45.0  # 抓取正文单独超时，秒
+    # 首选引擎空结果或失败时的免费候补引擎序列（仍经 open-websearch）。
+    fallback_engines: list[str] = field(default_factory=lambda: ["baidu", "duckduckgo", "sogou"])
+    # 每次自动搜索最多尝试的上游引擎数（含首选）；显式指定引擎时不回退。
+    max_engines: int = 3
+    # 一次搜索所有引擎回退共享的超时预算，秒；超出即停止候补。
+    timeout_budget: float = 25.0
+    # 一次搜索跨所有 provider 共享的请求次数上限；超出即返回当前最佳候选。
+    max_requests: int = 9
+    # 每厂商调用上限（Search/Fetch 共池）；键为 provider 名。
+    usage_limits: dict[str, UsageLimit] = field(default_factory=dict)
+
+
+def read_api_key(env_name: str) -> str:
+    """读取厂商 API Key：环境变量优先，其次系统凭据（Keyring）。"""
+    value = os.environ.get(env_name, "").strip()
+    if value:
+        return value
+    try:
+        import keyring
+
+        return (keyring.get_password(KEYRING_SERVICE, env_name) or "").strip()
+    except Exception:
+        return ""
+
+
+@dataclass(slots=True)
+class UsageLimit:
+    """单厂商调用上限；本地计数不等于服务商账单上限。"""
+
+    period: str = "daily"  # daily / monthly
+    max_calls: int = 0  # <=0 表示不限制
+
+
+@dataclass(slots=True)
+class FetchConfig:
+    # 网页抓取的 provider 顺序；与 search.providers 相互独立。
+    providers: list[str] = field(default_factory=lambda: ["open_websearch"])
 
 
 @dataclass(slots=True)
@@ -122,6 +159,7 @@ class Config:
     chat: ChatConfig = field(default_factory=ChatConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
+    fetch: FetchConfig = field(default_factory=FetchConfig)
     confidence_threshold: float = 0.8
     auto_push: bool = False
 
@@ -220,6 +258,7 @@ def _validate_config(data: dict) -> None:
         "llm.timeout", "chat.context_window", "chat.max_tool_steps", "chat.tool_timeout",
         "search.timeout", "search.max_results", "search.fetch_timeout",
         "chat.reflect_idle_seconds", "chat.reflect_interval_seconds",
+        "search.max_engines", "search.timeout_budget", "search.max_requests",
     ):
         _validate_range(data, name, positive=True)
     for name in (
@@ -292,6 +331,20 @@ def load_config(path: Path | str | None = None) -> Config:
         ),
     )
     search_raw = data.get("search", {})
+    usage_limits: dict[str, UsageLimit] = {}
+    usage_raw = search_raw.get("usage_limits", {})
+    if isinstance(usage_raw, dict):
+        for name, item in usage_raw.items():
+            if not isinstance(item, dict):
+                continue
+            period = str(item.get("period", "daily"))
+            if period not in ("daily", "monthly"):
+                period = "daily"
+            try:
+                max_calls = int(item.get("max_calls", 0))
+            except (TypeError, ValueError):
+                max_calls = 0
+            usage_limits[str(name)] = UsageLimit(period=period, max_calls=max_calls)
     providers = search_raw.get("providers", ["open_websearch"])
     if not isinstance(providers, list):
         providers = ["open_websearch"]
@@ -301,6 +354,12 @@ def load_config(path: Path | str | None = None) -> Config:
     engines = list(
         dict.fromkeys(str(item).strip() for item in engines_raw if str(item).strip())
     ) or ["bing"]
+    fallback_raw = search_raw.get("fallback_engines", ["baidu", "duckduckgo", "sogou"])
+    if not isinstance(fallback_raw, list):
+        fallback_raw = ["baidu", "duckduckgo", "sogou"]
+    fallback_engines = list(
+        dict.fromkeys(str(item).strip() for item in fallback_raw if str(item).strip())
+    ) or ["baidu", "duckduckgo", "sogou"]
     search = SearchConfig(
         enabled=bool(search_raw.get("enabled", True)),
         providers=[str(item) for item in providers if str(item).strip()] or ["open_websearch"],
@@ -311,7 +370,19 @@ def load_config(path: Path | str | None = None) -> Config:
         transport=str(search_raw.get("transport", "http")),
         auto_start=bool(search_raw.get("auto_start", True)),
         engines=engines,
-        fetch_timeout=float(search_raw.get("fetch_timeout", 25.0)),
+        fetch_timeout=float(search_raw.get("fetch_timeout", 45.0)),
+        fallback_engines=fallback_engines,
+        max_engines=max(1, int(search_raw.get("max_engines", 3))),
+        timeout_budget=float(search_raw.get("timeout_budget", 25.0)),
+        max_requests=int(search_raw.get("max_requests", 9)),
+        usage_limits=usage_limits,
+    )
+    fetch_raw = data.get("fetch", {})
+    fetch_providers = fetch_raw.get("providers", ["open_websearch"])
+    if not isinstance(fetch_providers, list):
+        fetch_providers = ["open_websearch"]
+    fetch = FetchConfig(
+        providers=[str(item) for item in fetch_providers if str(item).strip()]
     )
     return Config(
         vault=Path(vault_raw).expanduser(),
@@ -319,9 +390,22 @@ def load_config(path: Path | str | None = None) -> Config:
         chat=chat,
         retrieval=retrieval,
         search=search,
+        fetch=fetch,
         confidence_threshold=float(data.get("confidence_threshold", 0.8)),
         auto_push=bool(data.get("auto_push", False)),
     )
+
+
+def usage_limits_toml(limits: dict[str, "UsageLimit"]) -> str:
+    """把 usage_limits 序列化成 TOML 段；空配置返回空串。"""
+    parts = []
+    for name, limit in limits.items():
+        parts.append(
+            f"\n[search.usage_limits.{name}]"
+            f'\nperiod = "{limit.period}"'
+            f"\nmax_calls = {limit.max_calls}\n"
+        )
+    return "".join(parts)
 
 
 def write_example_config(path: Path, vault: Path) -> None:
@@ -386,7 +470,18 @@ auto_start = true
 # 上游搜索引擎：bing / baidu / sogou / duckduckgo / brave / startpage 等
 engines = {toml_literal(["bing"])}
 # 抓取正文的单独超时（秒），比搜索慢
-fetch_timeout = 25.0
+fetch_timeout = 45.0
+# 一次搜索跨所有 provider 共享的请求次数上限；超出即返回当前最佳候选。
+max_requests = 9
+# 每厂商调用上限（Search/Fetch 共用同一计数池）；按需取消注释并修改。
+# 本地计数不等于服务商实际账单上限。
+# [search.usage_limits.tavily]
+# period = "daily"  # daily / monthly
+# max_calls = 20
+
+[fetch]
+# 网页抓取的 provider 顺序；与搜索的 providers 相互独立。
+providers = {toml_literal(["open_websearch"])}
 '''
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")

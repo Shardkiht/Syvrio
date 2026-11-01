@@ -68,7 +68,7 @@ def test_corrupt_profile_does_not_block_chat_or_fact_recall(tmp_path):
     service.note("合成偏好：喜欢安静阅读", topic="preferences")
     service.inferences.path.write_text("{broken\n", encoding="utf-8")
     events = []
-    reply = runtime.ask("安静阅读", on_event=events.append)
+    reply = runtime.ask("我喜欢安静阅读吗", on_event=events.append)
     assert reply.content == "收到"
     assert any("画像读取失败" in event for event in events)
     assert any("画像读取失败" in event for event in reply.events)
@@ -337,7 +337,7 @@ def test_auto_recall_injects_long_term_memory(tmp_path):
     runtime, service = build_runtime(tmp_path, model)
     service.note("喜欢清淡风味", topic="preferences")
 
-    runtime.ask("清淡")
+    runtime.ask("我喜欢清淡吗")
 
     system_message = model.calls[0][0][0]
     assert "<long_term_memory>" in system_message["content"]
@@ -1219,3 +1219,81 @@ def test_consolidate_does_not_let_short_sessions_hide_eligible_sessions(tmp_path
     assert not runtime.sessions.load(sessions[0].id).needs_consolidation()
     assert all(runtime.sessions.load(s.id).needs_consolidation() for s in sessions[1:])
     assert runtime.consolidate_pending()["consolidated"] == 3
+
+
+def test_general_question_skips_automatic_memory(tmp_path, monkeypatch):
+    runtime, service = build_runtime(tmp_path, FakeChatModel([AssistantTurn(content="答案")]))
+    monkeypatch.setattr(service, "recall", lambda *a, **k: pytest.fail("不应预取记忆"))
+    monkeypatch.setattr(runtime.recall_queries, "build", lambda *a: pytest.fail("不应改写查询"))
+    runtime.ask("解释 Python 的列表推导式")
+
+
+def test_progress_precedes_model_and_tool_execution(tmp_path, monkeypatch):
+    from quiet_memo.agent.tools import ToolOutcome, ToolRegistry
+
+    progress = []
+
+    class ProgressModel(FakeChatModel):
+        def chat(self, messages, tools, on_delta=None):
+            assert progress[-1] == "Waiting for model"
+            return super().chat(messages, tools, on_delta)
+
+    def execute(registry, name, arguments):
+        assert progress[-1] == f"Calling tool: {name}"
+        return ToolOutcome(ok=True, content="合成结果", display="工具完成")
+
+    monkeypatch.setattr(ToolRegistry, "execute", execute)
+    runtime, _ = build_runtime(tmp_path, ProgressModel([
+        AssistantTurn(tool_calls=[ToolCall(id="t1", name="recall", arguments={"query": "合成"})]),
+        AssistantTurn(content="完成"),
+    ]))
+    runtime.ask("你好", on_progress=progress.append)
+    assert progress == ["Preparing context", "Waiting for model", "Calling tool: recall", "Waiting for model"]
+
+
+@pytest.mark.parametrize("stop_at", ["context", "stream", "tool"])
+def test_cancel_preserves_partial_and_tool_pairs(tmp_path, monkeypatch, stop_at):
+    from threading import Event
+    from quiet_memo.llm import GenerationCancelled
+    from quiet_memo.agent import runtime as module
+    from quiet_memo.agent.tools import ToolOutcome
+
+    cancel = Event()
+    calls = []
+    class Tools:
+        def schemas(self):
+            return []
+        def execute(self, name, arguments):
+            calls.append(name)
+            cancel.set()
+            return ToolOutcome(ok=True, content="done", display="done")
+    monkeypatch.setattr(module, "build_tools", lambda *a, **kw: Tools())
+    turn = AssistantTurn(content="partial text", tool_calls=[
+        ToolCall(id="one", name="first", arguments={}),
+        ToolCall(id="two", name="second", arguments={}),
+    ] if stop_at == "tool" else [])
+    model = FakeChatModel([turn])
+    runtime, _ = build_runtime(tmp_path, model)
+    runtime.config.recall_rewrite = False
+    def progress(phase):
+        if stop_at == "context":
+            cancel.set()
+    def delta(text):
+        if stop_at == "stream":
+            cancel.set()
+    with pytest.raises(GenerationCancelled):
+        runtime.ask("hello", on_delta=delta, on_progress=progress, cancel=cancel)
+    loaded = runtime.sessions.load(runtime.current.id)
+    stopped = loaded.records[-1]
+    assert "stopped by user" in stopped["content"]
+    assert runtime._active_ask is None
+    if stop_at == "stream":
+        assert stopped["content"].startswith("partia\n\n")
+        assert len(model.calls) == 1
+    if stop_at == "tool":
+        assert calls == ["first"]
+        results = [r for r in loaded.records if r.get("type") == "tool"]
+        assert [r["tool_call_id"] for r in results] == ["one", "two"]
+        assert results[1]["ok"] is False
+    runtime.model = FakeChatModel([AssistantTurn(content="next reply")])
+    assert runtime.ask("continue", on_delta=lambda _: None).content == "next reply"
