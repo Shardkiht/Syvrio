@@ -2790,3 +2790,25 @@ async def test_long_pending_review_actions_keep_full_text(tmp_path, action):
         else:
             expected = "Synthetic final edited text" if action == "edit" else " ".join(text.split())
             assert [entry.text for entry in entries] == [expected]
+
+
+@pytest.mark.parametrize("size", [(80, 24), (120, 40), (160, 50)])
+async def test_short_pending_review_stays_compact(tmp_path, size):
+    from textual.containers import VerticalScroll
+    from quiet_memo.memory.models import Candidate, PendingItem
+
+    app = build_app(tmp_path, [])
+    item = PendingItem.from_candidate(Candidate(text="Synthetic short confirmation.", confidence=0.5),
+                                      "chat", "low confidence")
+    app.service.queue.add(item)
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+        app._pending_picked(item.id)
+        await pilot.pause()
+        card = app.screen.query_one("#pick-card")
+        panel = app.screen.query_one("#pick-detail", VerticalScroll)
+        assert card.size.width <= 76
+        assert card.size.height <= 14
+        assert panel.size.height == 1
+        assert panel.max_scroll_y == 0
+        assert app.screen.query_one("#pick-list").region.bottom < card.region.bottom
