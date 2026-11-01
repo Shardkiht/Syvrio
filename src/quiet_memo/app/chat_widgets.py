@@ -4,8 +4,16 @@
 """
 from __future__ import annotations
 
+import re
+import unicodedata
+
+from markdown_it import MarkdownIt
+from markdown_it.rules_inline import emphasis
+from markdown_it.rules_inline.state_inline import StateInline
 from rich.markup import escape
-from rich.markdown import Markdown as RichMarkdown
+from rich.markdown import Markdown as RichMarkdown, Heading, CodeBlock
+from rich.syntax import Syntax
+from rich.console import Console, ConsoleOptions, RenderResult
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -20,13 +28,65 @@ from textual.widgets import Input, Label, ListView, ListItem, Static
 
 from ..agent.session import Session
 from .command_catalog import SLASH_COMMANDS
+from .chat_theme import MARKDOWN_THEME
+
+
+_CJK_EMPHASIS = re.compile(r"[\u3400-\u9fff]\*\*[^\w\s*]|[^\w\s*]\*\*[\u3400-\u9fff]")
+
+
+def _cjk_strong(state: StateInline, silent: bool) -> bool:
+    start = state.pos
+    if silent or state.src[start:start + 2] != "**":
+        return False
+    if state.src[start:start + 3] == "***":
+        return False
+    before = state.src[start - 1] if start else " "
+    after = state.src[start + 2] if start + 2 < state.posMax else " "
+    can_open = 0x3400 <= ord(before) <= 0x9FFF and unicodedata.category(after).startswith("P")
+    can_close = unicodedata.category(before).startswith("P") and 0x3400 <= ord(after) <= 0x9FFF
+    if not (can_open or can_close):
+        return False
+    # Keep markdown-it's delimiter pairing, escapes and code rules intact.
+    emphasis.tokenize(state, silent)
+    for delimiter in state.delimiters[-2:]:
+        delimiter.open = delimiter.open or can_open
+        delimiter.close = delimiter.close or can_close
+    return True
+
+
+class _ReplyHeading(Heading):
+    LEVEL_ALIGN = dict.fromkeys(("h1", "h2", "h3", "h4", "h5", "h6"), "left")
+    new_line = False
+
+
+class _ReplyCodeBlock(CodeBlock):
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        # Remove only the fence's terminal newline, never code indentation/spaces.
+        yield Syntax(str(self.text).removesuffix("\n"), self.lexer_name,
+                     theme=self.theme, background_color="#1a1c22",
+                     word_wrap=True, padding=(0, 1))
+
+
+class _ReplyMarkdown(RichMarkdown):
+    elements = {**RichMarkdown.elements, "heading_open": _ReplyHeading,
+                "fence": _ReplyCodeBlock, "code_block": _ReplyCodeBlock}
+
+    def __init__(self, markdown: str) -> None:
+        compatible = bool(_CJK_EMPHASIS.search(markdown))
+        # Initialize Rich's rendering state without parsing an affected reply twice.
+        super().__init__("" if compatible else markdown, code_theme="github-dark")
+        if compatible:
+            self.markup = markdown
+            parser = MarkdownIt().enable("strikethrough").enable("table")
+            parser.inline.ruler.before("emphasis", "cjk_strong", _cjk_strong)
+            self.parsed = parser.parse(markdown)
 
 
 class _SelectableMarkdown(RichVisual):
     """Rich Markdown 本身不提供文本坐标，转成 Content 后才能选择和高亮。"""
 
     def __init__(self, widget: Static, markdown: str) -> None:
-        super().__init__(widget, RichMarkdown(markdown))
+        super().__init__(widget, _ReplyMarkdown(markdown))
         self._content_cache: tuple[int, Content] | None = None
 
     def selectable_content(self, width: int) -> Content:
@@ -34,11 +94,12 @@ class _SelectableMarkdown(RichVisual):
         if self._content_cache is None or self._content_cache[0] != width:
             console = self._widget.app.console
             options = self._widget.app.console_options.update(width=width, highlight=False)
-            text = Text.assemble(*(
-                (segment.text, segment.style)
-                for segment in console.render(self._renderable, options)
-                if not segment.control
-            ))
+            with console.use_theme(MARKDOWN_THEME):
+                text = Text.assemble(*(
+                    (segment.text, segment.style)
+                    for segment in console.render(self._renderable, options)
+                    if not segment.control
+                ))
             text = text[:len(text.plain.rstrip("\n"))]
             self._content_cache = (width, Content.from_rich_text(text))
         return self._content_cache[1]
@@ -58,6 +119,8 @@ class ChatReply(Static):
         super().update(_SelectableMarkdown(self, content))
 
     def update(self, content: str) -> None:
+        if content == self._markdown:
+            return
         self._markdown = content
         super().update(_SelectableMarkdown(self, content))
 
