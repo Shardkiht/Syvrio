@@ -1,6 +1,27 @@
 """Textual 主题与布局样式；ChatApp 通过 CSS = APP_CSS 应用。"""
 from __future__ import annotations
 
+from rich.theme import Theme
+
+# Scoped to reply rendering; other Rich/CLI output keeps its own theme.
+MARKDOWN_THEME = Theme({
+    "markdown.h1": "bold #8fa6c5 not underline",
+    "markdown.h2": "bold #d2d3d7 not underline",
+    "markdown.h3": "bold #b7bdc9 not underline",
+    "markdown.h4": "bold #b7bdc9 not underline",
+    "markdown.h5": "bold #b7bdc9 not underline",
+    "markdown.h6": "bold #b7bdc9 not underline",
+    "markdown.link": "#8fa6c5 underline",
+    "markdown.link_url": "#8fa6c5 underline",
+    "markdown.code": "#c1cddd on #1a1c22",
+    "markdown.block_quote": "#969da9",
+    "markdown.table.border": "#454b58",
+    "markdown.table.header": "bold #c6cfdd",
+    "markdown.item.bullet": "#8fa6c5",
+    "markdown.item.number": "#8fa6c5",
+    "markdown.hr": "#454b58",
+})
+
 APP_CSS = """
     $accent: #d2d3d7;
     $dim: #3a3b42;
