@@ -2,7 +2,7 @@ name: test
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature-memory-evolution]
   pull_request:
 
 jobs:
@@ -19,3 +19,5 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen
       - run: uv run pytest -q
+      - run: uv build
+      - run: uv run qm --help

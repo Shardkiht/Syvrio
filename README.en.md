@@ -21,6 +21,8 @@ Stop repeating your preferences and plans every time you start a chat. Tell it â
 
 The demo operates the actual Textual UI with synthetic data and scripted model replies. Memory writes and cross-session retrieval run through the real implementation, with no paid model requests. [View the still screenshot](docs/assets/quiet-memo-demo.png).
 
+Stable showcase: `main` is frozen after final acceptance; use `portfolio-2026-11-01` to identify this source snapshot. Package version remains `0.3.2`; the older `v0.3.2` release and PyPI package are separate snapshots. Routine development continues only on `feature-memory-evolution`.
+
 ## Quick start
 
 Requires Python 3.12+, uv, and git.
@@ -535,3 +537,12 @@ Legacy `period` / `max_calls` settings override defaults and save in the new for
 In `qm setup`, select search/fetch setup then quota and official-pause management to view defaults, effective limits, tracked usage, remaining counts and pause reasons; edit both caps (0 means unlimited), restore defaults, or clear an official pause without resetting counters. Enabling a provider no longer assigns a universal daily cap of 20.
 
 Only documented official quota/balance/spending-limit errors persist a pause. Ordinary rate limits, timeouts, 5xx and authentication failures do not. Local-limit and official-pause reasons differ; automatic fallback continues, while explicit provider selection never silently substitutes another provider. Cached results remain available. A pause expires automatically only with a reliable recovery timestamp. The checked vendor documents do not establish exact reset instants/timezones for these account errors, so current recognized errors require manual recovery rather than guessed calendar resets.
+
+
+### Stability boundaries
+
+Session lists and startup consolidation isolate invalid files with a diagnostic; direct loading still fails, and source bytes remain untouched. Torn trailing records retain append-only recovery. Manual approve/correct/reject/forget operations compensate ordinary write exceptions across the affected topic and decision logs; a successful rollback makes a retry safe. Failed rollback is reported explicitly. This is not an atomic transaction across process termination, power loss or concurrent processes; single-writer use and Vault Git checkpoints remain important.
+
+Search/Fetch limits share counters within one process, but simultaneous QM/MCP processes do not have atomic quota accounting. Local caps are conservative safeguards, not provider billing guarantees. The optional `npx open-websearch@latest` fallback is not frozen by Python's lockfile: for repeatable deployments, install and retain a tested upstream version; the installed command remains preferred. This freeze does not verify a clean upstream package or dynamic websites through live APIs.
+
+On Windows, redirected CLI stdout/stderr use UTF-8; native terminal handling and persistent system settings are unchanged.
