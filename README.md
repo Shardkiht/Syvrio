@@ -21,7 +21,7 @@
 
 演示操作实际 Textual 界面，使用合成数据与固定模型回复回放；记忆写入和跨会话检索走真实代码，不产生模型费用。[查看静态截图](docs/assets/quiet-memo-demo.png)。
 
-稳定展示：`main` 在最终验收后冻结，使用 `portfolio-2026-11-01` 标识本轮源码快照。包版本仍为 `0.3.2`，较早的 `v0.3.2` Release 和 PyPI 包属于其他快照。后续常规开发仅在 `feature-memory-evolution` 进行。
+稳定展示：`main` 在最终验收后冻结，使用 `portfolio-2026-11-01` 标识本轮源码快照。稳定发行版本为 `0.3.3`（`v0.3.3`）；较早的 `v0.3.2` Release 属于其他快照。后续常规开发仅在 `feature-memory-evolution` 进行。
 
 ## 快速开始
 
