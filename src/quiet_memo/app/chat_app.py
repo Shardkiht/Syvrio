@@ -110,6 +110,7 @@ class ChatApp(ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixin, App):
                 with Horizontal(id="status-row"):
                     yield self._model_status
                     yield Static("", id="status")
+                yield Static("Enter send   Ctrl+P commands   Ctrl+B conversations", id="composer-hint")
 
     def on_mount(self) -> None:
         self.set_interval(0.15, self._render_model_status)
@@ -472,25 +473,21 @@ class ChatApp(ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixin, App):
         self.call_after_refresh(self._chat().scroll_end, animate=False)
 
     def add_welcome(self) -> None:
-        total = self.service.config.chat.context_window
         chat = self._chat()
-        chat.mount(Static("quiet-memo", classes="welcome-brand"))
-        chat.mount(Static("A quiet personal memory vault", classes="welcome-line"))
-        chat.mount(
-            Static(
-                f"{self.runtime.model_label} · {self.service.retrieval_mode}"
-                f" · {format_tokens(total)} context",
-                classes="welcome-meta",
-            )
-        )
-        chat.mount(
-            Static(
-                "/help commands · Ctrl+B sidebar · Ctrl+Q quit",
-                classes="welcome-hint",
-            )
-        )
+        chat.add_class("home")
+        # 单一欢迎块让短内容保持聚合；小窗口仍由聊天容器滚动。
+        chat.mount(Vertical(
+            Static("PERSONAL MEMORY", classes="welcome-eyebrow"),
+            Static("[bold #e3e3e3]quiet[/][bold #d6a18c]-memo[/]", classes="welcome-brand"),
+            Static("Pick up where you left off.", classes="welcome-line"),
+            Static("Talk naturally. The useful details stay with you.", classes="welcome-meta"),
+            Static("[bold]/sessions[/]  Continue a conversation", classes="welcome-shortcut"),
+            Static("[bold]/model[/]     Choose a model", classes="welcome-shortcut"),
+            classes="welcome-shell",
+        ))
 
     def build_transcript(self) -> None:
+        self._chat().remove_class("home")
         self.query_one("#chat", TranscriptView).show_session(self.runtime.current)
         self._scroll_end()
 
@@ -524,6 +521,8 @@ class ChatApp(ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixin, App):
 
     def add_user_turn(self, content: str, stamp: str | None = None) -> None:
         chat = self._chat()
+        if chat.has_class("home"):
+            self._clear_chat()
         if stamp:
             chat.mount(Static(f"You · {stamp}", classes="who-user"))
         # 容器构造时直接带子组件，避免“先挂载容器再补挂子组件”的时序问题。

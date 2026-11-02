@@ -154,6 +154,7 @@ class TranscriptView(VerticalScroll):
         self._more: HistoryMore | None = None
 
     def clear_transcript(self) -> None:
+        self.remove_class("home")
         self._turns = []
         self._tools = {}
         self._start = 0

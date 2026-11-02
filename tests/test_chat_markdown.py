@@ -102,7 +102,7 @@ def test_heading_style_and_compact_spacing():
     assert text.plain.splitlines()[0].startswith("Heading")
     start = text.plain.index("Heading")
     styles = [s.style for s in text.spans if s.start <= start < s.end]
-    assert any(s.bold and s.color.get_truecolor() == (134, 207, 188) for s in styles)
+    assert any(s.bold and s.color.get_truecolor() == (222, 222, 222) for s in styles)
     assert not any(s.underline for s in styles)
     assert text.plain.splitlines()[1].startswith("Body")
     assert len(render(SAMPLE).plain.splitlines()) < len(render(SAMPLE, original=True).plain.splitlines())

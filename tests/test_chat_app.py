@@ -1392,8 +1392,8 @@ async def test_session_picker_focus_bar_follows_selection(tmp_path):
         await pilot.pause()
 
         assert other.has_class("-highlight")
-        assert other.styles.border_left[1] == Color.parse("#8dd8c0")  # 焦点强调色
-        assert current.styles.border_left[1] == Color.parse("#96979c")  # 当前会话弱色
+        assert other.styles.border_left[1] == Color.parse("#d6a18c")  # 焦点强调色
+        assert current.styles.border_left[1] == Color.parse("#a6a6a6")  # 当前会话弱色
         assert len({row.query_one(".session-title").region.x for row in rows}) == 1
 
 
@@ -2056,11 +2056,11 @@ async def test_dialog_inputs_share_evolution_focus_style(tmp_path):
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         main_input = app.query_one("#input", Input)
-        assert main_input.styles.background == Color.parse("#1d1d1d")
-        assert main_input.styles.border_top[1] == Color.parse("#8dd8c0")
+        assert main_input.styles.background == Color.parse("#202020")
+        assert main_input.styles.border_left[1] == Color.parse("#d6a18c")
         main_input.blur()
         await pilot.pause()
-        assert main_input.styles.background == Color.parse("#1d1d1d")
+        assert main_input.styles.background == Color.parse("#202020")
         main_input.focus()
 
         app.open_session_picker()
@@ -2068,7 +2068,7 @@ async def test_dialog_inputs_share_evolution_focus_style(tmp_path):
         assert isinstance(app.screen, SessionPickerScreen)
         picker_input = app.screen.query_one("#picker-input", Input)
         assert picker_input.styles.background == Color.parse("#222222")
-        assert picker_input.styles.border_top[1] == main_input.styles.border_top[1]
+        assert picker_input.styles.border_top[1] == main_input.styles.border_left[1]
 
 
 async def test_session_picker_ctrl_r_renames_session(tmp_path):
@@ -2951,3 +2951,25 @@ async def test_short_pending_review_stays_compact(tmp_path, size):
         assert panel.size.height == 1
         assert panel.max_scroll_y == 0
         assert app.screen.query_one("#pick-list").region.bottom < card.region.bottom
+
+
+@pytest.mark.parametrize("size", [(80, 24), (120, 40)])
+async def test_welcome_transitions_to_left_aligned_conversation(tmp_path, size):
+    app = build_app(tmp_path, [AssistantTurn(content="Synthetic reply")])
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+        chat = app.query_one("#chat")
+        welcome = app.query_one(".welcome-shell")
+        assert chat.has_class("home")
+        assert welcome.region.width <= chat.content_region.width
+        assert welcome.region.bottom <= app.query_one("#input").region.y
+        assert app.query_one("#composer-hint").region.bottom <= size[1]
+        app.query_one("#input", Input).value = "Synthetic question"
+        await pilot.press("enter")
+        await _wait_reply(app, pilot)
+        await pilot.pause()
+        assert not chat.has_class("home")
+        assert not app.query(".welcome-shell")
+        bubble = app.query_one(".bubble")
+        assert bubble.region.x <= app.query_one(".reply").region.x + 1
+        assert bubble.region.width > chat.content_region.width * 0.8
