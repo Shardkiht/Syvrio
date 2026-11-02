@@ -317,7 +317,9 @@ def test_due_respects_daily_schedule_and_success_state(tmp_path):
     result = sync.sync("scheduled", now=at_time)
     assert result.status == "partial"  # 未配置 remote，但本地提交成功
     state = read_state(service)
-    assert state["last_daily_success_date"] == "2026-11-02"
+    assert state.get("last_daily_success_date") != "2026-11-02"
+    assert state["last_daily_attempt_date"] == "2026-11-02"
+    assert state["last_daily_blocked_date"] == "2026-11-02"
     assert not sync.due(datetime(2026, 11, 2, 23, 0, tzinfo=TZ))
     assert sync.due(datetime(2026, 11, 3, 3, 0, tzinfo=TZ))
 
@@ -398,6 +400,89 @@ def _lock_child(vault: Path, code: str) -> subprocess.Popen:
         text=True,
         env=env,
     )
+
+
+def test_vault_lock_same_process_contention_times_out_without_releasing_owner(tmp_path):
+    vault = tmp_path / "vault"
+    lock = vault_write_lock(vault)
+    entered, release = threading.Event(), threading.Event()
+    result: dict[str, object] = {}
+
+    def owner():
+        with lock:
+            entered.set()
+            assert release.wait(5)
+
+    thread = threading.Thread(target=owner)
+    thread.start()
+    try:
+        assert entered.wait(5)
+        with pytest.raises(LockTimeout):
+            lock.acquire(timeout=0.1)
+        assert lock.locked  # 另一线程仍拥有锁，不允许错误释放。
+        result["owner_active"] = thread.is_alive()
+    finally:
+        release.set()
+        thread.join(timeout=5)
+    assert result["owner_active"] is True
+    assert not lock.locked
+    with lock:
+        assert lock.locked
+
+
+def test_git_lock_same_process_contention_causes_busy_result(tmp_path):
+    service = make_service(tmp_path)
+    lock = git_operation_lock(service.config.vault)
+    entered, release = threading.Event(), threading.Event()
+
+    def owner():
+        with lock:
+            entered.set()
+            assert release.wait(5)
+
+    thread = threading.Thread(target=owner)
+    thread.start()
+    try:
+        assert entered.wait(5)
+        result = service.git_sync.sync("manual", wait_for_git=False)
+        assert result.status == "failed"
+        assert result.error_kind == "busy"
+    finally:
+        release.set()
+        thread.join(timeout=5)
+
+
+def test_vault_lock_contention_does_not_commit_unprotected(tmp_path):
+    service = make_service(tmp_path)
+    service.note("待提交数据", topic="misc")
+    lock = vault_write_lock(service.config.vault)
+    entered, release = threading.Event(), threading.Event()
+
+    def owner():
+        with lock:
+            entered.set()
+            assert release.wait(5)
+
+    thread = threading.Thread(target=owner)
+    thread.start()
+    try:
+        assert entered.wait(5)
+        # 使用同进程另一个线程执行同步，确保测试真实模拟锁竞争。
+        # vault 锁等待默认为 30s；此处将其 acquire 包装成较短超时。
+        original_acquire = lock.acquire
+        def acquire_short(timeout=None):
+            return original_acquire(timeout=0.1)
+        lock.acquire = acquire_short
+        try:
+            result = service.git_sync.sync("manual")
+            assert result.status == "failed"
+            assert result.error_kind == "vault_busy"
+            assert service.repo.has_changes()
+        finally:
+            lock.acquire = original_acquire
+    finally:
+        release.set()
+        thread.join(timeout=5)
 
 
 def test_vault_lock_is_cross_process(tmp_path):
@@ -624,3 +709,19 @@ def test_git_config_load_validate_and_example(tmp_path):
     assert roundtripped.git.auto_sync is False
     assert roundtripped.git.sync_time == "05:15"
     assert roundtripped.git.retry_interval_minutes == 10
+
+
+def test_nonretryable_daily_failure_is_blocked_not_success(tmp_path):
+    service = make_service(tmp_path)
+    sync = service.git_sync
+    stamp = datetime(2026, 11, 2, 3, 0, tzinfo=TZ)
+    result = sync.sync("scheduled", now=stamp)
+    assert result.status == "partial"
+    assert result.error_kind == "no_remote"
+    state = read_state(service)
+    assert "last_daily_success_date" not in state
+    assert state["last_daily_blocked_date"] == "2026-11-02"
+    assert state["last_daily_attempt_date"] == "2026-11-02"
+    assert not sync.due(stamp + timedelta(hours=1))
+    assert sync.next_sync_at(stamp) == stamp + timedelta(days=1)
+    assert sync.due(stamp + timedelta(days=1))
