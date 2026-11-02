@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import threading
+from datetime import date
 
 import pytest
 
@@ -15,7 +17,8 @@ from quiet_memo.agent.session import SessionStore, new_message_id
 from quiet_memo.app.chat_app import ChatApp, SidebarToggle
 from quiet_memo.app.chat_input import BarInput
 from quiet_memo.app.command_catalog import SLASH_COMMANDS
-from quiet_memo.infra.config import ChatConfig, Config, LLMConfig, RetrievalConfig, SearchConfig
+from quiet_memo.app.git_screen import GitConfirmScreen, GitScreen
+from quiet_memo.infra.config import ChatConfig, Config, GitConfig, LLMConfig, RetrievalConfig, SearchConfig
 from quiet_memo.infra.tokens import format_tokens
 from quiet_memo.llm import AssistantTurn
 from quiet_memo.memory.extractor import StaticExtractor
@@ -166,13 +169,14 @@ async def test_import_error_releases_busy(tmp_path):
         assert any("import failed" in str(card.render()).lower() for card in app.query(".card"))
 
 
-def build_app(tmp_path, turns, extract_on_exit=False, search=None):
+def build_app(tmp_path, turns, extract_on_exit=False, search=None, git=None):
     config = Config(
         vault=tmp_path / "vault",
         llm=LLMConfig(),
         retrieval=RetrievalConfig(method="keyword"),
         search=search or SearchConfig(auto_start=False),
         chat=ChatConfig(context_window=32000, auto_recall=3, recall_rewrite=False, extract_on_exit=extract_on_exit),
+        git=git or GitConfig(auto_sync=False),
     )
     service = MemoryService(config, extractor=StaticExtractor(ExtractionResult(memories=[])))
     service.init_vault()
@@ -3218,3 +3222,166 @@ async def test_dragging_scrollbar_freezes_stream_layout(tmp_path):
         finally:
             await pilot.mouse_up(bar, offset=(0, bar.size.height - 2))
         assert not chat.is_vertical_scrollbar_grabbed
+
+
+# ---------- Git 管理界面 ----------
+
+
+def _configure_git_remote(app, tmp_path):
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+    vault = str(app.service.config.vault)
+    subprocess.run(["git", "-C", vault, "remote", "add", "origin", str(remote)], check=True, capture_output=True)
+    subprocess.run(["git", "-C", vault, "push", "-u", "origin", "HEAD"], check=True, capture_output=True)
+    return remote
+
+
+def _remote_log(remote) -> list[str]:
+    completed = subprocess.run(
+        ["git", "-C", str(remote), "log", "--oneline"], capture_output=True, text=True
+    )
+    return [line for line in completed.stdout.splitlines() if line]
+
+
+async def test_git_screen_requires_explicit_confirmation(tmp_path):
+    import asyncio
+
+    app = build_app(tmp_path, [])
+    remote = _configure_git_remote(app, tmp_path)
+    before = _remote_log(remote)
+    app.service.note("TUI 同步记录", topic="misc")
+    async with app.run_test(size=(120, 40)) as pilot:
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        await pilot.pause()
+        app._command("/git")
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        await pilot.pause()
+        assert isinstance(app.screen, GitScreen)
+        content = str(app.screen.query_one("#git-content", Static).content)
+        assert "Initialized" in content
+        assert "Not configured" not in content
+
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert isinstance(app.screen, GitConfirmScreen)
+        assert _remote_log(remote) == before  # 未按 Enter 不执行
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert isinstance(app.screen, GitScreen)
+        assert _remote_log(remote) == before
+
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert isinstance(app.screen, GitConfirmScreen)
+        await pilot.press("enter")
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        await pilot.pause()
+
+        assert isinstance(app.screen, GitScreen)
+        assert len(_remote_log(remote)) == len(before) + 1
+        content = str(app.screen.query_one("#git-content", Static).content)
+        assert "Synchronization Completed" in content
+        assert "Last Result" in content
+        assert "is running" not in content
+        assert "Git" not in str(app.query_one("#status", Static).content)
+
+
+async def test_ctrl_s_outside_git_screen_does_nothing(tmp_path):
+    import asyncio
+
+    app = build_app(tmp_path, [])
+    async with app.run_test(size=(120, 40)) as pilot:
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        await pilot.pause()
+        stack = list(app.screen_stack)
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert app.screen_stack == stack
+        assert not isinstance(app.screen, (GitScreen, GitConfirmScreen))
+
+
+async def test_git_sync_failure_shows_reason(tmp_path):
+    import asyncio
+
+    app = build_app(tmp_path, [])
+    app.service.note("无远程配置", topic="misc")
+    async with app.run_test(size=(120, 40)) as pilot:
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        await pilot.pause()
+        app._command("/git")
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        await pilot.pause()
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        await pilot.press("enter")
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        await pilot.pause()
+
+        content = str(app.screen.query_one("#git-content", Static).content)
+        assert "Partially Completed" in content
+        assert "Remote is not configured" in content
+        assert not app.service.git_sync.running
+
+
+async def test_closing_git_screen_does_not_cancel_sync(tmp_path):
+    import asyncio
+
+    app = build_app(tmp_path, [])
+    remote = _configure_git_remote(app, tmp_path)
+    before = _remote_log(remote)
+    app.service.note("关闭界面时仍在推送", topic="misc")
+    started, release = threading.Event(), threading.Event()
+    real_push = app.service.repo.push
+
+    def slow_push():
+        started.set()
+        assert release.wait(5)
+        return real_push()
+
+    app.service.repo.push = slow_push
+    async with app.run_test(size=(120, 40)) as pilot:
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        await pilot.pause()
+        app._command("/git")
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        await pilot.pause()
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        await pilot.press("enter")
+        try:
+            assert await asyncio.to_thread(started.wait, 5)
+            await pilot.pause()
+            content = str(app.screen.query_one("#git-content", Static).content)
+            assert "Git Synchronization" in content
+            assert "Pushing to remote" in content
+            # 执行中再次 Ctrl+S 不得打开第二个确认界面。
+            await pilot.press("ctrl+s")
+            await pilot.pause()
+            assert isinstance(app.screen, GitScreen)
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not isinstance(app.screen, GitScreen)
+        finally:
+            release.set()
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        await pilot.pause()
+        assert not app._git_sync_running
+        assert not app.service.git_sync.running
+        assert len(_remote_log(remote)) == len(before) + 1
+
+
+async def test_startup_compensation_runs_missed_daily_sync(tmp_path):
+    import asyncio
+
+    app = build_app(tmp_path, [], git=GitConfig(auto_sync=True, sync_time="00:00"))
+    state_path = app.service.config.vault / ".quiet-memo" / "git-sync-state.json"
+    async with app.run_test(size=(120, 40)) as pilot:
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        await pilot.pause()
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        await pilot.pause()
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        assert state["last_sync_trigger"] == "scheduled"
+        assert state["last_daily_success_date"] == date.today().isoformat()
+        assert not app._git_sync_running

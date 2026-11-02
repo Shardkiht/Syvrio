@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 from ..infra.config import Config, LLMConfig, RetrievalConfig, default_config_path, load_config
 from ..infra.gitops import GitError, GitRepo
+from ..infra.gitsync import GitSyncService, ensure_runtime_gitignore
+from ..infra.locking import git_operation_lock, vault_write_lock
 from ..infra.tokens import truncate_to_tokens
 from ..llm import LiteLLMEmbedder
 from ..llm.commit_summary import summarize_diff
@@ -49,6 +50,7 @@ VAULT_README = """# quiet-memo vault
 - `.quiet-memo/resolved.jsonl`：已确认/已拒绝记录。
 - `.quiet-memo/audit.jsonl`：更正、删除等审计记录。
 - `.quiet-memo/inferences.jsonl`：独立假设与去重后的事实来源，不参与事实检索。
+- `.quiet-memo/git-sync-state.json`：本机 Git 同步状态，不纳入 Git 历史。
 - `SOUL.md`（可选）：自定义人设，替代系统提示词里的默认人设段。
 - 全部变更由 Git 跟踪，可回滚、可审计。
 """
@@ -59,6 +61,8 @@ VAULT_GITIGNORE = """__pycache__/
 Thumbs.db
 .quiet-memo/vectors.npz
 .quiet-memo/search-cache.json
+.quiet-memo/git-sync-state.json
+.quiet-memo/*.lock
 """
 
 # 默认人设兼作 init 写入 SOUL.md 的模板；放 memory 层是因为 agent/prompts.py 可以引 memory，
@@ -171,39 +175,32 @@ class MemoryService:
         self.config_path = config_path
         # 后台补沉淀与前台对话可能并发写 vault：所有变更操作在这把锁内串行。
         # 组合写入流程可安全复用公开服务方法，调用方不再绕过接口调用私有实现。
-        self.write_lock = threading.RLock()
+        # 锁同时通过文件锁覆盖 CLI/TUI/MCP 多个进程，进程崩溃后由内核释放。
+        self.write_lock = vault_write_lock(config.vault)
+        self._git_lock = git_operation_lock(config.vault)
         self.reflection = ReflectionEngine(self)
+        self.git_sync = GitSyncService(config, repo=self.repo)
 
     def init_vault(self) -> dict:
-        self.store.ensure()
-        self.queue.dir.mkdir(parents=True, exist_ok=True)
-        (self.config.vault / "sessions").mkdir(parents=True, exist_ok=True)
-        readme = self.config.vault / "README.md"
-        if not readme.exists():
-            readme.write_text(VAULT_README, encoding="utf-8")
-        soul = self.config.vault / SOUL_FILENAME
-        if not soul.exists():
-            soul.write_text(DEFAULT_PERSONA + "\n", encoding="utf-8")
-        gitignore = self.config.vault / ".gitignore"
-        if not gitignore.exists():
-            gitignore.write_text(VAULT_GITIGNORE, encoding="utf-8")
-        else:
-            # 老记忆库补齐派生缓存忽略规则；这些文件可重建，不进 Git 历史。
-            existing = gitignore.read_text(encoding="utf-8")
-            missing = [
-                line
-                for line in (".quiet-memo/vectors.npz", ".quiet-memo/search-cache.json")
-                if line not in existing
-            ]
-            if missing:
-                with open(gitignore, "a", encoding="utf-8") as handle:
-                    # 旧文件可能没有末尾换行，直接追加会把规则拼到上一行。
-                    if existing and not existing.endswith("\n"):
-                        handle.write("\n")
-                    handle.write("\n".join(missing) + "\n")
-        created = self.repo.ensure_init()
-        self.repo.stage_all()
-        commit_hash = self.repo.commit("memory: 初始化记忆库")
+        with self._git_lock:
+            with self.write_lock:
+                self.store.ensure()
+                self.queue.dir.mkdir(parents=True, exist_ok=True)
+                (self.config.vault / "sessions").mkdir(parents=True, exist_ok=True)
+                readme = self.config.vault / "README.md"
+                if not readme.exists():
+                    readme.write_text(VAULT_README, encoding="utf-8")
+                soul = self.config.vault / SOUL_FILENAME
+                if not soul.exists():
+                    soul.write_text(DEFAULT_PERSONA + "\n", encoding="utf-8")
+                gitignore = self.config.vault / ".gitignore"
+                if not gitignore.exists():
+                    gitignore.write_text(VAULT_GITIGNORE, encoding="utf-8")
+                # 老记忆库补齐派生缓存和同步状态的忽略规则；旧文件可能没有末尾换行。
+                ensure_runtime_gitignore(self.config.vault)
+                created = self.repo.ensure_init()
+                self.repo.stage_all()
+                commit_hash = self.repo.commit("memory: 初始化记忆库")
         return {"vault": str(self.config.vault), "git_created": created, "commit": commit_hash}
 
     def memorize(
@@ -711,26 +708,54 @@ class MemoryService:
             "retrieval": self.retrieval_mode,
         }
 
+    def _refuse_sensitive(self) -> None:
+        sensitive = self.repo.sensitive_paths()
+        if sensitive:
+            paths = "、".join(sensitive[:5])
+            raise GitError(f"拒绝提交疑似敏感文件：{paths}。请移出 vault 或加入 .gitignore。", kind="sensitive")
+
     def commit_pending_changes(self) -> str | None:
         """启动检查用：自动提交 vault 未保存变更（不 push、不调 LLM 生成总结）。"""
-        with self.write_lock:
-            self.repo.ensure_init()
-            self.repo.stage_all()
-            if not self.repo.has_staged():
-                return None
-            return self.repo.commit("memory: 自动提交未保存变更（启动检查）")
+        with self._git_lock:
+            with self.write_lock:
+                ensure_runtime_gitignore(self.config.vault)
+                self.repo.ensure_init()
+                self._refuse_sensitive()
+                self.repo.stage_all()
+                if not self.repo.has_staged():
+                    return None
+                return self.repo.commit("memory: 自动提交未保存变更（启动检查）")
 
     def commit(self, push: bool | None = None) -> dict:
-        with self.write_lock:
+        with self._git_lock:
             return self._commit_locked(push)
 
     def _commit_locked(self, push: bool | None) -> dict:
-        self.repo.ensure_init()
-        self.repo.stage_all()
-        if not self.repo.has_staged():
-            return {"committed": False, "summary": "没有需要提交的变更。", "hash": None, "pushed": False}
-        stat = self.repo.staged_stat()
-        summary = summarize_diff(self.repo.staged_diff(), self.config.llm, stat)
+        with self.write_lock:
+            ensure_runtime_gitignore(self.config.vault)
+            self.repo.ensure_init()
+            self._refuse_sensitive()
+            self.repo.stage_all()
+            staged = self.repo.has_staged()
+            if staged:
+                stat = self.repo.staged_stat()
+                diff = self.repo.staged_diff()
+        should_push = self.config.auto_push if push is None else push
+        if not staged:
+            result = {"committed": False, "summary": "没有需要提交的变更。", "hash": None,
+                      "pushed": False, "push_output": "", "push_error": ""}
+            # 没有新提交时仍允许补推历史未推送提交；缺少 remote/upstream 时保持静默。
+            if should_push and self.repo.has_remote() and self.repo.upstream():
+                if self.repo.unpushed_count():
+                    try:
+                        result["push_output"] = self.repo.push()
+                        result["pushed"] = True
+                        self.git_sync.record_push_success()
+                    except GitError as exc:
+                        result["push_error"] = str(exc)
+            return result
+        # LLM 摘要与 Push 都不占 Vault 写锁；Git 锁仍持有，其他 Git 操作不会改 Index。
+        summary = summarize_diff(diff, self.config.llm, stat)
         lines = summary.splitlines()
         subject = lines[0] if lines else "memory: 更新记忆库"
         if not subject.startswith("memory:"):
@@ -741,7 +766,6 @@ class MemoryService:
             message += f"\n\n{body}"
         commit_hash = self.repo.commit(message)
         # 本地提交已成功；push 失败只记录原因，不掩盖已完成的提交。
-        should_push = self.config.auto_push if push is None else push
         pushed = False
         push_output = ""
         push_error = ""
@@ -749,6 +773,7 @@ class MemoryService:
             try:
                 push_output = self.repo.push()
                 pushed = True
+                self.git_sync.record_push_success()
             except GitError as exc:
                 push_error = str(exc)
         return {

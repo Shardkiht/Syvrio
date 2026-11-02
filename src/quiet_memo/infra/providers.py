@@ -304,6 +304,11 @@ vault = {toml_literal(config.vault.as_posix())}
 confidence_threshold = {config.confidence_threshold}
 auto_push = {str(config.auto_push).lower()}
 
+[git]
+auto_sync = {str(config.git.auto_sync).lower()}
+sync_time = {toml_literal(config.git.sync_time)}
+retry_interval_minutes = {config.git.retry_interval_minutes}
+
 [llm]
 provider = {toml_literal(config.llm.provider)}
 base_url = {toml_literal(config.llm.base_url)}

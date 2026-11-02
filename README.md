@@ -79,7 +79,12 @@ export DEEPSEEK_API_KEY=sk-...
 ```toml
 vault = "C:/Users/you/.quiet-memo/vault"
 confidence_threshold = 0.8
-auto_push = false
+auto_push = false              # 仅影响 qm commit；TUI 同步见下方 [git]
+
+[git]
+auto_sync = true               # 每日定时 Commit + Push（TUI 运行时生效）
+sync_time = "03:00"            # 本地时区 HH:MM
+retry_interval_minutes = 30    # 网络/超时失败后的补推间隔
 
 [llm]
 provider = "deepseek"          # provider：deepseek/siliconflow/dashscope/spark/openrouter/openai/custom
@@ -185,6 +190,7 @@ Spark 使用 MaaS 的 Bearer API Key；适配层保留服务端采样默认值�
 | `/undo` | 撤销最后一轮提问及后续回复，回填原消息重新编辑 |
 | `/summary` | 查看当前会话摘要 |
 | `/status` | 会话、模型、检索模式、上下文和待确认状态 |
+| `/git` | 打开 Git 管理界面：查看仓库、Remote/Upstream、工作区与未推送提交，`Ctrl+S` 手动同步（需 `Enter` 二次确认） |
 | `/model` | 搜索切换模型；`Ctrl+P` 打开独立供应商管理，`Ctrl+R` 刷新，`Ctrl+N` 输入自定义模型名。列表先用缓存或预设打开，再后台刷新；`/model refresh` 跳过旧缓存 |
 | `/think` | 切换思考强度：默认 / low / medium / high，仅模型支持时可选，实时生效并写回配置 |
 | `/context` | 切换上下文长度：档位按当前模型上限生成，也可自定义，下一轮即生效 |
@@ -199,6 +205,23 @@ Spark 使用 MaaS 的 Bearer API Key；适配层保留服务端采样默认值�
 | `/exit` | 退出 |
 
 `/help` 查看命令说明；`/quit` 同 `/exit`。选择类弹窗均可 `ESC` 取消；Ctrl+B 折叠/展开会话栏，Ctrl+Q 退出。
+
+### Git 同步
+
+`/git` 打开独立的 Git 管理界面，展示真实仓库状态：仓库是否初始化、Remote 与 Upstream、当前分支、工作区变更数、未推送提交数、最近 Commit 与最近成功 Push 时间、自动同步开关、每日时间、下次执行时间、最近结果与失败原因。尚未配置 Remote/Upstream 或无法确认的数量显示 `Not configured` / `Unknown`，不会因为配置了 Remote 就声称远程已连通。
+
+`Ctrl+S` 只在 Git 管理界面内有效，且不会直接提交：先弹出确认界面，`Enter` 确认后由后台 Worker 执行，`Esc` 取消。执行阶段逐项显示 Checking working tree / Creating commit / Pushing to remote / Refreshing status；没有实际执行的阶段标记 `Skipped`，不显示虚构进度百分比。同步过程中可以关闭界面，Git 操作与锁会继续完成；任务执行中重复按 `Ctrl+S` 会被拒绝。若终端把 `Ctrl+S` 当作 XON/XOFF 流控拦截，可点击界面中的 Synchronize 行，或自行调整终端设置（QuietMemo 不修改系统终端配置）。
+
+同步规则：
+
+- 有未提交变化时 Stage + Commit，无变化时跳过，不产生空 Commit；即使本次没有新 Commit，也会独立补推历史未推送提交。
+- Push 失败不回滚本地 Commit；下次手动或自动同步只补推已有提交，不会重复生成 Commit。
+- 不执行 Force Push、自动 Pull、Merge、Rebase 或 Reset；远程分叉时停止自动推送并提示人工处理；未配置 Remote/Upstream 时给出设置提示。
+- 手动同步与每日自动同步都使用固定、可读的提交信息，不调用 LLM 生成摘要；CLI `qm commit` 保留原有行为，`auto_push` 只影响该命令。
+- 每日默认本地时间 `03:00` 执行一次 Commit + Push，可通过 `[git]` 配置修改时间、重试间隔或关闭。调度只在 TUI 进程内运行；错过的计划在下次启动时补执行，已成功执行的日期不会重复提交。网络/超时失败按 `retry_interval_minutes` 补推；认证失败、远程分叉、未配置 Remote/Upstream 不会频繁重试。
+- 执行状态保存在 `.quiet-memo/git-sync-state.json`（vault 内 gitignore），只记录本机真实结果；最近成功 Push 时间不会用 Commit 时间代替。
+
+并发保护：记忆文件、会话 JSONL、推断/审计/待确认日志和回顾任务日志的写入与 Git 快照共用 `.quiet-memo/vault.lock`；Stage/Commit/Push 共用 `.quiet-memo/git.lock`。两把锁都是进程内可重入、跨进程互斥，进程异常退出由操作系统释放。固定顺序为 Git 操作锁 → Vault 写锁；Push 网络等待只持有 Git 操作锁，不阻塞聊天和新记忆写入。锁依赖本地文件系统的 advisory lock；通过 NFS/SMB 等多机共享目录访问同一 vault 时无法保证跨主机互斥。外部 Git 操作可能改变引用，`/git` 状态以本地读取为准。
 
 ### 数据流
 
@@ -405,8 +428,8 @@ Bing 对部分中文专有名词会按单字切词（例如「智谱」只按「
 src/quiet_memo/
 ├── app/          cli.py, server.py, tui.py, chat_app.py, chat_commands.py, chat_flow.py,
 │                 chat_widgets.py, chat_input.py, chat_theme.py, command_catalog.py,
-│                 actions.py, ui.py, session_ui.py, chat_reflection.py
-│                                                   # CLI / Textual TUI / FastMCP 入口
+│                 actions.py, ui.py, session_ui.py, chat_reflection.py, chat_git.py,
+│                 git_screen.py                     # CLI / Textual TUI / FastMCP 入口
 ├── agent/        runtime.py, prompts.py, context.py, tools.py,
 │                 session.py, recall.py, file_tools.py # Agent 循环、工具、会话与文件分析
 ├── memory/       service.py, store.py, models.py, queue.py,
@@ -416,8 +439,8 @@ src/quiet_memo/
 │                                                   # Retriever 接口 + BM25/向量/混合
 ├── llm/          client.py, summarizer.py, commit_summary.py
 │                                                   # LiteLLM 适配、会话/提交摘要
-└── infra/        config.py, providers.py, gitops.py, tokens.py,
-                  layout.py, dialogs.py, documents.py, diagnostics.py, search/ # 配置、诊断、文档转换、联网搜索
+└── infra/        config.py, providers.py, gitops.py, gitsync.py, locking.py, tokens.py,
+                  layout.py, dialogs.py, documents.py, diagnostics.py, search/ # 配置、Git 同步与锁、诊断、文档转换、联网搜索
 ```
 
 依赖方向：`app → agent → memory → retrieval → infra`，`memory/agent → llm → infra`。

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import tomllib
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -14,6 +15,7 @@ DEFAULT_API_KEY_ENV = "DEEPSEEK_API_KEY"
 DEFAULT_EMBEDDING_MODEL = "BAAI/bge-small-zh-v1.5"
 DEFAULT_EMBEDDING_BASE_URL = "https://api.siliconflow.cn/v1"
 CONFIG_FILENAME = "quiet-memo.toml"
+_TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
 KEYRING_SERVICE = "quiet-memo"
@@ -83,6 +85,13 @@ class ChatConfig:
     reflect_interval_seconds: float = 300.0
     reflect_request_budget: int = 20
     extract_on_exit: bool = True
+
+
+@dataclass(slots=True)
+class GitConfig:
+    auto_sync: bool = True
+    sync_time: str = "03:00"
+    retry_interval_minutes: int = 30
 
 
 @dataclass(slots=True)
@@ -175,6 +184,7 @@ class Config:
     vault: Path
     llm: LLMConfig = field(default_factory=LLMConfig)
     chat: ChatConfig = field(default_factory=ChatConfig)
+    git: GitConfig = field(default_factory=GitConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
     fetch: FetchConfig = field(default_factory=FetchConfig)
@@ -277,6 +287,7 @@ def _validate_config(data: dict) -> None:
         "search.timeout", "search.max_results", "search.fetch_timeout",
         "chat.reflect_idle_seconds", "chat.reflect_interval_seconds",
         "search.max_engines", "search.timeout_budget", "search.max_requests",
+        "git.retry_interval_minutes",
     ):
         _validate_range(data, name, positive=True)
     for name in (
@@ -287,6 +298,11 @@ def _validate_config(data: dict) -> None:
         _validate_range(data, name)
     for name in ("confidence_threshold", "chat.compact_threshold"):
         _validate_range(data, name, unit_interval=True)
+    git_raw = data.get("git", {})
+    if isinstance(git_raw, dict) and "sync_time" in git_raw:
+        value = git_raw["sync_time"]
+        if not isinstance(value, str) or not _TIME_RE.match(value):
+            raise ConfigError("配置字段 git.sync_time 必须是 HH:MM（24 小时制）。")
 
 
 def load_config(path: Path | str | None = None) -> Config:
@@ -335,6 +351,12 @@ def load_config(path: Path | str | None = None) -> Config:
         reflect_interval_seconds=float(chat_raw.get("reflect_interval_seconds", 300.0)),
         reflect_request_budget=int(chat_raw.get("reflect_request_budget", 20)),
         extract_on_exit=bool(chat_raw.get("extract_on_exit", True)),
+    )
+    git_raw = data.get("git", {})
+    git = GitConfig(
+        auto_sync=bool(git_raw.get("auto_sync", True)),
+        sync_time=str(git_raw.get("sync_time", "03:00")),
+        retry_interval_minutes=int(git_raw.get("retry_interval_minutes", 30)),
     )
     retrieval_raw = data.get("retrieval", {})
     embedding_raw = retrieval_raw.get("embedding", {})
@@ -417,6 +439,7 @@ def load_config(path: Path | str | None = None) -> Config:
         vault=Path(vault_raw).expanduser(),
         llm=llm,
         chat=chat,
+        git=git,
         retrieval=retrieval,
         search=search,
         fetch=fetch,
@@ -443,6 +466,12 @@ vault = {toml_literal(vault.as_posix())}
 
 confidence_threshold = 0.8
 auto_push = false
+
+[git]
+# 每日定时 Commit + Push，仅在 TUI 运行时执行；错过的计划在下次启动补执行。
+auto_sync = true
+sync_time = {toml_literal("03:00")}
+retry_interval_minutes = 30
 
 [llm]
 provider = {toml_literal("deepseek")}

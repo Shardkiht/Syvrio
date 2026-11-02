@@ -68,6 +68,7 @@ memory/agent → llm → infra
 - 可选事实上下文以行尾 `context` JSON 标签保存；日期精度由 YYYY / YYYY-MM / YYYY-MM-DD 保留，不以写入时间补猜事实时间。改写后确认与手动更正不继承旧上下文。
 - 推断单独追加到 `.quiet-memo/inferences.jsonl`，不参与事实检索；新假设只接受有效事实来源 ID，来源去重，重复证据不提升可信度。用户确认仍保持推断与事实分离；状态变更追加 revision 快照事件，更正在同一事件保存新旧状态。来源失效后不可重新启用旧推断；损坏日志不得静默忽略或覆盖；显式尾行恢复仅追加 recovery 标记（ignored_line 为 1 起始物理行号），中间损坏仍报错。
 - `.quiet-memo/vectors.npz` 是向量检索的派生缓存（含 `model_id`，换模型自动失效），vault 内 gitignore，可删除重建，不进 Git 历史。
+- Vault 写入（记忆、会话追加、审计/推断/回顾日志）与 Git 快照共享 `.quiet-memo/vault.lock`；Stage/Commit/Push 使用 `.quiet-memo/git.lock`。两把锁跨进程互斥，固定顺序 Git → Vault；Push 网络等待只持 Git 锁。同步状态 `.quiet-memo/git-sync-state.json` 与锁文件在 vault 内 gitignore。
 - `.quiet-memo/search-cache.json` 是联网搜索的派生缓存（按 TTL 过期），vault 内 gitignore，可删除重建，不进 Git 历史。
 - `sessions/<id>.jsonl` 是追加写的事件流，不重写旧行；上下文压缩只追加 `summary` 记录，不删除原文。
 - 会话追加前递归隐藏已识别凭据；损坏尾行只读恢复，续写追加 `recovery` 标记记录 `ignored_line`（1 起始物理行号），保留原始字节；未标记的中间行损坏不能静默忽略。

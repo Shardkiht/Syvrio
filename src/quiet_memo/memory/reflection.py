@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Callable
 
 from ..infra.tokens import truncate_to_tokens
 from ..infra.diagnostics import record_event
+from ..infra.locking import vault_write_lock
 from ..llm.client import complete
 from .detect import contains_secret
 from .inference import source_fingerprint
@@ -47,6 +48,7 @@ class ReflectionEngine:
         self.path = service.config.vault / ".quiet-memo" / "reflection-jobs.jsonl"
         self._running = threading.Lock()
         self._cancel = threading.Event()
+        self._vault_lock = vault_write_lock(service.config.vault)
 
     def cancel(self) -> None:
         self._cancel.set()
@@ -83,6 +85,11 @@ class ReflectionEngine:
         return truncate_to_tokens(text, max_tokens)
 
     def _events(self) -> tuple[list[dict], int | None]:
+        # 与 Git 快照、其他进程的追加共用写锁，避免读到写了一半的任务日志。
+        with self._vault_lock:
+            return self._events_unlocked()
+
+    def _events_unlocked(self) -> tuple[list[dict], int | None]:
         if not self.path.exists():
             return [], None
         lines = self.path.read_bytes().splitlines()
@@ -116,30 +123,31 @@ class ReflectionEngine:
     def _record(self, key: str, status: str, proposals: list[ReflectionProposal] | None = None,
                 mode: str | None = None, sources: list[str] | None = None,
                 inputs: list[str] | None = None, error_kind: str | None = None) -> None:
-        _, damaged_tail = self._events()
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now().astimezone().isoformat(timespec="seconds")
-        with self.path.open("a+b") as handle:
-            handle.seek(0, 2)
-            if handle.tell():
-                handle.seek(-1, 2)
-                if handle.read(1) != b"\n":
-                    handle.write(b"\n")
-            if damaged_tail is not None:
-                marker = {"status": "recovery", "ignored_line": damaged_tail, "at": stamp}
-                handle.write((json.dumps(marker) + "\n").encode())
-            event = {"key": key, "status": status, "at": stamp}
-            if error_kind is not None:
-                event["error_kind"] = error_kind
-            if proposals is not None:
-                event["proposals"] = [proposal.model_dump() for proposal in proposals]
-            if mode is not None:
-                event["mode"] = mode
-            if sources is not None:
-                event["sources"] = sources
-            if inputs is not None:
-                event["inputs"] = inputs
-            handle.write((json.dumps(event, ensure_ascii=False) + "\n").encode())
+        with self._vault_lock:
+            _, damaged_tail = self._events_unlocked()
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now().astimezone().isoformat(timespec="seconds")
+            with self.path.open("a+b") as handle:
+                handle.seek(0, 2)
+                if handle.tell():
+                    handle.seek(-1, 2)
+                    if handle.read(1) != b"\n":
+                        handle.write(b"\n")
+                if damaged_tail is not None:
+                    marker = {"status": "recovery", "ignored_line": damaged_tail, "at": stamp}
+                    handle.write((json.dumps(marker) + "\n").encode())
+                event = {"key": key, "status": status, "at": stamp}
+                if error_kind is not None:
+                    event["error_kind"] = error_kind
+                if proposals is not None:
+                    event["proposals"] = [proposal.model_dump() for proposal in proposals]
+                if mode is not None:
+                    event["mode"] = mode
+                if sources is not None:
+                    event["sources"] = sources
+                if inputs is not None:
+                    event["inputs"] = inputs
+                handle.write((json.dumps(event, ensure_ascii=False) + "\n").encode())
 
     @staticmethod
     def _signature(entry: Entry) -> str:

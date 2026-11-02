@@ -25,6 +25,7 @@ from ..infra.tokens import format_tokens
 from ..infra.diagnostics import record_event
 from ..memory.service import MemoryService
 from .chat_commands import ChatCommandsMixin
+from .chat_git import ChatGitMixin
 from .chat_reflection import ChatReflectionMixin
 from .chat_flow import ChatFlowMixin, _QueuedLine
 from .chat_input import BarInput
@@ -45,7 +46,7 @@ from .chat_widgets import (
 from .session_ui import visible_sessions
 
 
-class ChatApp(ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixin, App):
+class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixin, App):
     TITLE = "QuietMemo — Personal Memory"
 
     CSS = APP_CSS
@@ -133,6 +134,7 @@ class ChatApp(ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixin, App):
         self._run_catchup()
         self._warm_search()
         self._start_auto_reflection()
+        self._start_git_scheduler()
 
     def _handle_exception(self, error: Exception) -> None:
         record_event("tui.failed", error, busy=self.busy, streaming=self._ask_active,
@@ -183,6 +185,7 @@ class ChatApp(ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixin, App):
         self.add_card(f"Startup catch-up failed: {message}")
         self.refresh_pending()
         self.update_status()
+        self._git_scheduler_tick()
 
     def _after_catchup(self, result: dict, auto_commit: str | None) -> None:
         self._reflection_ready = True
@@ -202,6 +205,7 @@ class ChatApp(ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixin, App):
             self.refresh_sessions()
             self.refresh_pending()
             self.update_status()
+        self._git_scheduler_tick()
 
     def action_toggle_sidebar(self) -> None:
         self._set_sidebar_visible(not self.query_one("#sidebar", Vertical).display)

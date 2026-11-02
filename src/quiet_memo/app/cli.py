@@ -506,6 +506,10 @@ def commit(
         return
     if not result["committed"]:
         console.print(f"[dim]{result['summary']}[/dim]")
+        if result.get("pushed"):
+            console.print("[bold]已推送[/]")
+        elif result.get("push_error"):
+            console.print(f"[#b8b8b8]推送未成功：{result['push_error']}[/]")
         return
     console.print("[bold]本次提交总结[/bold]")
     console.print(result["summary"])

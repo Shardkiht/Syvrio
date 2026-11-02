@@ -55,6 +55,8 @@ class ChatCommandsMixin:
                 self.add_markdown_card(summary, "Session summary") if summary else self.add_card("This session has no summary yet.")
         elif command == "/status":
             self._show_status()
+        elif command == "/git":
+            self.open_git_screen()
         elif command == "/rename":
             if not self.runtime.has_session:
                 self.add_card("The session is not created yet; send a message first, then rename.")

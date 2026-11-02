@@ -11,6 +11,7 @@ from typing import Any
 
 from ..infra.tokens import estimate_tokens
 from ..infra.diagnostics import record_event
+from ..infra.locking import vault_write_lock
 from ..memory.detect import redact_secrets
 
 _LOG = logging.getLogger(__name__)
@@ -214,28 +215,31 @@ class Session:
 class SessionStore:
     def __init__(self, vault: Path):
         self.root = Path(vault) / "sessions"
+        # 会话追加与 Git 快照共用 Vault 写锁，避免提交到写了一半的 JSONL。
+        self._lock = vault_write_lock(vault)
         self._listing_cache: dict[str, tuple[tuple[int, int], dict]] = {}
         # 补沉淀扫描只需知道文件还有多少待抽取消息，不必保留完整会话。
         self._undistilled_cache: dict[str, tuple[tuple[int, int], int]] = {}
 
     def create(self) -> Session:
         stamp = datetime.now()
-        self.root.mkdir(parents=True, exist_ok=True)
-        session_id = f"s-{stamp:%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
-        path = self.root / f"{session_id}.jsonl"
-        # Exclusive creation also protects the collision window between processes.
-        while True:
-            meta = {
-                "type": "meta", "id": session_id,
-                "started_at": stamp.isoformat(timespec="seconds"), "cwd": str(Path.cwd()),
-            }
-            try:
-                with path.open("x", encoding="utf-8") as handle:
-                    handle.write(json.dumps(meta, ensure_ascii=False) + "\n")
-                break
-            except FileExistsError:
-                session_id = f"s-{stamp:%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
-                path = self.root / f"{session_id}.jsonl"
+        with self._lock:
+            self.root.mkdir(parents=True, exist_ok=True)
+            session_id = f"s-{stamp:%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
+            path = self.root / f"{session_id}.jsonl"
+            # Exclusive creation also protects the collision window between processes.
+            while True:
+                meta = {
+                    "type": "meta", "id": session_id,
+                    "started_at": stamp.isoformat(timespec="seconds"), "cwd": str(Path.cwd()),
+                }
+                try:
+                    with path.open("x", encoding="utf-8") as handle:
+                        handle.write(json.dumps(meta, ensure_ascii=False) + "\n")
+                    break
+                except FileExistsError:
+                    session_id = f"s-{stamp:%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
+                    path = self.root / f"{session_id}.jsonl"
 
         return Session(id=session_id, started_at=meta["started_at"], path=path, records=[meta])
 
@@ -287,22 +291,23 @@ class SessionStore:
         record = _redact_record(record)
         record.setdefault("at", now_iso())
         # 损坏尾行原样保留：只追加换行和恢复标记，后续加载据此跳过该行。
-        with session.path.open("a+b") as handle:
-            handle.seek(0, 2)
-            if handle.tell():
-                handle.seek(-1, 2)
-                if handle.read(1) != b"\n":
-                    handle.write(b"\n")
-            if session.damaged_tail_line is not None:
-                recovery = {
-                    "type": "recovery", "ignored_line": session.damaged_tail_line,
-                    "at": now_iso(),
-                }
-                handle.write((json.dumps(recovery) + "\n").encode("utf-8"))
-                session.records.append(recovery)
-                session.damaged_tail_line = None
-            handle.write((json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8"))
-        session.records.append(record)
+        with self._lock:
+            with session.path.open("a+b") as handle:
+                handle.seek(0, 2)
+                if handle.tell():
+                    handle.seek(-1, 2)
+                    if handle.read(1) != b"\n":
+                        handle.write(b"\n")
+                if session.damaged_tail_line is not None:
+                    recovery = {
+                        "type": "recovery", "ignored_line": session.damaged_tail_line,
+                        "at": now_iso(),
+                    }
+                    handle.write((json.dumps(recovery) + "\n").encode("utf-8"))
+                    session.records.append(recovery)
+                    session.damaged_tail_line = None
+                handle.write((json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8"))
+            session.records.append(record)
         return record
 
     def rename(self, session: Session, title: str) -> None:
@@ -310,11 +315,12 @@ class SessionStore:
 
     def delete(self, session_id: str) -> bool:
         path = self._path(session_id)
-        if not path.exists():
-            return False
-        path.unlink()
-        self._listing_cache.pop(session_id, None)
-        self._undistilled_cache.pop(session_id, None)
+        with self._lock:
+            if not path.exists():
+                return False
+            path.unlink()
+            self._listing_cache.pop(session_id, None)
+            self._undistilled_cache.pop(session_id, None)
         return True
 
     def _listing_row(self, path: Path, with_tokens: bool) -> dict | None:

@@ -79,7 +79,12 @@ Manual configuration example:
 ```toml
 vault = "C:/Users/you/.quiet-memo/vault"
 confidence_threshold = 0.8
-auto_push = false
+auto_push = false              # Affects `qm commit` only; TUI sync uses [git] below
+
+[git]
+auto_sync = true               # Daily Commit + Push while the TUI is running
+sync_time = "03:00"            # Local time, HH:MM
+retry_interval_minutes = 30    # Retry interval after network/timeout failures
 
 [llm]
 provider = "deepseek"          # provider: deepseek/siliconflow/dashscope/spark/openrouter/openai/custom
@@ -184,6 +189,7 @@ In-session commands:
 | `/undo` | Withdraw the latest turn and restore its user message for editing |
 | `/summary` | View the current session summary |
 | `/status` | Session, model, retrieval mode, context, and pending status |
+| `/git` | Open Git management: repository, Remote/Upstream, working tree and unpushed commits; `Ctrl+S` starts a manual sync (requires `Enter` confirmation) |
 | `/model` | Search and switch models; `Ctrl+P` opens separate provider management, `Ctrl+R` refreshes, and `Ctrl+N` enters a custom model name. Opens from cache or presets, then refreshes in the background; `/model refresh` skips the old cache |
 | `/think` | Switch reasoning effort: default / low / medium / high, only when the model supports it; applies immediately and persists to the config |
 | `/context` | Switch the context window: presets generated from the current model's limit, custom value allowed; effective on the next turn |
@@ -198,6 +204,23 @@ In-session commands:
 | `/exit` | Exit |
 
 `/help` shows command descriptions; `/quit` is the same as `/exit`.
+
+### Git synchronization
+
+`/git` opens a dedicated Git management screen backed by the real repository: initialization state, Remote and Upstream, current branch, modified files, unpushed commits, the latest commit and latest successful push, auto-sync state, daily time, next run, last result, and the latest failure reason. Missing or unverifiable values are shown as `Not configured` or `Unknown`; a configured Remote is never reported as a verified connection.
+
+`Ctrl+S` only works inside the Git screen and never commits immediately: it opens a confirmation screen, `Enter` runs the background Worker, and `Esc` cancels. Stages are reported as Checking working tree / Creating commit / Pushing to remote / Refreshing status. Stages that did not run are marked `Skipped`; no fake percentage is shown. Closing the screen does not cancel a running operation or release its locks early, and repeated `Ctrl+S` during a run is rejected. If the terminal intercepts `Ctrl+S` as XON/XOFF flow control, click the Synchronize row or adjust the terminal yourself; QuietMemo does not modify terminal settings.
+
+Sync rules:
+
+- Stage and commit only when the working tree has changes; never create empty commits. Push is checked independently, so existing unpushed commits are pushed even when nothing new was committed.
+- A failed push preserves the local commit. Later manual or scheduled runs push the existing commit without creating another one.
+- Never force-push, pull, merge, rebase, or reset. A diverged remote stops automatic pushing and requires manual handling; missing Remote/Upstream produces setup guidance.
+- Both manual and daily sync use fixed, readable commit messages and never call the LLM. The CLI `qm commit` keeps its previous behavior; `auto_push` applies only to that command.
+- The daily job runs once at `03:00` local time by default. Configure the time, retry interval, or disable it under `[git]`. Scheduling lives inside the TUI process; a missed run is compensated on the next launch, and a date that already succeeded is not repeated. Network/timeout failures retry after `retry_interval_minutes`; authentication failures, divergence, and missing Remote/Upstream do not retry repeatedly.
+- Runtime state is stored in `.quiet-memo/git-sync-state.json` (gitignored inside the vault) and records only real local results; a successful push time is never inferred from the commit time.
+
+Concurrency: memory files, session JSONL, inference/audit/pending logs, and reflection job logs share `.quiet-memo/vault.lock` with Git snapshot creation; Stage/Commit/Push share `.quiet-memo/git.lock`. Both locks are reentrant in-process and mutually exclusive across processes, and the OS releases them after a crash. The fixed order is Git operation lock → Vault write lock; a network push holds only the Git lock, so chatting and new memory writes continue. Advisory locks depend on the local filesystem; sharing one vault over NFS/SMB cannot guarantee cross-host exclusion. External Git operations may change refs, so `/git` reflects the last local read.
 
 ### Data flow
 
@@ -407,8 +430,8 @@ Credential detection considers assignment syntax and separators. It permits Chin
 src/quiet_memo/
 ├── app/          cli.py, server.py, tui.py, chat_app.py, chat_commands.py, chat_flow.py,
 │                 chat_widgets.py, chat_input.py, chat_theme.py, command_catalog.py,
-│                 actions.py, ui.py, session_ui.py, chat_reflection.py
-│                                                   # CLI / Textual TUI / FastMCP entry points
+│                 actions.py, ui.py, session_ui.py, chat_reflection.py, chat_git.py,
+│                 git_screen.py                     # CLI / Textual TUI / FastMCP entry points
 ├── agent/        runtime.py, prompts.py, context.py, tools.py,
 │                 session.py, recall.py, file_tools.py # Agent loop, tools, sessions, file analysis
 ├── memory/       service.py, store.py, models.py, queue.py,
@@ -418,8 +441,8 @@ src/quiet_memo/
 │                                                   # Retriever interface + BM25/vector/hybrid
 ├── llm/          client.py, summarizer.py, commit_summary.py
 │                                                   # LiteLLM adapter, session/commit summaries
-└── infra/        config.py, providers.py, gitops.py, tokens.py,
-                  layout.py, dialogs.py, documents.py, diagnostics.py, search/ # Config, diagnostics, document conversion, web search
+└── infra/        config.py, providers.py, gitops.py, gitsync.py, locking.py, tokens.py,
+                  layout.py, dialogs.py, documents.py, diagnostics.py, search/ # Config, Git sync and locks, diagnostics, document conversion, web search
 ```
 
 Dependency direction: `app → agent → memory → retrieval → infra`, `memory/agent → llm → infra`.

@@ -120,6 +120,12 @@ APP_CSS = """
     .cmd-desc { color: #a3a3a3; }
 
     PickScreen, SessionPickerScreen, TextInputScreen { align: center middle; background: #0d0d0d 75%; }
+    GitScreen, GitConfirmScreen { align: center middle; background: #0d0d0d 75%; }
+    #git-card { width: 72; max-width: 92%; height: auto; max-height: 85%; background: $panel; border: round #484848; padding: 1 2; }
+    #git-body { height: auto; max-height: 55vh; min-height: 8; padding: 0 1; background: $bg; }
+    #git-content { height: auto; width: 1fr; color: #d5d5d5; }
+    #git-action { height: 1; color: $accent; margin-top: 1; }
+    #git-confirm { height: auto; color: #d5d5d5; }
     #pick-card { width: 64; height: auto; max-height: 70%; background: $panel; border: round #484848; padding: 1 2; }
     #picker-input, #pick-search, #pick-input { width: 1fr; background: #171717; color: #dedede; border: round #414141; }
     #picker-input:focus, #pick-search:focus, #pick-input:focus { background: #222222; border: round #6cb6ff; }

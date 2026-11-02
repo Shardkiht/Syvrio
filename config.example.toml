@@ -9,7 +9,16 @@ vault = "~/.quiet-memo/vault"
 confidence_threshold = 0.8
 
 # 提交后是否自动 push（需要已配置 remote）。
+# 仅影响 `qm commit`；TUI 的手动/每日同步由下方 [git] 控制。
 auto_push = false
+
+[git]
+# 每日定时 Commit + Push，仅在 TUI 运行时执行；错过的计划在下次启动补执行。
+auto_sync = true
+# 本地时区 HH:MM。有效范围 00:00–23:59。
+sync_time = "03:00"
+# 网络/超时失败后的自动补推间隔（分钟）；认证失败、远程分叉、未配置 remote 不会频繁重试。
+retry_interval_minutes = 30
 
 [llm]
 provider = "deepseek"

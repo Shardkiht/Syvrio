@@ -8,6 +8,7 @@ SLASH_COMMANDS = [
     ("undo", "/undo", "Undo and edit last message"),
     ("summary", "/summary", "Show summary"),
     ("status", "/status", "Session status"),
+    ("git", "/git", "Git status and synchronization"),
     ("model", "/model [refresh]", "Models & providers"),
     ("think", "/think", "Reasoning effort"),
     ("context", "/context", "Context window"),

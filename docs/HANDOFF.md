@@ -1,5 +1,16 @@
 # 开发交接
 
+## Git 维护功能增强（2026-11-02）
+
+- 分支 `feature-memory-evolution`。完成 TUI `/git` 管理界面：真实仓库状态、Remote/Upstream、未提交文件、未推送提交、最近 Commit/Push、自动同步配置、最近结果与错误；`Ctrl+S` 仅在界面内打开确认，`Enter` 执行，`Esc` 取消，后台 Worker 分阶段反馈。关闭界面不取消执行，重复触发被拒绝。底部模型/上下文/Pending 状态栏未加入 Git 信息。
+- Commit/Push 解耦：有变更才提交，无变更时仍可独立补推；Push 失败保留本地 Commit，下次只补推；禁止 Force/Pull/Merge/Rebase/Reset；远程分叉停止自动推送；未配置 Remote/Upstream 显示设置提示。手动与每日同步均使用固定提交信息，不调用 LLM；`qm commit` 与 `auto_push` 旧语义保留。
+- 每日默认本地 03:00 的 TUI 进程内调度，支持修改时间、关闭、启动补执行、按日期去重；网络/超时失败按 `retry_interval_minutes` 补推，认证/分叉/未配置不频繁重试。状态持久化到 vault 内 `.quiet-memo/git-sync-state.json`（gitignore），最近成功 Push 时间不从 Commit 推断。
+- 并发：新增 `.quiet-memo/vault.lock`（记忆、会话 JSONL、审计/推断/回顾日志与 Git 快照）和 `.quiet-memo/git.lock`（Stage/Commit/Push），均为进程内重入、跨进程互斥，进程崩溃由 OS 释放；固定顺序 Git → Vault。Push 网络等待只持 Git 锁，不阻塞聊天和记忆写入。SessionStore 与回顾任务日志已接入同一 Vault 锁。
+- 新增 `infra/locking.py`、`infra/gitsync.py`、`app/git_screen.py`、`app/chat_git.py`；增强 `infra/gitops.py`（超时、非交互、状态/上游/未推送查询、错误分类、敏感路径检查），扩展 `infra/config.py` `[git]` 配置。中英文 README、`config.example.toml` 与结构树同步。
+- 验证：新增 31 项 Git 同步/调度/并发测试与 6 项 TUI 交互测试，使用临时 vault、本地 bare remote 和模拟时钟，不触碰真实记忆库或外部远程。全量 `pytest -q`（启用项目 env.sh 的 fastembed 缓存并设置 `HF_HUB_OFFLINE=1`）为 994 passed、2 skipped，耗时 106.54 秒；此前未设置缓存路径时 fastembed 会尝试联网下载，属于环境问题。
+- 已知边界：文件锁依赖本地文件系统 advisory lock，NFS/SMB 多主机共享同一 vault 不保证跨主机互斥；TUI 未运行时不会主动定时，只由下次启动补偿；外部 Git 操作可能改变引用，界面状态以本地读取为准；终端 XON/XOFF 可能拦截 `Ctrl+S`，界面提供点击同步行作为替代。
+- 按本次任务要求未 Commit、未 Push 源码，等待验收。
+
 ## CI 环境与失败修复（2026-11-02）
 
 - 用户指定远程测试环境统一 Debian：演进分支的测试与发布 workflow 均使用 Debian 13 slim 容器、Python 3.12；Ubuntu runner 仅作为 Docker 宿主。安装 Git、CA 证书与 Node 所需 C++ 运行库后再 checkout。保留测试、构建和 CLI help 检查，未修改冻结 main 的 workflow。

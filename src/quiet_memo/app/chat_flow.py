@@ -30,7 +30,7 @@ class ChatFlowMixin:
     # 等待 LLM 期间可直接执行的导航/只读命令；其余提交（消息与命令）进全局 FIFO。
     SAFE_COMMANDS = frozenset({
         "/new", "/sessions", "/exit", "/quit", "/help", "/model",
-        "/status", "/topics", "/summary", "/pending",
+        "/status", "/topics", "/summary", "/pending", "/git",
     })
 
     # ---------- 提交与调度 ----------
