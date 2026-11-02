@@ -150,7 +150,8 @@ class GitSyncService:
         state = self._read_state()
         if target > now:
             return target
-        if state.get("last_daily_success_date") == now.date().isoformat():
+        today = now.date().isoformat()
+        if state.get("last_daily_success_date") == today or state.get("last_daily_blocked_date") == today:
             return target + timedelta(days=1)
         return now
 
@@ -160,7 +161,8 @@ class GitSyncService:
             return False
         now = now or _now()
         state = self._read_state()
-        if state.get("last_daily_success_date") == now.date().isoformat():
+        today = now.date().isoformat()
+        if state.get("last_daily_success_date") == today or state.get("last_daily_blocked_date") == today:
             return False
         if now.time() < self._schedule_time():
             return False
@@ -416,8 +418,15 @@ class GitSyncService:
             # 只有实际 push 成功才更新；不能用 Commit 时间代替。
             state["last_push_at"] = now.isoformat(timespec="seconds")
         if result.trigger == "scheduled":
-            if result.status == "success" or result.error_kind not in RETRYABLE:
+            state["last_daily_attempt_date"] = now.date().isoformat()
+            # 成功与不可重试失败分别记录；不可重试只暂停当日重复尝试。
+            if result.status == "success":
                 state["last_daily_success_date"] = now.date().isoformat()
+                state["last_daily_blocked_date"] = None
+            elif result.error_kind not in RETRYABLE:
+                state["last_daily_blocked_date"] = now.date().isoformat()
+            else:
+                state["last_daily_blocked_date"] = None
             if result.error_kind in RETRYABLE:
                 retry = now + timedelta(minutes=self.config.git.retry_interval_minutes)
                 state["retry_after"] = retry.isoformat(timespec="seconds")
