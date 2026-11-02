@@ -6,14 +6,14 @@ from rich.theme import Theme
 # Scoped to reply rendering; other Rich/CLI output keeps its own theme.
 MARKDOWN_THEME = Theme({
     "markdown.h1": "bold #dedede not underline",
-    "markdown.h2": "bold #d6a18c not underline",
+    "markdown.h2": "bold #cfcfcf not underline",
     "markdown.h3": "bold #c5c5c5 not underline",
     "markdown.h4": "bold #c5c5c5 not underline",
     "markdown.h5": "bold #c5c5c5 not underline",
     "markdown.h6": "bold #c5c5c5 not underline",
-    "markdown.link": "#dedede underline",
-    "markdown.link_url": "#dedede underline",
-    "markdown.code": "#d6b6a6 on #252525",
+    "markdown.link": "#6cb6ff underline",
+    "markdown.link_url": "#6cb6ff underline",
+    "markdown.code": "#d8d8d8 on #252525",
     "markdown.block_quote": "#9a9a9a",
     "markdown.table.border": "#444444",
     "markdown.table.header": "bold #d8d8d8",
@@ -23,10 +23,10 @@ MARKDOWN_THEME = Theme({
 })
 
 APP_CSS = """
-    /* Evolution: neutral surfaces, a single warm accent, and content-led hierarchy. */
-    $accent: #d6a18c;
+    /* Evolution: neutral surfaces, a clear sky-blue accent, and content-led hierarchy. */
+    $accent: #6cb6ff;
     $secondary: #a6a6a6;
-    $warm: #d8ba86;
+    $warm: #a6a6a6;
     $dim: #3a3a3a;
     $muted: #a6a6a6;
     $faint: #818181;
@@ -122,7 +122,7 @@ APP_CSS = """
     PickScreen, SessionPickerScreen, TextInputScreen { align: center middle; background: #0d0d0d 75%; }
     #pick-card { width: 64; height: auto; max-height: 70%; background: $panel; border: round #484848; padding: 1 2; }
     #picker-input, #pick-search, #pick-input { width: 1fr; background: #171717; color: #dedede; border: round #414141; }
-    #picker-input:focus, #pick-search:focus, #pick-input:focus { background: #222222; border: round #d6a18c; }
+    #picker-input:focus, #pick-search:focus, #pick-input:focus { background: #222222; border: round #6cb6ff; }
     #picker-input, #pick-search { margin-bottom: 1; }
     #picker-list { height: auto; max-height: 16; }
     /* 与侧栏一致：SessionItem 内层 Vertical 默认 1fr 会把整行撑满 */

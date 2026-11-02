@@ -592,4 +592,6 @@ On Windows, redirected CLI stdout/stderr use UTF-8; native terminal handling and
 
 CI tests, package builds and the `qm --help` check run inside Debian 13 with Python 3.12; publishing also uses Debian 13. The GitHub-hosted Ubuntu runner only hosts the container. There is no Windows/Ubuntu test matrix; Windows behavior requires separate validation when relevant.
 
-The evolution TUI uses neutral gray surfaces with one warm accent. A centered welcome block gives way to a left-aligned conversation after the first message. User messages occupy full-width gray panels, while assistant text uses open spacing. A flat composer indicates focus with a left marker; model, context and shortcuts sit together below. The empty-input hint stays on its top edge to avoid overlapping IME composition.
+The evolution TUI uses neutral gray surfaces with a sky-blue accent (`#6CB6FF`). A centered welcome block gives way to a left-aligned conversation after the first message. User messages occupy full-width gray panels, while assistant text uses open spacing. A flat composer indicates focus with a left marker; model, context and shortcuts sit together below. The empty-input hint stays on its top edge to avoid overlapping IME composition.
+
+The sidebar starts collapsed. Press `Ctrl+B` or click the top-left expand control to show conversations.

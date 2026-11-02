@@ -125,6 +125,7 @@ class ChatApp(ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixin, App):
         self.query_one("#sessions", ListView).can_focus = False
         self.query_one("#chat", VerticalScroll).can_focus = False
         self.query_one("#input", Input).focus()
+        self._set_sidebar_visible(False)
         self._run_catchup()
         self._warm_search()
         self._start_auto_reflection()
@@ -478,7 +479,7 @@ class ChatApp(ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixin, App):
         # 单一欢迎块让短内容保持聚合；小窗口仍由聊天容器滚动。
         chat.mount(Vertical(
             Static("PERSONAL MEMORY", classes="welcome-eyebrow"),
-            Static("[bold #e3e3e3]quiet[/][bold #d6a18c]-memo[/]", classes="welcome-brand"),
+            Static("[bold #e3e3e3]quiet[/][bold #6cb6ff]-memo[/]", classes="welcome-brand"),
             Static("Pick up where you left off.", classes="welcome-line"),
             Static("Talk naturally. The useful details stay with you.", classes="welcome-meta"),
             Static("[bold]/sessions[/]  Continue a conversation", classes="welcome-shortcut"),

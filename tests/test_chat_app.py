@@ -967,6 +967,9 @@ async def test_ctrl_b_toggles_sidebar(tmp_path):
     async with app.run_test(size=(120, 40)) as pilot:
         sidebar = app.query_one("#sidebar", Vertical)
         expand = app.query_one("#show-sidebar", SidebarToggle)
+        assert not sidebar.display and expand.display
+        await pilot.press("ctrl+b")
+        await pilot.pause()
         assert sidebar.display and not expand.display
         await pilot.press("ctrl+b")
         await pilot.pause()
@@ -990,6 +993,8 @@ async def test_main_focus_stays_on_chat_input(tmp_path):
 
     app = build_app(tmp_path, [])
     async with app.run_test(size=(100, 30)) as pilot:
+        app.show_sidebar()
+        await pilot.pause()
         await pilot.pause()
         widget = app.query_one("#input", Input)
         sessions = app.query_one("#sessions", ListView)
@@ -1045,6 +1050,8 @@ async def test_sidebar_rows_align_with_new_session(tmp_path):
             {"type": "message", "id": new_message_id(), "role": "user", "content": f"内容 {index}"},
         )
     async with app.run_test(size=(100, 30)) as pilot:
+        app.show_sidebar()
+        await pilot.pause()
         for _ in range(60):
             await pilot.pause()
             if app.query("#sessions > ListItem"):
@@ -1074,6 +1081,8 @@ async def test_sidebar_items_are_compact_and_clickable(tmp_path):
         )
         ids.append(session.id)
     async with app.run_test(size=(100, 30)) as pilot:
+        app.show_sidebar()
+        await pilot.pause()
         # 等启动补沉淀（含自动提交）结束再操作列表：补记的 refresh_sessions 会重建
         # 列表控件，点击旧引用会被吞掉。busy 不覆盖后台补记，必须等 worker 收尾。
         for _ in range(200):
@@ -1392,7 +1401,7 @@ async def test_session_picker_focus_bar_follows_selection(tmp_path):
         await pilot.pause()
 
         assert other.has_class("-highlight")
-        assert other.styles.border_left[1] == Color.parse("#d6a18c")  # 焦点强调色
+        assert other.styles.border_left[1] == Color.parse("#6cb6ff")  # 焦点强调色
         assert current.styles.border_left[1] == Color.parse("#a6a6a6")  # 当前会话弱色
         assert len({row.query_one(".session-title").region.x for row in rows}) == 1
 
@@ -1490,6 +1499,7 @@ async def test_new_session_click_queues_while_busy(tmp_path):
     # 回归：导航期间点击新会话不能被静默丢弃；LLM 等待期则应立即切换（另测）。
     app = build_app(tmp_path, [])
     async with app.run_test(size=(120, 40)) as pilot:
+        app.show_sidebar()
         await pilot.pause()
         app._begin_navigation()
         await pilot.click("#new-session")
@@ -2057,7 +2067,7 @@ async def test_dialog_inputs_share_evolution_focus_style(tmp_path):
         await pilot.pause()
         main_input = app.query_one("#input", Input)
         assert main_input.styles.background == Color.parse("#202020")
-        assert main_input.styles.border_left[1] == Color.parse("#d6a18c")
+        assert main_input.styles.border_left[1] == Color.parse("#6cb6ff")
         main_input.blur()
         await pilot.pause()
         assert main_input.styles.background == Color.parse("#202020")
