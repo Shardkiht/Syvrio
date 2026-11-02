@@ -2056,18 +2056,18 @@ async def test_dialog_inputs_share_evolution_focus_style(tmp_path):
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         main_input = app.query_one("#input", Input)
-        assert main_input.styles.background == Color.parse("#172131")
+        assert main_input.styles.background == Color.parse("#1d1d1d")
         assert main_input.styles.border_top[1] == Color.parse("#8dd8c0")
         main_input.blur()
         await pilot.pause()
-        assert main_input.styles.background == Color.parse("#172131")
+        assert main_input.styles.background == Color.parse("#1d1d1d")
         main_input.focus()
 
         app.open_session_picker()
         await pilot.pause()
         assert isinstance(app.screen, SessionPickerScreen)
         picker_input = app.screen.query_one("#picker-input", Input)
-        assert picker_input.styles.background == Color.parse("#1b293b")
+        assert picker_input.styles.background == Color.parse("#222222")
         assert picker_input.styles.border_top[1] == main_input.styles.border_top[1]
 
 
