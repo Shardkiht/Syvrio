@@ -7,9 +7,9 @@
 - 每日默认本地 03:00 的 TUI 进程内调度，支持修改时间、关闭、启动补执行、按日期去重；网络/超时失败按 `retry_interval_minutes` 补推，认证/分叉/未配置不频繁重试。状态持久化到 vault 内 `.quiet-memo/git-sync-state.json`（gitignore），最近成功 Push 时间不从 Commit 推断。
 - 并发：新增 `.quiet-memo/vault.lock`（记忆、会话 JSONL、审计/推断/回顾日志与 Git 快照）和 `.quiet-memo/git.lock`（Stage/Commit/Push），均为进程内重入、跨进程互斥，进程崩溃由 OS 释放；固定顺序 Git → Vault。Push 网络等待只持 Git 锁，不阻塞聊天和记忆写入。SessionStore 与回顾任务日志已接入同一 Vault 锁。
 - 新增 `infra/locking.py`、`infra/gitsync.py`、`app/git_screen.py`、`app/chat_git.py`；增强 `infra/gitops.py`（超时、非交互、状态/上游/未推送查询、错误分类、敏感路径检查），扩展 `infra/config.py` `[git]` 配置。中英文 README、`config.example.toml` 与结构树同步。
-- 验证：新增 31 项 Git 同步/调度/并发测试与 6 项 TUI 交互测试，使用临时 vault、本地 bare remote 和模拟时钟，不触碰真实记忆库或外部远程。全量 `pytest -q`（启用项目 env.sh 的 fastembed 缓存并设置 `HF_HUB_OFFLINE=1`）为 994 passed、2 skipped，耗时 106.54 秒；此前未设置缓存路径时 fastembed 会尝试联网下载，属于环境问题。
+- 验证：新增 31 项 Git 同步/调度/并发测试与 6 项 TUI 交互测试，使用临时 vault、本地 bare remote 和模拟时钟，不触碰真实记忆库或外部远程。全量 `pytest -q`（启用项目 env.sh 的 fastembed 缓存并设置 `HF_HUB_OFFLINE=1`）为 994 passed、2 skipped，耗时 101.07 秒；此前未设置缓存路径时 fastembed 会尝试联网下载，属于环境问题。
 - 已知边界：文件锁依赖本地文件系统 advisory lock，NFS/SMB 多主机共享同一 vault 不保证跨主机互斥；TUI 未运行时不会主动定时，只由下次启动补偿；外部 Git 操作可能改变引用，界面状态以本地读取为准；终端 XON/XOFF 可能拦截 `Ctrl+S`，界面提供点击同步行作为替代。
-- 按本次任务要求未 Commit、未 Push 源码，等待验收。
+- 已提交 `ca53b1e` 并推送到 `origin/feature-memory-evolution`（2026-11-02）；本地 HTTPS 访问 GitHub 不通，推送使用同一仓库的 SSH 地址完成。
 
 ## CI 环境与失败修复（2026-11-02）
 
