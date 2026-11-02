@@ -103,7 +103,7 @@ class VaultLock:
         else:
             acquired = self._local.acquire(timeout=max(0.0, timeout))
         if not acquired:
-            return False
+            raise LockTimeout(f"锁被同进程其他线程占用：{self._path.name}")
         try:
             if self._depth == 0:
                 remaining = None
