@@ -2,16 +2,18 @@
 
 ## 当前开发分支与冻结约定（2026-11-01）
 
-- 长期远程仅保留 `main` 与 `feature-memory-evolution`。两个历史分支通过最终验收和祖先检查后删除。历史章节中的 base 开发、自动同步 main、提交前默认全量测试等安排均已失效。常规开发前若位于 main，应切换到 evolution 或从 evolution 派生任务分支；main 保留 GitHub 默认分支身份。
+- **当前远程分支仅有 `main` 与 `feature-memory-evolution`**；历史 `base/chat-stability`、`feature/context-review-recall` 已不在远程。删除前的祖先检查记录未独立复核。历史章节中的 base 开发、自动同步 main、提交前默认全量测试均已失效。常规开发应在 evolution 或由其派生的短期任务分支进行；main 保留 GitHub 默认分支身份。
 - **后续默认开发分支：`feature-memory-evolution`**。所有新功能、常规问题修复、实验和相应文档工作从此分支（或从它派生的任务分支）开展。执行前确认当前 branch，不在默认的 `main` 上直接开发。
-- **`main`：本轮最终稳定修复验收后冻结，仅用于简历展示、稳定发布与长期维护**。禁止自动将演进分支、历史 `base/chat-stability` 分支向 `main` 同步或合并；只有本人明确点名授权的必要稳定性/安全修复才可走独立修复与受保护分支 PR 流程。
-- 冻结前源码 Review 基线 `main@b016ccbf`，评审结果和待验收项见 [review-2026-11-01-freeze.md](review-2026-11-01-freeze.md)。此后的文档提交不改变该源码评审基线。历史部分对 `base/chat-stability` 的同步安排均以本节新约定为准。
-- main 已通过 PR #15 冻结在 `316a03063d396b60b66a91b17fba095ab7676f3a`，Tag `portfolio-2026-11-01` 指向该源码；PR 与合入后 Windows/Ubuntu 的测试、构建和 CLI 检查均通过。未发布 PyPI，原生终端/IME/系统剪贴板仍待人工验收。
+- **`main`：PR #15 合并后冻结展示源码，PR #16 为经授权的发布元数据维护；此后仅用于简历展示、稳定发布与长期维护**。禁止自动将演进分支、历史 `base/chat-stability` 分支向 `main` 同步或合并；只有本人明确点名授权的必要稳定性/安全修复才可走独立修复与受保护分支 PR 流程。
+- 历史冻结前源码评审基线为 `main@b016ccbf`，详见 [review-2026-11-01-freeze.md](review-2026-11-01-freeze.md)，不得将其当作当前 HEAD。PR #15 合并提交 `316a030` 对应 `portfolio-2026-11-01`；PR #16 合并提交 `22217c2` 对应 `v0.3.3`。历史 base 同步安排全部作废。
+- PR #15 已合并，`portfolio-2026-11-01` 指向 `316a030`；PR #16 已合并，`main` 当前 HEAD 为 `22217c2`，`v0.3.3` Tag 和 GitHub Release 均已存在。两次 PR 的 Windows/Ubuntu CI 均通过。PyPI `0.3.3` 本轮未通过官方发布记录独立复核；原生终端/IME/系统剪贴板仍待人工验收。
 
 
-## 当前接续入口（2026-10-30）
+- **尚未同步的发布维护**：本分支文档修订前源码基线 `887698d` 已包含 PR #15，但仍保留 `0.3.2` 包版本及说明；与 `main@22217c2` 分叉。PR #16 的版本、锁文件及 MCP 标识应在独立任务中单向同步 `main` → evolution，不得整体反向合并。本文档修订不代表已执行该同步。
 
-本节是当前状态，下方按时间保留的发布/开发记录是历史证据；其中“仅手动”“自动调度未实现”“英文主题白名单”等旧边界已被后续实现取代。交接记录不替代当前会话授权。
+## 历史接续记录（2026-10-30；不可作为当前入口）
+
+本节保留 2026-10-30 当时的接续快照，不能作为 2026-11-02 的分支 HEAD、发布版本或任务优先级依据；下方均为按时间保留的历史工程记录。后续实现已改变部分旧边界；交接记录不替代当前会话授权。
 
 - 远程目标 `feature-memory-evolution`，本地功能分支 `codex/feature-memory-evolution`；主目录 main 保持独立，不自动合并。当前功能基线 `8b8d507`；main 的命令精简基线 `a7777c0`。
 - TUI 默认空闲回顾：补记结束后空闲 60 秒，Dreaming/画像轮转，间隔 300 秒，每次启动自动预算 20 次；配置可关闭，cancel 暂停，resume 恢复。进程退出后无守护任务。预算耗尽不会由 resume 自动补满，手动执行使用单独预算。
@@ -66,7 +68,7 @@
 
 ## 忙碌态解耦与会话一致性（2026-10-31，分支 base/chat-stability）
 
-- 分支约定：基础层修复与改进使用 `base/` 前缀；验证通过后经用户同意才分别合入 main 与 feature-memory-evolution（后者定位为记忆内容前沿版本）。
+- **历史流程（已废止，不得执行）**：当时基础修复使用 `base/` 前缀，再分别合入 main 与 evolution。现行开发仅在 evolution（或其短期派生分支）；禁止自动向冻结 main 同步。
 - 等待 LLM 期间输入保持可用、会话切换立即执行；等待期提交（消息与 /命令）进入全局 FIFO 队列，按提交顺序执行且任意时刻至多一个请求（并发第二个请求会被 exclusive worker 协作取消且 runtime.ask 无重入保护，故只能排队）；导航/只读命令（/new、/sessions、/exit 等）等待期直接执行。旧的全局 busy 布尔拆为 navigation_busy 与 ask_active 两态，输入框只在导航期间禁用。
 - 数据一致性：`runtime.ask` 支持显式 session 并新增 on_session 回调；`_auto_recall`/`_flush_memories` 显式绑定请求会话，不再读 self.current；`last_plan` 带 session 标识，状态栏不串会话；后台任务执行时从磁盘新鲜加载会话对象，完成后若目标是当前会话则 reload 治愈内存快照；切走/新建时对生成中的会话延迟打 closed/distill_deferred 标记（保证排在最后的 assistant 记录之后）；生成期间跳过后台补沉淀，留给启动补记；删除守卫拒绝删除生成中或被队列引用的会话——物理删除后后台追加会原路重建僵尸文件（已用临时库脚本实证）。
 - 切回生成中的会话：磁盘重建负责已完成轮次，界面只重放未落盘的活跃段（已完成段必然已随 assistant 记录落盘，天然去重）。
@@ -198,7 +200,7 @@ Spark 真实接口合成数据冒烟：流式回复、带时间/地点的记忆�
 
 本分支验证：推断/日期/Agent 专项回归 99 项通过；推断界面正常操作与异常恢复均通过。合成 200 条记忆，关键词条件检索预热后连续 10 次，耗时中位数 26.88 ms、最大 37.65 ms；仅代表本机该合成规模，不代表向量模型或大库性能。最终全量回归 560 passed；随后补充的故障注入与界面复测 23 passed（其中包含新增的两条审计保留用例，不与全量数量简单相加）。git diff --check 通过。所有测试记录与合成评测文件保留在忽略目录，不删除。
 
-推断日志写入失败的边界：事实更正/软删除先保留审计，再同步推断失效；若失效追加失败，下次审查重新校验来源并补记。尾行恢复仅显式执行，不改写原文件。旧版 0.3.2 不理解 revision/recovery 推断事件，功能分支必须使用独立测试库，不能让两个版本共写同一库。本分支独立开发，现有主目录仍为发布版本；提交与推送状态以 Git 记录为准，合并须由用户评估。每次提交前按约定运行全量测试。
+推断日志写入失败的边界：事实更正/软删除先保留审计，再同步推断失效；若失效追加失败，下次审查重新校验来源并补记。尾行恢复仅显式执行，不改写原文件。旧版 0.3.2 不理解 revision/recovery 推断事件，功能分支必须使用独立测试库，不能让两个版本共写同一库。本分支独立开发，现有主目录仍为发布版本；提交与推送状态以 Git 记录为准，合并须由用户评估。当时约定每次提交前运行全量测试；现行以 AGENTS.md 的按影响范围选测规则为准。
 
 本次提交前完整回归：562 passed。模型搜索测试改为等待列表的最终可观察状态，保留原筛选断言，避免将异步移除/挂载尚未完成的一帧误判为失败。
 
@@ -412,4 +414,4 @@ Spark 真实接口合成数据冒烟：流式回复、带时间/地点的记忆�
 - Merged only main -> evolution after the stable main PR and final-SHA CI passed and the portfolio tag was pushed. Retain temporal retrieval, reflection, inference review/fingerprints and dated-session behavior; no evolution features enter main.
 - Conflict resolution preserves inference validation/invalidation in manual correction and soft-delete. Existing evolution tests establish that completed source facts and their audit survive a later inference append failure; subsequent inference reads repair derived status. Accordingly source/audit writes receive main's exception rollback, while inference invalidation remains after that boundary. The existing source-audit failure regression is retained and strengthened; no inference format or commit semantics are changed.
 - Shared queue keeps main's rollback and log-before-removal behavior plus evolution's existing log-failure test. Current branch/freeze instructions replace the obsolete base-first workflow; historical evolution planning remains recorded.
-- Evolution merge validation: memory-evolution/reflection/inference/context/service suite 125 passed; focused TUI queue/pending/cancel/cursor suite 24 passed. Shared session/queue/Agent/CLI/Markdown regressions also passed before resolving the inference commit-boundary difference, and the affected service paths were rerun in the 125-test group. Main is unchanged after tagging; evolution push CI remains the final synchronization gate.
+- Evolution merge validation: memory-evolution/reflection/inference/context/service suite 125 passed; focused TUI queue/pending/cancel/cursor suite 24 passed. Shared session/queue/Agent/CLI/Markdown regressions also passed before resolving the inference commit-boundary difference, and the affected service paths were rerun in the 125-test group. At that historical checkpoint, main was unchanged after tagging and evolution push CI was still the synchronization gate. Current release/branch status is recorded at the top.
