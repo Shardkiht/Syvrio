@@ -21,7 +21,7 @@
 
 演示操作实际 Textual 界面，使用合成数据与固定模型回复回放；记忆写入和跨会话检索走真实代码，不产生模型费用。[查看静态截图](docs/assets/quiet-memo-demo.png)。
 
-稳定展示：`main` 已在 PR #15 后冻结，以 `portfolio-2026-11-01`（`316a030`）标识展示源码；随后 PR #16 仅更新发布元数据，`v0.3.3`（`22217c2`）已创建 GitHub Release。本演进分支仍保留 `0.3.2` 包版本元数据，尚未单向同步 PR #16；请勿将本分支的 `0.3.2` 误认为 `main` 当前发布版本。常规开发仅在 `feature-memory-evolution` 进行，禁止将演进功能反向合入 `main`。
+稳定展示：`main` 已于 PR #15 后冻结，以 `portfolio-2026-11-01`（`316a030`）标识展示源码；PR #16 更新发行版本至 `0.3.3`（`v0.3.3`、`22217c2`），GitHub Release 已发布。本演进分支已通过 `main` → `feature-memory-evolution` 单向合并继承 PR #16 的版本与锁文件更新，当前源码包版本也是 `0.3.3`。常规开发仅在 `feature-memory-evolution` 进行，禁止将演进功能反向合入已冻结的 `main`。
 
 ## 快速开始
 

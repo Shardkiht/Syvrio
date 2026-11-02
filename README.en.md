@@ -21,7 +21,7 @@ Stop repeating your preferences and plans every time you start a chat. Tell it �
 
 The demo operates the actual Textual UI with synthetic data and scripted model replies. Memory writes and cross-session retrieval run through the real implementation, with no paid model requests. [View the still screenshot](docs/assets/quiet-memo-demo.png).
 
-Stable showcase: `main` was frozen after PR #15; `portfolio-2026-11-01` (`316a030`) identifies the showcase source. PR #16 subsequently changed release metadata only, and the `v0.3.3` (`22217c2`) GitHub Release is published. This evolution branch still carries `0.3.2` package metadata because PR #16 has not yet been merged in the `main` → evolution direction. Do not confuse that branch-local version with the current `main` release. Routine work stays on `feature-memory-evolution`, and evolution features must not be merged back into frozen `main`.
+Stable showcase: `main` was frozen after PR #15; `portfolio-2026-11-01` (`316a030`) identifies the showcase source. PR #16 updated the release version to `0.3.3` (`v0.3.3`, `22217c2`), with a published GitHub Release. This evolution branch has now inherited PR #16's version and lockfile changes via a one-way `main` → `feature-memory-evolution` merge, and its source package version is also `0.3.3`. Routine work remains on `feature-memory-evolution`; evolution features must not be merged back into frozen `main`.
 
 ## Quick start
 

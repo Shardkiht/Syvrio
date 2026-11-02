@@ -8,7 +8,7 @@
 - 历史冻结前源码评审基线为 `main@b016ccbf`，详见 [review-2026-11-01-freeze.md](review-2026-11-01-freeze.md)，不得将其当作当前 HEAD。PR #15 合并提交 `316a030` 对应 `portfolio-2026-11-01`；PR #16 合并提交 `22217c2` 对应 `v0.3.3`。历史 base 同步安排全部作废。
 - PR #15 已合并，`portfolio-2026-11-01` 指向 `316a030`；PR #16 已合并，`main` 当前 HEAD 为 `22217c2`，`v0.3.3` Tag 和 GitHub Release 均已存在。两次 PR 的 Windows/Ubuntu CI 均通过。PyPI `0.3.3` 本轮未通过官方发布记录独立复核；原生终端/IME/系统剪贴板仍待人工验收。
 
-- **尚未同步的发布维护**：本分支文档修订前源码基线 `887698d` 已包含 PR #15，但仍保留 `0.3.2` 包版本及说明；与 `main@22217c2` 分叉。PR #16 的版本、锁文件及 MCP 标识应在独立任务中单向同步 `main` → evolution，不得整体反向合并。本文档修订不代表已执行该同步。
+- **PR #16 发布维护已同步（2026-11-02）**：本分支通过 `main@22217c2` → `feature-memory-evolution` 单向合并吸收 PR #16 的四处版本变更：`pyproject.toml`、`__init__.py`、`open_websearch.py` 的 MCP clientInfo、`uv.lock`，统一为 `0.3.3`；中英文 README 保留演进功能说明，修正已过期的“尚未同步”描述。合并提交为双父提交，保留 `main` 的完整祖先历史以及本分支原有功能；未将 evolution 反向合入 main。此前 Windows CI 的会话切换异步测试仍应独立复核，合并行为不代表测试已修复。
 
 ## 历史接续记录（2026-10-30；不可作为当前入口）
 
