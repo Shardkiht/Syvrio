@@ -3383,5 +3383,8 @@ async def test_startup_compensation_runs_missed_daily_sync(tmp_path):
         await pilot.pause()
         state = json.loads(state_path.read_text(encoding="utf-8"))
         assert state["last_sync_trigger"] == "scheduled"
-        assert state["last_daily_success_date"] == date.today().isoformat()
+        # 临时 Vault 未配置 Remote：已尝试并暂停当日自动重试，不能标记同步成功。
+        assert state["last_daily_attempt_date"] == date.today().isoformat()
+        assert state["last_daily_blocked_date"] == date.today().isoformat()
+        assert state.get("last_daily_success_date") != date.today().isoformat()
         assert not app._git_sync_running
