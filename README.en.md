@@ -596,4 +596,5 @@ The evolution TUI uses neutral gray surfaces with a sky-blue accent (`#6CB6FF`).
 
 The sidebar starts collapsed. Press `Ctrl+B` or click the top-left expand control to show conversations.
 
-The home screen shows a local memory/topic/review overview, the three most recent non-empty conversations and clickable prompt examples. Recent entries resume their sessions; prompts only fill the composer and require Enter to send. Overview data loads in a worker with visible failure feedback. The home screen scrolls in smaller windows while the composer stays visible.
+
+The minimal home screen uses a large QuietMemo terminal wordmark (taller uppercase Q/M with smaller lowercase letters) and one short prompt, with no overview data or conversation cards. Use `/sessions` or expand the sidebar to access conversations.

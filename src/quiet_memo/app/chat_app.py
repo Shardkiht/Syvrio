@@ -43,7 +43,7 @@ from .session_ui import visible_sessions
 
 
 class ChatApp(ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixin, App):
-    TITLE = "quiet-memo — Personal Memory"
+    TITLE = "QuietMemo — Personal Memory"
 
     CSS = APP_CSS
 
@@ -98,7 +98,7 @@ class ChatApp(ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixin, App):
         with Horizontal(id="root"):
             with Vertical(id="sidebar"):
                 with Horizontal(id="sidebar-head"):
-                    yield Static("quiet-memo", id="brand")
+                    yield Static("QuietMemo", id="brand")
                     yield SidebarToggle("«", id="hide-sidebar")
                 yield NewSessionButton("+ New session", id="new-session")
                 yield ListView(id="sessions")

@@ -2986,39 +2986,18 @@ async def test_welcome_transitions_to_left_aligned_conversation(tmp_path, size):
         assert bubble.region.width > chat.content_region.width * 0.8
 
 
-async def test_home_recent_and_prompt_actions(tmp_path):
-    import asyncio
-    from quiet_memo.app.chat_widgets import HomeRecent, HomePrompt
+@pytest.mark.parametrize("size", [(50, 24), (120, 40)])
+async def test_home_has_full_project_wordmark(tmp_path, size):
+    from quiet_memo.app.chat_widgets import HomePanel
+    from rich.cells import cell_len
     app = build_app(tmp_path, [])
-    app.service.note("Synthetic preference", topic="preferences")
-    session = app.sessions.create()
-    app.sessions.rename(session, "[bold]Synthetic title[/bold]")
-    app.sessions.append(session, {"type": "message", "role": "user", "content": "Synthetic message"})
-    async with app.run_test(size=(120, 40)) as pilot:
-        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+    async with app.run_test(size=size) as pilot:
         await pilot.pause()
-        assert "Memories 1" in str(app.query_one("#home-overview", Static).content)
-        recent = app.query_one(HomeRecent)
-        assert "[bold]" in str(recent.content)
-        app.query_one(HomePrompt).action_use()
-        assert app.query_one("#input", Input).value
-        assert not app.runtime.has_session
-        assert not app._ask_active
-        recent.action_resume()
-        async with asyncio.timeout(5):
-            while app._navigation_busy or not app.runtime.has_session:
-                await pilot.pause()
-        assert app.runtime.current.id == session.id
-        assert not app.query_one("#chat").has_class("home")
-
-
-async def test_home_overview_failure_is_visible_and_chat_remains_ready(tmp_path, monkeypatch):
-    import asyncio
-    app = build_app(tmp_path, [])
-    def fail():
-        raise OSError("synthetic failure")
-    monkeypatch.setattr(app.service, "current_facts", fail)
-    async with app.run_test() as pilot:
-        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
-        assert "unavailable" in str(app.query_one("#home-overview", Static).content)
-        assert not app.query_one("#input", Input).disabled
+        logo = app.query_one(".welcome-wordmark", Static)
+        assert logo.region.height == 5
+        assert abs(logo.region.center[0] - app.query_one(HomePanel).region.center[0]) <= 1
+        assert logo.region.bottom <= app.query_one("#input").region.y
+        assert len(app.query_one(HomePanel).children) == 2
+        assert not app.query("#home-overview, #home-recents, .home-prompt")
+        assert all(cell_len(line) == 39 for line in HomePanel.wordmark().plain.splitlines())
+        assert not app.query_one("#sidebar").display

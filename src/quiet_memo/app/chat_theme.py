@@ -86,24 +86,11 @@ APP_CSS = """
     .meta { color: $faint; width: 1fr; }
     .divider { height: 1; margin: 0; }
     .card { border-left: solid $dim; background: $panel; padding: 0 2; margin: 1 0; color: #d4d4d4; width: 1fr; }
-    /* 欢迎信息聚合居中，首条消息进入统一左对齐的对话流。 */
-    #chat.home { align: center top; padding-top: 2; }
-    .welcome-shell { width: 86; max-width: 100%; height: auto; padding: 1 2; }
-    .welcome-eyebrow { color: $faint; margin-bottom: 1; }
-    .welcome-brand { color: #e3e3e3; text-style: bold; margin-bottom: 1; }
-    .welcome-line { color: #c8c8c8; margin-bottom: 1; }
-    .welcome-meta { color: #969696; margin-bottom: 1; }
-    .welcome-shortcut { color: #929292; margin-top: 1; }
-
-    #home-overview { color: #adadad; padding: 0 2; background: #202020; height: auto; }
-    .home-section { color: #8e8e8e; margin: 1 0 0 0; }
-    #home-recents { height: auto; }
-    .home-recent { height: 2; padding: 0 2; margin-top: 1; background: #202020; border-left: solid #414141; }
-    .home-recent:hover, .home-recent:focus { border-left: solid $accent; background: #272727; }
-    .home-empty { color: #9a9a9a; height: auto; padding: 1 0; }
-    .home-prompt { height: auto; padding: 0 1; margin-top: 0; color: #bcbcbc; border-left: solid #414141; }
-    .home-prompt:hover, .home-prompt:focus { color: $accent; border-left: solid $accent; }
-    .home-footnote { color: #858585; height: auto; margin-top: 1; }
+    /* 欢迎区只保留完整项目名字标，不用数据卡片填满留白。 */
+    #chat.home { align: center middle; }
+    .welcome-shell { width: 60; max-width: 100%; height: auto; padding: 1 0; align: center top; }
+    .welcome-wordmark { width: 39; height: 5; margin-bottom: 1; }
+    .welcome-line { color: #929292; width: 1fr; content-align: center top; height: auto; }
 
     /* 输入框不做焦点整块提亮，避免像额外遮罩；只用边框区分焦点。 */
     #send-queue { display: none; height: auto; max-height: 5; margin: 0 3; padding: 0 1; color: $muted; border-left: solid $dim; }
