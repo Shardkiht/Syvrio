@@ -421,3 +421,9 @@ Spark 真实接口合成数据冒烟：流式回复、带时间/地点的记忆�
 - Conflict resolution preserves inference validation/invalidation in manual correction and soft-delete. Existing evolution tests establish that completed source facts and their audit survive a later inference append failure; subsequent inference reads repair derived status. Accordingly source/audit writes receive main's exception rollback, while inference invalidation remains after that boundary. The existing source-audit failure regression is retained and strengthened; no inference format or commit semantics are changed.
 - Shared queue keeps main's rollback and log-before-removal behavior plus evolution's existing log-failure test. Current branch/freeze instructions replace the obsolete base-first workflow; historical evolution planning remains recorded.
 - Evolution merge validation: memory-evolution/reflection/inference/context/service suite 125 passed; focused TUI queue/pending/cancel/cursor suite 24 passed. Shared session/queue/Agent/CLI/Markdown regressions also passed before resolving the inference commit-boundary difference, and the affected service paths were rerun in the 125-test group. At that historical checkpoint, main was unchanged after tagging and evolution push CI was still the synchronization gate. Current release/branch status is recorded at the top.
+
+## Evolution 视觉区分（2026-11-02）
+
+TUI 改为深蓝灰面板、薄荷绿焦点/当前会话、淡紫角色/模型标签、暖金快捷键提示；回复 Markdown 同步配色。布局、键位、数据和命令行为保留。配色集中 chat_theme.py，固定 TUI 文案继续英文。只同步 evolution，不修改冻结 main。
+
+视觉验证：相关焦点、当前会话、命令面板、弹窗布局与 Markdown 渲染 40 项通过；合成聊天、命令面板和会话选择器已导出预览，聊天配色已渲染检查。预览仅在本地忽略目录，未使用真实 Vault 或调用服务。主目录日常启动器已使用 evolution，重启即可加载新样式。

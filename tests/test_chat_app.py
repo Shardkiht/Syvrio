@@ -1392,7 +1392,7 @@ async def test_session_picker_focus_bar_follows_selection(tmp_path):
         await pilot.pause()
 
         assert other.has_class("-highlight")
-        assert other.styles.border_left[1] == Color.parse("#d2d3d7")  # 焦点强调色
+        assert other.styles.border_left[1] == Color.parse("#8dd8c0")  # 焦点强调色
         assert current.styles.border_left[1] == Color.parse("#96979c")  # 当前会话弱色
         assert len({row.query_one(".session-title").region.x for row in rows}) == 1
 
@@ -2042,7 +2042,7 @@ async def test_session_picker_is_centered(tmp_path):
         assert "Ctrl+R" in str(picker.query_one(".pick-hint", Static).content)
 
 
-async def test_dialog_inputs_share_neutral_focus_style(tmp_path):
+async def test_dialog_inputs_share_evolution_focus_style(tmp_path):
     from textual.color import Color
 
     from quiet_memo.app.chat_widgets import SessionPickerScreen
@@ -2056,18 +2056,18 @@ async def test_dialog_inputs_share_neutral_focus_style(tmp_path):
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         main_input = app.query_one("#input", Input)
-        assert main_input.styles.background == Color.parse("#131417")
-        assert main_input.styles.border_top[1] == Color.parse("#56575f")
+        assert main_input.styles.background == Color.parse("#172131")
+        assert main_input.styles.border_top[1] == Color.parse("#8dd8c0")
         main_input.blur()
         await pilot.pause()
-        assert main_input.styles.background == Color.parse("#131417")
+        assert main_input.styles.background == Color.parse("#172131")
         main_input.focus()
 
         app.open_session_picker()
         await pilot.pause()
         assert isinstance(app.screen, SessionPickerScreen)
         picker_input = app.screen.query_one("#picker-input", Input)
-        assert picker_input.styles.background == Color.parse("#191a1f")
+        assert picker_input.styles.background == Color.parse("#1b293b")
         assert picker_input.styles.border_top[1] == main_input.styles.border_top[1]
 
 
