@@ -29,6 +29,7 @@ from .chat_theme import APP_CSS
 from .chat_widgets import (
     ASSISTANT_NAME,
     CommandPalette,
+    HomePanel,
     NewSessionButton,
     PickScreen,
     ModelPickerScreen,
@@ -476,16 +477,7 @@ class ChatApp(ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixin, App):
     def add_welcome(self) -> None:
         chat = self._chat()
         chat.add_class("home")
-        # 单一欢迎块让短内容保持聚合；小窗口仍由聊天容器滚动。
-        chat.mount(Vertical(
-            Static("PERSONAL MEMORY", classes="welcome-eyebrow"),
-            Static("[bold #e3e3e3]quiet[/][bold #6cb6ff]-memo[/]", classes="welcome-brand"),
-            Static("Pick up where you left off.", classes="welcome-line"),
-            Static("Talk naturally. The useful details stay with you.", classes="welcome-meta"),
-            Static("[bold]/sessions[/]  Continue a conversation", classes="welcome-shortcut"),
-            Static("[bold]/model[/]     Choose a model", classes="welcome-shortcut"),
-            classes="welcome-shell",
-        ))
+        chat.mount(HomePanel(classes="welcome-shell"))
 
     def build_transcript(self) -> None:
         self._chat().remove_class("home")

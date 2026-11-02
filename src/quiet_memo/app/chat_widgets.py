@@ -28,6 +28,7 @@ from textual.widgets import Input, Label, ListView, ListItem, Static
 
 from ..agent.session import Session
 from .command_catalog import SLASH_COMMANDS
+from .session_ui import visible_sessions
 from .chat_theme import MARKDOWN_THEME
 
 
@@ -221,6 +222,94 @@ class TranscriptView(VerticalScroll):
             more.remove()
             self._more = None
         self.call_after_refresh(self.scroll_home, animate=False)
+
+
+class HomeRecent(Static):
+    can_focus = True
+    BINDINGS = [("enter", "resume", "Continue"), ("space", "resume", "Continue")]
+
+    def __init__(self, row: dict) -> None:
+        self.session_id = row["id"]
+        stamp = str(row.get("updated_at") or "")[:16].replace("T", " ")
+        count = row["messages"]
+        unit = "message" if count == 1 else "messages"
+        super().__init__(f"{row['title']}\n{stamp} · {count} {unit}",
+                         markup=False, classes="home-recent")
+
+    def action_resume(self) -> None:
+        self.app._switch_session(self.session_id)
+
+    def on_click(self) -> None:
+        self.action_resume()
+
+
+class HomePrompt(Static):
+    can_focus = True
+    BINDINGS = [("enter", "use", "Use prompt"), ("space", "use", "Use prompt")]
+
+    def __init__(self, text: str) -> None:
+        self.prompt = text
+        super().__init__(text, markup=False, classes="home-prompt")
+
+    def action_use(self) -> None:
+        widget = self.app.query_one("#input", Input)
+        widget.value = self.prompt
+        widget.focus()
+
+    def on_click(self) -> None:
+        self.action_use()
+
+
+class HomePanel(Vertical):
+    """首页数据在 worker 读取；退出欢迎态后返回的数据不能重新挂载首页。"""
+
+    def compose(self) -> ComposeResult:
+        yield Static("PERSONAL MEMORY", classes="welcome-eyebrow")
+        yield Static("[bold #e3e3e3]quiet[/][bold #6cb6ff]-memo[/]", classes="welcome-brand")
+        yield Static("A place for the details that matter.", classes="welcome-line")
+        yield Static("Conversations become memories. Pick up the thread, or start somewhere new.", classes="welcome-meta")
+        yield Static("Loading your local overview…", id="home-overview", markup=False)
+        yield Static("CONTINUE A CONVERSATION", classes="home-section")
+        with Vertical(id="home-recents"):
+            yield Static("Loading recent conversations…", classes="home-empty")
+        yield Static("SOMETHING TO TALK ABOUT", classes="home-section")
+        yield HomePrompt("What do you remember about my preferences?")
+        yield HomePrompt("Help me think through a plan for this week.")
+        yield HomePrompt("Remember this: I prefer…")
+        yield Static("Click a prompt to edit it. Nothing is sent until you press Enter.", classes="home-footnote")
+        yield Static("/sessions  All conversations    /model  Choose a model", classes="welcome-shortcut")
+
+    def on_mount(self) -> None:
+        from functools import partial
+
+        self.run_worker(partial(self._load, self.app), thread=True, exit_on_error=False)
+
+    def _load(self, app) -> None:
+        try:
+            rows = visible_sessions(app.sessions.list(100, with_tokens=False))[:3]
+            with app.service.write_lock:
+                facts = app.service.current_facts()
+                overview = f"Memories {len(facts)}  ·  Topics {len({item.topic for item in facts})}  ·  Pending memories {len(app.service.pending())}"
+            error = False
+        except Exception:
+            rows, overview, error = [], "Local overview unavailable. Your conversation is still ready.", True
+        try:
+            app.call_from_thread(self._show, rows, overview, error)
+        except RuntimeError:
+            pass  # 应用已关闭，保留文件与会话，不再更新界面。
+
+    async def _show(self, rows: list[dict], overview: str, error: bool) -> None:
+        if not self.is_mounted:
+            return
+        self.query_one("#home-overview", Static).update(overview)
+        recent = self.query_one("#home-recents", Vertical)
+        await recent.remove_children()
+        if not self.is_mounted:
+            return
+        if rows:
+            await recent.mount(*(HomeRecent(row) for row in rows))
+        else:
+            await recent.mount(Static("Recent conversations could not be loaded." if error else "Your first conversation starts here. Say what is on your mind.", classes="home-empty"))
 
 
 class OptionItem(ListItem):

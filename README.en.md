@@ -595,3 +595,5 @@ CI tests, package builds and the `qm --help` check run inside Debian 13 with Pyt
 The evolution TUI uses neutral gray surfaces with a sky-blue accent (`#6CB6FF`). A centered welcome block gives way to a left-aligned conversation after the first message. User messages occupy full-width gray panels, while assistant text uses open spacing. A flat composer indicates focus with a left marker; model, context and shortcuts sit together below. The empty-input hint stays on its top edge to avoid overlapping IME composition.
 
 The sidebar starts collapsed. Press `Ctrl+B` or click the top-left expand control to show conversations.
+
+The home screen shows a local memory/topic/review overview, the three most recent non-empty conversations and clickable prompt examples. Recent entries resume their sessions; prompts only fill the composer and require Enter to send. Overview data loads in a worker with visible failure feedback. The home screen scrolls in smaller windows while the composer stays visible.

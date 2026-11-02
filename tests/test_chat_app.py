@@ -2972,7 +2972,8 @@ async def test_welcome_transitions_to_left_aligned_conversation(tmp_path, size):
         welcome = app.query_one(".welcome-shell")
         assert chat.has_class("home")
         assert welcome.region.width <= chat.content_region.width
-        assert welcome.region.bottom <= app.query_one("#input").region.y
+        assert chat.region.bottom <= app.query_one("#input").region.y
+        assert chat.styles.overflow_y == "auto"
         assert app.query_one("#composer-hint").region.bottom <= size[1]
         app.query_one("#input", Input).value = "Synthetic question"
         await pilot.press("enter")
@@ -2983,3 +2984,41 @@ async def test_welcome_transitions_to_left_aligned_conversation(tmp_path, size):
         bubble = app.query_one(".bubble")
         assert bubble.region.x <= app.query_one(".reply").region.x + 1
         assert bubble.region.width > chat.content_region.width * 0.8
+
+
+async def test_home_recent_and_prompt_actions(tmp_path):
+    import asyncio
+    from quiet_memo.app.chat_widgets import HomeRecent, HomePrompt
+    app = build_app(tmp_path, [])
+    app.service.note("Synthetic preference", topic="preferences")
+    session = app.sessions.create()
+    app.sessions.rename(session, "[bold]Synthetic title[/bold]")
+    app.sessions.append(session, {"type": "message", "role": "user", "content": "Synthetic message"})
+    async with app.run_test(size=(120, 40)) as pilot:
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        await pilot.pause()
+        assert "Memories 1" in str(app.query_one("#home-overview", Static).content)
+        recent = app.query_one(HomeRecent)
+        assert "[bold]" in str(recent.content)
+        app.query_one(HomePrompt).action_use()
+        assert app.query_one("#input", Input).value
+        assert not app.runtime.has_session
+        assert not app._ask_active
+        recent.action_resume()
+        async with asyncio.timeout(5):
+            while app._navigation_busy or not app.runtime.has_session:
+                await pilot.pause()
+        assert app.runtime.current.id == session.id
+        assert not app.query_one("#chat").has_class("home")
+
+
+async def test_home_overview_failure_is_visible_and_chat_remains_ready(tmp_path, monkeypatch):
+    import asyncio
+    app = build_app(tmp_path, [])
+    def fail():
+        raise OSError("synthetic failure")
+    monkeypatch.setattr(app.service, "current_facts", fail)
+    async with app.run_test() as pilot:
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        assert "unavailable" in str(app.query_one("#home-overview", Static).content)
+        assert not app.query_one("#input", Input).disabled
