@@ -494,6 +494,7 @@ uv run python evals/retrieval_eval.py
 | 中～中高 | [事实时间演化与多维召回](https://github.com/Shardkiht/quiet-memo/issues/12) | 已支持条件筛选、当前/历史视图和显式时态演化；复杂时序重排待完善 |
 | 高 | [梦境记忆 / Dreaming](https://github.com/Shardkiht/quiet-memo/issues/8) | 已实现 TUI 空闲自动回顾、请求上限、暂停与恢复 |
 | 高 | [动态用户画像](https://github.com/Shardkiht/quiet-memo/issues/9) | 已实现可重建的事实/推断画像、空闲刷新和相关已确认推断注入；长期语义评测待完善 |
+| 很高 / 长期 | [演化认知：纵向用户理解](https://github.com/Shardkiht/quiet-memo/issues/18) | 规划中：以可追溯的跨期证据识别稳定特征、短期波动、阶段性变化和长期趋势；形成可审阅、可重建的演化认识，区别于单条事实演化与当前画像 |
 | 很高 / 长期 | [跨 AI 客户端主动召回](https://github.com/Shardkiht/quiet-memo/issues/13) | 在客户端能力允许时，无需显式提醒即可适时调用个人记忆 |
 | 持续工程 | [记忆质量评测与回归](https://github.com/Shardkiht/quiet-memo/issues/14) | 扩展抽取/冲突、时间变化、情绪推断、隐含召回等合成测试，不以一次发布为终点 |
 
