@@ -7,16 +7,19 @@ on:
 
 jobs:
   test:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    name: test (debian-13)
+    runs-on: ubuntu-latest
+    container: debian:13-slim
     steps:
+      - name: Install Debian prerequisites
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git libstdc++6
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+          python-version: "3.12"
       - run: uv sync --frozen
       - run: uv run pytest -q
       - run: uv build

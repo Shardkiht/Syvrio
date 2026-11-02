@@ -89,7 +89,7 @@ memory/agent → llm → infra
 
 ## 可移植性
 
-CI 在 ubuntu-latest 与 windows-latest 双矩阵运行，**本地全绿不等于 CI 绿**：
+CI 的测试、构建、CLI 检查与发布作业统一在 Debian 13 容器中运行（GitHub 托管 Ubuntu 仅作为容器宿主），**本地全绿不等于 CI 绿**：
 
 - 禁用平台专属编码与 API（如 `mbcs`）——ubuntu 上直接 LookupError，英文 Windows 上行为不同；用全平台内置的替代（如 `gbk`），确需平台分支时以 `sys.platform` 显式守卫。
 - 文件路径、换行、终端转义同理：优先标准库可移植写法。

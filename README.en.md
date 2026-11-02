@@ -589,3 +589,5 @@ Session lists and startup consolidation isolate invalid files with a diagnostic;
 Search/Fetch limits share counters within one process, but simultaneous QM/MCP processes do not have atomic quota accounting. Local caps are conservative safeguards, not provider billing guarantees. The optional `npx open-websearch@latest` fallback is not frozen by Python's lockfile: for repeatable deployments, install and retain a tested upstream version; the installed command remains preferred. This freeze does not verify a clean upstream package or dynamic websites through live APIs.
 
 On Windows, redirected CLI stdout/stderr use UTF-8; native terminal handling and persistent system settings are unchanged.
+
+CI tests, package builds and the `qm --help` check run inside Debian 13 with Python 3.12; publishing also uses Debian 13. The GitHub-hosted Ubuntu runner only hosts the container. There is no Windows/Ubuntu test matrix; Windows behavior requires separate validation when relevant.

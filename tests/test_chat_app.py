@@ -2525,6 +2525,8 @@ async def test_switch_during_ask_is_immediate_and_reply_lands_in_original(tmp_pa
 
 
 async def test_switch_back_to_generating_session_replays_stream(tmp_path):
+    import asyncio
+
     # 回归：切走再切回生成中的会话，未落盘的活跃段从状态重放并继续实时更新。
     app = build_app(tmp_path, [])
     gated = GatedChatModel([AssistantTurn(content="streamed body")], stream_first=True)
@@ -2535,25 +2537,23 @@ async def test_switch_back_to_generating_session_replays_stream(tmp_path):
         app.query_one("#input", Input).value = "q"
         await pilot.press("enter")
         await _wait_ask_started(app, pilot)
-        for _ in range(100):
-            await pilot.pause()
-            if app._stream_buffer:
-                break
+        async with asyncio.timeout(5):
+            while app._stream_buffer != "streamed body":
+                await pilot.pause()
         session_a = app.runtime.current.id
 
         session_b = app.sessions.create().id
         app._switch_session(session_b)
-        for _ in range(100):
-            await pilot.pause()
-            if not app._navigation_busy:
-                break
+        # 导航标志先释放，Textual 的旧控件移除随后异步完成。
+        async with asyncio.timeout(5):
+            while app._navigation_busy or app.runtime.current.id != session_b or app.query(".reply"):
+                await pilot.pause()
         assert not app.query(".reply")  # 切走后视图清空，buffer 保留
 
         app._switch_session(session_a)
-        for _ in range(100):
-            await pilot.pause()
-            if not app._navigation_busy:
-                break
+        async with asyncio.timeout(5):
+            while app._navigation_busy or app.runtime.current.id != session_a or not app.query(".reply"):
+                await pilot.pause()
         assert app.query(".reply")  # 活跃段重放
         assert app._stream_buffer == "streamed body"
 

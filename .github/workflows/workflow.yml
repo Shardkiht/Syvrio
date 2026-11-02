@@ -11,6 +11,7 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    container: debian:13-slim
     environment:
       name: pypi
       url: https://pypi.org/p/quiet-memo
@@ -18,6 +19,10 @@ jobs:
       id-token: write
       contents: read
     steps:
+      - name: Install Debian prerequisites
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git libstdc++6
       - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v6

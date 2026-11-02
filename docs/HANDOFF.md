@@ -1,5 +1,12 @@
 # 开发交接
 
+## CI 环境与失败修复（2026-11-02）
+
+- 用户指定远程测试环境统一 Debian：演进分支的测试与发布 workflow 均使用 Debian 13 slim 容器、Python 3.12；Ubuntu runner 仅作为 Docker 宿主。安装 Git、CA 证书与 Node 所需 C++ 运行库后再 checkout。保留测试、构建和 CLI help 检查，未修改冻结 main 的 workflow。
+- Actions run 41368204299：Ubuntu job 通过；Windows job 在会话切换 UI 测试失败（934 passed、4 skipped、1 failed），CLI help 步骤因前序失败跳过，不是 CLI 启动错误。
+- 修复测试同步条件：导航标志结束不代表 Textual 异步移除完成；等待目标会话、导航就绪与实际回复控件状态，并等待完整流式缓冲，保留清空和切回重放断言。局部相关 3 项通过，扩大会话切换/流式/导航回归 18 项通过；uv build 和 qm --help 均通过，YAML 结构校验通过，未调用真实模型或搜索。
+- 旧章节中的双平台 CI 描述属于历史，不代表当前演进分支工作流。新 Debian 容器的执行结果须以推送后的 Actions 为准。
+
 ## 当前开发分支与冻结约定（2026-11-01）
 
 - **长期远程保留 `main` 与 `feature-memory-evolution`**；历史 `base/chat-stability`、`feature/context-review-recall` 已不在远程，审核期间可存在待清理的短期 PR 分支。删除前的祖先检查记录未独立复核。历史章节中的 base 开发、自动同步 main、提交前默认全量测试均已失效。常规开发应在 evolution 或由其派生的短期任务分支进行；main 保留 GitHub 默认分支身份。

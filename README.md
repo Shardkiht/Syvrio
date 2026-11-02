@@ -585,3 +585,5 @@ monthly = 800
 Search/Fetch 同进程共享额度计数，但多个 QM/MCP 进程同时运行时不保证跨进程原子性；本地额度是保守防护，不是厂商账单保证。可选的 `npx open-websearch@latest` 兜底不受 Python 锁文件冻结：需复现环境时，应自行安装并保留经过验证的上游版本，已安装命令仍优先使用。本轮冻结不包含干净上游包或动态网站的真实 API 验证。
 
 Windows 下 CLI 重定向的标准输出和错误输出采用 UTF-8；原生终端处理及系统持久设置保持不变。
+
+CI 在 Debian 13 容器与 Python 3.12 环境中执行测试、包构建和 `qm --help` 检查；发布作业同样使用 Debian 13。GitHub 托管的 Ubuntu 仅作为容器宿主，不再运行 Windows/Ubuntu 双矩阵。Windows 行为需按改动范围另行验证。
