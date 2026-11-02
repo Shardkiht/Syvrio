@@ -2994,10 +2994,99 @@ async def test_home_has_full_project_wordmark(tmp_path, size):
     async with app.run_test(size=size) as pilot:
         await pilot.pause()
         logo = app.query_one(".welcome-wordmark", Static)
-        assert logo.region.height == 5
+        assert logo.region.height == (1 if app.query_one(HomePanel).size.width < 51 else 5)
         assert abs(logo.region.center[0] - app.query_one(HomePanel).region.center[0]) <= 1
         assert logo.region.bottom <= app.query_one("#input").region.y
         assert len(app.query_one(HomePanel).children) == 2
         assert not app.query("#home-overview, #home-recents, .home-prompt")
-        assert all(cell_len(line) == 39 for line in HomePanel.wordmark().plain.splitlines())
+        assert all(cell_len(line) == 51 for line in HomePanel.wordmark().plain.splitlines())
         assert not app.query_one("#sidebar").display
+
+
+async def test_stream_follow_pauses_above_bottom_and_resumes_at_bottom(tmp_path):
+    app = build_app(tmp_path, [])
+    async with app.run_test(size=(100, 24)) as pilot:
+        app.add_user_turn("Synthetic question")
+        text = "\n\n".join(f"Synthetic paragraph {i}" for i in range(50))
+        app.add_assistant_turn(text, "12:00")
+        await pilot.pause()
+        await pilot.pause()
+        chat = app.query_one("#chat")
+        assert chat.is_vertical_scroll_end
+        app._scroll_end()  # 已排队的旧刷新也不能覆盖随后发生的上滑。
+        chat.scroll_to(y=0, animate=False, immediate=True)
+        await pilot.pause()
+        assert not chat.follow_output
+        old_y = chat.scroll_y
+        app._stream_widget = app.query_one(".reply")
+        app._stream_buffer = text + "\n\nNew output"
+        app._stream_flush()
+        await pilot.pause()
+        await pilot.pause()
+        assert chat.scroll_y == old_y
+        chat.scroll_end(animate=False)
+        await pilot.pause()
+        assert chat.follow_output
+        app._stream_buffer += "\n\nMore output" * 5
+        app._stream_flush()
+        await pilot.pause()
+        await pilot.pause()
+        assert chat.is_vertical_scroll_end
+
+
+async def test_chat_selection_suspends_cursor_and_stream_scroll(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from textual.selection import SELECT_ALL
+    app = build_app(tmp_path, [])
+    async with app.run_test(size=(100, 24)) as pilot:
+        app.add_user_turn("Synthetic question")
+        app.add_assistant_turn("\n\n".join("Synthetic paragraph" for _ in range(40)), "12:00")
+        await pilot.pause()
+        await pilot.pause()
+        widget = app.query_one("#input", BarInput)
+        writes = []
+        monkeypatch.setattr(app._driver, "write", writes.append)
+        monkeypatch.setattr(BarInput, "_uses_native_cursor", property(lambda self: True))
+        widget._show_native_cursor()
+        assert widget._native_cursor_active
+        reply = app.query_one(".reply")
+        chat = app.query_one("#chat")
+        app.on_mouse_down(SimpleNamespace(widget=reply))
+        assert widget._cursor_suspended and not widget._native_cursor_active
+        app.screen.selections = {reply: SELECT_ALL}
+        app.on_mouse_up(SimpleNamespace(widget=reply))
+        old_y = chat.scroll_y
+        app._stream_widget = reply
+        app._stream_buffer = reply._markdown + "\n\nNew output" * 5
+        app._stream_flush()
+        await pilot.pause()
+        await pilot.pause()
+        assert chat.scroll_y == old_y
+        assert app.screen.selections
+        widget.on_key()
+        assert not widget._cursor_suspended and widget._native_cursor_active
+
+
+async def test_mouse_drag_in_chat_keeps_input_caret_stable(tmp_path):
+    from textual.color import Color
+    app = build_app(tmp_path, [])
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.add_user_turn("Synthetic question")
+        app.add_assistant_turn("Synthetic selectable reply", "12:00")
+        await pilot.pause()
+        await pilot.pause()
+        widget = app.query_one("#input", BarInput)
+        widget.value = "draft text"
+        widget.cursor_position = 3
+        assert app.query_one(".bubble").styles.border_left[1] == Color.parse("#6cb6ff")
+        reply = app.query_one(".reply")
+        await pilot.mouse_down(reply, offset=(1, 0))
+        assert widget._cursor_suspended
+        assert app.query_one("#chat").selecting
+        await pilot.hover(reply, offset=(12, 0))
+        await pilot.mouse_up(reply, offset=(12, 0))
+        assert not app.query_one("#chat").selecting
+        assert widget.value == "draft text" and widget.cursor_position == 3
+        assert app.screen.selections
+        await pilot.press("x")
+        assert not widget._cursor_suspended

@@ -152,14 +152,25 @@ class TranscriptView(VerticalScroll):
         self._tools: dict[str, dict] = {}
         self._start = 0
         self._more: HistoryMore | None = None
+        self.follow_output = True
+        self.selecting = False
 
     def clear_transcript(self) -> None:
+        self.follow_output = True
+        self.selecting = False
         self.remove_class("home")
         self._turns = []
         self._tools = {}
         self._start = 0
         self._more = None
         self.remove_children()
+
+    def watch_scroll_y(self, old_value: float, new_value: float) -> None:
+        super().watch_scroll_y(old_value, new_value)
+        if new_value < old_value:
+            self.follow_output = False
+        elif self.is_vertical_scroll_end:
+            self.follow_output = True
 
     def show_session(self, session: Session) -> None:
         self._turns = []
@@ -224,19 +235,19 @@ class TranscriptView(VerticalScroll):
 
 
 class HomePanel(Vertical):
-    """QuietMemo 固定终端字标：大写五行、小写三行，基线对齐。"""
+    """细线字标保留字腔与字距；窄窗口回退完整名称，不裁切字形。"""
 
     @staticmethod
     def wordmark() -> Text:
         glyphs = {
-            "Q": (" ███ ", "█   █", "█   █", "█  ██", " ████"),
-            "u": ("   ", "   ", "█ █", "█ █", "███"),
-            "i": (" ", "█", " ", "█", "█"),
-            "e": ("   ", "   ", "███", "██ ", "███"),
-            "t": ("   ", " █ ", "███", " █ ", " ██"),
-            "M": ("█   █", "██ ██", "█ █ █", "█   █", "█   █"),
-            "m": ("     ", "     ", "█████", "█ █ █", "█ █ █"),
-            "o": ("   ", "   ", "███", "█ █", "███"),
+            "Q": ("╭───╮", "│   │", "│   │", "│ ╲ │", "╰──╲╯"),
+            "u": ("     ", "     ", "╷   ╷", "│   │", "╰───╯"),
+            "i": (" ", "·", " ", "│", "╵"),
+            "e": ("     ", "     ", "╭───╮", "├───╯", "╰────"),
+            "t": ("   ", "╷  ", "├──", "│  ", "╰──"),
+            "M": ("╷     ╷", "│╲   ╱│", "│ ╲ ╱ │", "│  ╵  │", "╵     ╵"),
+            "m": ("       ", "       ", "╭──┬──╮", "│  │  │", "╵  ╵  ╵"),
+            "o": ("     ", "     ", "╭───╮", "│   │", "╰───╯"),
         }
         result = Text(no_wrap=True)
         for row in range(5):
@@ -245,13 +256,31 @@ class HomePanel(Vertical):
             for index, letter in enumerate("QuietMemo"):
                 if index:
                     result.append(" ")
-                result.append(glyphs[letter][row], style="#dedede" if index < 5 else "#6cb6ff")
+                result.append(glyphs[letter][row], style="#b0b0b0")
         return result
 
     def compose(self) -> ComposeResult:
         with Center():
             yield Static(self.wordmark(), classes="welcome-wordmark")
         yield Static("Talk naturally. I'll remember the details.", classes="welcome-line")
+
+
+    def on_mount(self) -> None:
+        self.call_after_refresh(self._fit_wordmark)
+
+    def on_resize(self) -> None:
+        self.call_after_refresh(self._fit_wordmark)
+
+    def _fit_wordmark(self) -> None:
+        if not self.is_mounted:
+            return
+        logo = next(iter(self.query(".welcome-wordmark")), None)
+        if logo is None:
+            return
+        compact = self.size.width < 51
+        logo.update(Text("QuietMemo", style="#b0b0b0") if compact else self.wordmark())
+        logo.styles.width = 9 if compact else 51
+        logo.styles.height = 1 if compact else 5
 
 
 class OptionItem(ListItem):

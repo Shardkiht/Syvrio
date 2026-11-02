@@ -597,4 +597,8 @@ The evolution TUI uses neutral gray surfaces with a sky-blue accent (`#6CB6FF`).
 The sidebar starts collapsed. Press `Ctrl+B` or click the top-left expand control to show conversations.
 
 
-The minimal home screen uses a large QuietMemo terminal wordmark (taller uppercase Q/M with smaller lowercase letters) and one short prompt, with no overview data or conversation cards. Use `/sessions` or expand the sidebar to access conversations.
+The minimal home screen uses a large, uniformly soft-gray QuietMemo outline terminal wordmark (taller uppercase Q/M with smaller lowercase letters) and one short prompt, with no overview data or conversation cards. Use `/sessions` or expand the sidebar to access conversations.
+
+The wordmark uses thin strokes and open counters. Narrow terminals fall back to the full plain QuietMemo title rather than cropping the lettering.
+
+AI output follows only while you are at the bottom. Scrolling up or selecting conversation text preserves your reading position; returning to the bottom resumes following. The input caret pauses during conversation selection and returns when you click the composer or type. User messages use a blue left marker.

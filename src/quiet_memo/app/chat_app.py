@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.events import MouseDown, MouseUp
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Input, Label, ListView, ListItem, Markdown, Static
 
@@ -472,7 +473,21 @@ class ChatApp(ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixin, App):
         self._stream_flush_scheduled = False
 
     def _scroll_end(self) -> None:
-        self.call_after_refresh(self._chat().scroll_end, animate=False)
+        # 布局刷新前后都可能收到上滑/选择事件，真正滚动时再核验跟随意图。
+        def follow() -> None:
+            chat = self._chat()
+            selected = any(chat in widget.ancestors_with_self for widget in self.screen.selections)
+            if chat.follow_output and not chat.selecting and not selected:
+                chat.scroll_end(animate=False, immediate=True)
+        self.call_after_refresh(follow)
+
+    def on_mouse_down(self, event: MouseDown) -> None:
+        if event.widget is not None and self._chat() in event.widget.ancestors_with_self:
+            self._chat().selecting = True
+            self.query_one("#input", BarInput).suspend_cursor()
+
+    def on_mouse_up(self, event: MouseUp) -> None:
+        self._chat().selecting = False
 
     def add_welcome(self) -> None:
         chat = self._chat()
@@ -516,6 +531,7 @@ class ChatApp(ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixin, App):
         chat = self._chat()
         if chat.has_class("home"):
             self._clear_chat()
+        chat.follow_output = True
         if stamp:
             chat.mount(Static(f"You · {stamp}", classes="who-user"))
         # 容器构造时直接带子组件，避免“先挂载容器再补挂子组件”的时序问题。

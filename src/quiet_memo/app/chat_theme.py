@@ -77,7 +77,7 @@ APP_CSS = """
     #chat > * { margin-right: 2; }
     .who-user { content-align: left top; color: $faint; width: 1fr; margin-top: 1; }
     .user-turn { width: 1fr; height: auto; align: left top; margin-bottom: 1; }
-    .bubble { background: #222222; color: #dedede; border-left: solid #666666; padding: 1 2; width: 1fr; height: auto; }
+    .bubble { background: #222222; color: #dedede; border-left: solid $accent; padding: 1 2; width: 1fr; height: auto; }
     .who-ai { color: $faint; text-style: bold; margin-top: 1; width: 1fr; }
     .reply { color: #d5d5d5; margin: 0; height: auto; }
     /* 工具事件用薄边线和弱底色分组，不与正式回复争夺注意力 */
@@ -89,7 +89,7 @@ APP_CSS = """
     /* 欢迎区只保留完整项目名字标，不用数据卡片填满留白。 */
     #chat.home { align: center middle; }
     .welcome-shell { width: 60; max-width: 100%; height: auto; padding: 1 0; align: center top; }
-    .welcome-wordmark { width: 39; height: 5; margin-bottom: 1; }
+    .welcome-wordmark { width: 51; height: 5; margin-bottom: 1; }
     .welcome-line { color: #929292; width: 1fr; content-align: center top; height: auto; }
 
     /* 输入框不做焦点整块提亮，避免像额外遮罩；只用边框区分焦点。 */
