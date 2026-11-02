@@ -496,6 +496,7 @@ The full backlog lives in [GitHub Issues](https://github.com/Shardkiht/quiet-mem
 | Medium–medium-high | [Temporal evolution and contextual recall](https://github.com/Shardkiht/quiet-memo/issues/12) | Context filters, current/historical views and explicit evolution are implemented; advanced temporal reranking remains planned |
 | High | [Dream memory / Dreaming](https://github.com/Shardkiht/quiet-memo/issues/8) | Idle TUI reflection, request budgets, pause and recovery are implemented |
 | High | [Dynamic user profiles](https://github.com/Shardkiht/quiet-memo/issues/9) | Rebuildable fact/inference profiles, automatic idle refresh and relevant confirmed context are implemented; longitudinal semantic evaluation remains planned |
+| Very high / long-term | [Longitudinal user understanding / evolutionary cognition](https://github.com/Shardkiht/quiet-memo/issues/18) | Planned: trace evidence across time to distinguish stable traits, short-term fluctuations, life phases and long-term trends; produce reviewable, rebuildable insights distinct from individual fact evolution or current profiles |
 | Very high / long-term | [Proactive recall across AI clients](https://github.com/Shardkiht/quiet-memo/issues/13) | Surface relevant memories without explicit prompts where client integrations permit |
 | Ongoing | [Memory quality and regression evaluation](https://github.com/Shardkiht/quiet-memo/issues/14) | Synthetic tests for extraction/conflicts, temporal change, emotional inference, and implicit recall |
 
