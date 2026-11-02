@@ -8,6 +8,7 @@ from threading import Event
 from textual.widgets import Static
 
 from ..llm import ChatModelError, GenerationCancelled
+from ..infra.diagnostics import record_event
 from .chat_widgets import ASSISTANT_NAME, ChatReply
 
 
@@ -136,7 +137,8 @@ class ChatFlowMixin:
             return
         try:
             self.runtime.sessions.load(item.session_id)
-        except Exception:
+        except Exception as exc:
+            record_event("queue.failed", exc)
             self.notify("Queued command skipped: session no longer available")
             return
         self._pending_command = item
@@ -170,9 +172,11 @@ class ChatFlowMixin:
             self._ui(self._finish_cancelled, session_id)
             return
         except ChatModelError as exc:
+            record_event("chat.failed", exc)
             self._ui(self._finish_error, str(exc), session_id)
             return
         except Exception as exc:  # 界面不因单轮失败退出
+            record_event("chat.failed", exc)
             self._ui(self._finish_error, f"Request failed: {exc}", session_id)
             return
         elapsed = time.monotonic() - started
@@ -243,7 +247,8 @@ class ChatFlowMixin:
             return
         try:
             self.runtime.session = self.runtime.sessions.load(session_id)
-        except Exception:
+        except Exception as exc:
+            record_event("session.reload_failed", exc)
             pass  # 会话文件异常时保留内存对象，后续操作各自报错。
 
     def _finish_reply(self, content: str, stamp: str, meta: str, session_id: str | None) -> None:

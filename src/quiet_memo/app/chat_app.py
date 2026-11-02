@@ -16,11 +16,13 @@ from textual.binding import Binding
 from textual.events import MouseDown, MouseUp
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Input, Label, ListView, ListItem, Markdown, Static
+from textual.worker import Worker, WorkerState
 
 from ..agent.runtime import AgentRuntime
 from ..agent.session import Session, SessionStore
 from ..infra.search.daemon import ensure_search_daemon
 from ..infra.tokens import format_tokens
+from ..infra.diagnostics import record_event
 from ..memory.service import MemoryService
 from .chat_commands import ChatCommandsMixin
 from .chat_reflection import ChatReflectionMixin
@@ -132,6 +134,16 @@ class ChatApp(ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixin, App):
         self._warm_search()
         self._start_auto_reflection()
 
+    def _handle_exception(self, error: Exception) -> None:
+        record_event("tui.failed", error, busy=self.busy, streaming=self._ask_active,
+                     queued=len(self._queue))
+        super()._handle_exception(error)
+
+    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+        if event.state == WorkerState.ERROR:
+            record_event("tui.failed", event.worker.error, busy=self.busy,
+                         streaming=self._ask_active, queued=len(self._queue))
+
     def _warm_search(self) -> None:
         search = self.service.config.search
         if not search.enabled or not search.auto_start or search.transport != "http":
@@ -144,6 +156,7 @@ class ChatApp(ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixin, App):
         try:
             result = ensure_search_daemon(self.service.config.search.base_url)
         except Exception as exc:
+            record_event("search.failed", exc)
             self.call_from_thread(self.notify, f"Web search did not start: {exc}")
             return
         if result == "started":
@@ -159,6 +172,7 @@ class ChatApp(ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixin, App):
             result = self.runtime.consolidate_pending()
             auto_commit = self.service.commit_pending_changes()
         except Exception as exc:
+            record_event("catchup.failed", exc)
             self.call_from_thread(self._after_catchup_error, str(exc))
             return
         self.call_from_thread(self._after_catchup, result, auto_commit)
@@ -359,6 +373,7 @@ class ChatApp(ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixin, App):
                 label = f"{session.id} · {session.title()}"
         except Exception as exc:
             # 会话文件损坏/被删等异常不能让 busy 卡死：留在原会话并提示。
+            record_event("session.failed", exc)
             self.call_from_thread(self._finish_error, f"Session switch failed: {exc}")
             return
         self.call_from_thread(self._after_session_switch, stats, label)
@@ -369,7 +384,8 @@ class ChatApp(ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixin, App):
         try:
             # 切走时的后台补沉淀设阈值：小尾巴攒批留给启动补记，不烧小调用。
             deferred = self.runtime.consolidate_pending(min_new_messages=3)
-        except Exception:
+        except Exception as exc:
+            record_event("catchup.failed", exc)
             return
         if deferred["consolidated"] or deferred["errors"]:
             self.call_from_thread(self._after_deferred_distill, deferred)
@@ -476,18 +492,19 @@ class ChatApp(ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixin, App):
         # 布局刷新前后都可能收到上滑/选择事件，真正滚动时再核验跟随意图。
         def follow() -> None:
             chat = self._chat()
-            selected = any(chat in widget.ancestors_with_self for widget in self.screen.selections)
-            if chat.follow_output and not chat.selecting and not selected:
+            if not chat.reading_paused:
                 chat.scroll_end(animate=False, immediate=True)
         self.call_after_refresh(follow)
 
     def on_mouse_down(self, event: MouseDown) -> None:
         if event.widget is not None and self._chat() in event.widget.ancestors_with_self:
             self._chat().selecting = True
+            self._chat().record_reading_state()
             self.query_one("#input", BarInput).suspend_cursor()
 
     def on_mouse_up(self, event: MouseUp) -> None:
         self._chat().selecting = False
+        self._chat().record_reading_state()
 
     def add_welcome(self) -> None:
         chat = self._chat()
@@ -587,7 +604,8 @@ class ChatApp(ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixin, App):
     def _usage_work(self, key: tuple, session: Session) -> None:
         try:
             used = self.runtime.context.estimate_usage(session, self.runtime._system_prompt())
-        except Exception:
+        except Exception as exc:
+            record_event("usage.failed", exc)
             used = None
         try:
             self.call_from_thread(self._after_usage, key, used)
@@ -655,6 +673,7 @@ class ChatApp(ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixin, App):
         self._release_input_if_idle()
 
     def _begin_ask(self, session_id: str | None) -> None:
+        record_event("generation.started", queued=len(self._queue))
         self._reflection_activity()
         self._ask_active = True
         self._ask_in_flight = session_id
@@ -664,6 +683,9 @@ class ChatApp(ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixin, App):
         self._render_model_status()
 
     def _end_ask(self) -> None:
+        record_event("generation.finished", queued=len(self._queue),
+                     elapsed_ms=round((time.monotonic() - self._progress_started) * 1000)
+                     if self._ask_active else 0)
         self._ask_active = False
         self._cancel_generation = None
         self._ask_in_flight = None

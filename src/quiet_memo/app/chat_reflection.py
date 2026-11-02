@@ -6,6 +6,8 @@ from functools import partial
 
 from rich.markup import escape
 
+from ..infra.diagnostics import record_event
+
 
 class ChatReflectionMixin:
     """回顾 worker 不占聊天 busy；取消令牌在主线程创建，覆盖尚未启动的任务。"""
@@ -44,7 +46,8 @@ class ChatReflectionMixin:
         try:
             result = self.service.reflection.run(mode, 1, cancel_event=token)
             self.call_from_thread(self._after_auto_reflection, result, None)
-        except Exception:
+        except Exception as exc:
+            record_event("reflection.failed", exc)
             self.call_from_thread(self._after_auto_reflection, None, "Automatic reflection failed; progress preserved.")
 
     def _after_auto_reflection(self, result, error: str | None) -> None:
@@ -108,7 +111,8 @@ class ChatReflectionMixin:
             text = "\n".join(f"[{labels.get(item.status, item.status)}] {item.text}\nSources: {', '.join(item.source_ids)}" for item in items)
             text = text or "No profile yet. Save preferences, goals or habits; /profile refresh can generate proposals."
             text += "\nCorrect or forget facts using the existing controls; review inferences in /inferences."
-        except Exception:
+        except Exception as exc:
+            record_event("reflection.failed", exc)
             text = "Could not read the profile. Check local memory and inference logs."
         self.call_from_thread(self.add_card, escape(text))
 
@@ -121,7 +125,8 @@ class ChatReflectionMixin:
                 message += f"\n{result.error}"
             if result.proposed:
                 message += "\nView and review with /inferences."
-        except Exception:
+        except Exception as exc:
+            record_event("reflection.failed", exc)
             message = "Reflection failed; local progress preserved. Check the job log before retrying."
         self.call_from_thread(self._after_reflection, message)
 

@@ -1735,10 +1735,14 @@ async def test_tool_event_rows_use_single_border_and_assistant_is_qmo(tmp_path):
         assert labels and all(label.startswith("qmo") for label in labels)
 
 
-async def test_streaming_error_marks_interruption(tmp_path):
+async def test_streaming_error_marks_interruption(tmp_path, monkeypatch):
     # 回归（issue #4）：中途断流保留半截内容并显式标注，不静默吞掉。
     app = build_app(tmp_path, [])
     from quiet_memo.llm import ChatModelError
+    from quiet_memo.app import chat_flow
+
+    logged = []
+    monkeypatch.setattr(chat_flow, "record_event", lambda *args, **kwargs: logged.append(args))
 
     class BoomModel:
         def __init__(self):
@@ -1768,6 +1772,30 @@ async def test_streaming_error_marks_interruption(tmp_path):
         cards = [str(w.render()) for w in app.query(".card")]
         assert any("连接中断" in c for c in cards)
         assert app.query_one("#input", Input).disabled is False
+        assert any(event[0] == "chat.failed" and isinstance(event[1], ChatModelError)
+                   for event in logged)
+
+
+async def test_reading_diagnostics_records_state_transitions_without_content(tmp_path, monkeypatch):
+    from quiet_memo.app import chat_widgets
+
+    logged = []
+    monkeypatch.setattr(chat_widgets, "record_event", lambda *args, **kwargs: logged.append((args, kwargs)))
+    app = build_app(tmp_path, [])
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        chat = app._chat()
+        logged.clear()
+        chat.follow_output = False
+        chat.record_reading_state()
+        chat.record_reading_state()
+        chat.selecting = True
+        chat.record_reading_state()
+        assert len(logged) == 2
+        assert all(args == ("reading.changed",) for args, _ in logged)
+        assert logged[0][1]["follow"] is False
+        assert logged[1][1]["selecting"] is True
+        assert all(type(value) in (bool, int, float) for _, state in logged for value in state.values())
 
 
 async def test_switch_defers_distill_then_catches_up_in_background(tmp_path):
@@ -2994,6 +3022,10 @@ async def test_home_has_full_project_wordmark(tmp_path, size):
     async with app.run_test(size=size) as pilot:
         await pilot.pause()
         logo = app.query_one(".welcome-wordmark", Static)
+        for _ in range(30):
+            if logo.region.height == (1 if app.query_one(HomePanel).size.width < 51 else 5):
+                break
+            await pilot.pause(0.02)
         assert logo.region.height == (1 if app.query_one(HomePanel).size.width < 51 else 5)
         assert abs(logo.region.center[0] - app.query_one(HomePanel).region.center[0]) <= 1
         assert logo.region.bottom <= app.query_one("#input").region.y
@@ -3090,3 +3122,99 @@ async def test_mouse_drag_in_chat_keeps_input_caret_stable(tmp_path):
         assert app.screen.selections
         await pilot.press("x")
         assert not widget._cursor_suspended
+
+
+@pytest.mark.parametrize("paragraphs", [40, 50, 60])
+async def test_wheel_during_stream_freezes_layout_and_caret_until_bottom(tmp_path, monkeypatch, paragraphs):
+    from textual.events import MouseScrollUp, MouseScrollDown
+    app = build_app(tmp_path, [])
+    async with app.run_test(size=(100, 24)) as pilot:
+        app.add_user_turn("Synthetic question")
+        original = "\n\n".join(f"Paragraph {i}" for i in range(paragraphs))
+        app.add_assistant_turn(original, "12:00")
+        await pilot.pause()
+        await pilot.pause()
+        chat = app.query_one("#chat")
+        reply = app.query_one(".reply")
+        widget = app.query_one("#input", BarInput)
+        monkeypatch.setattr(app._driver, "write", lambda *_: None)
+        monkeypatch.setattr(BarInput, "_uses_native_cursor", property(lambda self: True))
+        widget._show_native_cursor()
+        chat.post_message(MouseScrollUp(chat, x=5, y=5, delta_x=0, delta_y=0, button=0, shift=False, meta=False, ctrl=False))
+        await pilot.pause()
+        assert widget._cursor_suspended and not widget._native_cursor_active
+        assert not chat.follow_output
+        y, height = chat.scroll_y, reply.virtual_size.height
+        app._stream_widget = reply
+        for index in range(8):
+            app._stream_buffer = original + "\n\n# New heading\n\n" + ("new content\n" * (index + 1))
+            app._stream_flush()
+            await pilot.pause()
+            assert reply._markdown == original
+            assert chat.scroll_y == y and reply.virtual_size.height == height
+        final = app._stream_buffer + "\n\nFinal output"
+        app._finalize_stream_segment(final)
+        assert reply._markdown == original  # 完成也不能重排阅读中的段落。
+        widget.on_focus()  # 后台完成或恢复焦点不能擅自重新显示硬件光标。
+        await pilot.pause()
+        assert widget._cursor_suspended and not widget._native_cursor_active
+        chat.scroll_end(animate=False)
+        for _ in range(30):
+            await pilot.pause(0.02)
+            if reply._markdown == final and reply.virtual_size.height > height and chat.is_vertical_scroll_end:
+                break
+        assert reply._markdown == final
+        assert reply.virtual_size.height > height
+        assert reply._pending_markdown is None
+        assert chat.is_vertical_scroll_end, (chat.scroll_y, chat.max_scroll_y, chat.follow_output,
+                                              chat.selecting, bool(app.screen.selections))
+        widget.on_key()
+        assert widget._native_cursor_active
+
+
+async def test_selected_stream_text_stays_copyable_until_input_clicked(tmp_path):
+    from textual.selection import SELECT_ALL
+    app = build_app(tmp_path, [])
+    async with app.run_test(size=(100, 24)) as pilot:
+        app.add_user_turn("Synthetic question")
+        app.add_assistant_turn("Original **selected** text", "12:00")
+        await pilot.pause()
+        await pilot.pause()
+        chat = app.query_one("#chat")
+        reply = app.query_one(".reply")
+        app.screen.selections = {reply: SELECT_ALL}
+        before = reply.get_selection(SELECT_ALL)[0]
+        for i in range(5):
+            reply.update("Changed reply " + "new text " * (i + 1))
+            await pilot.pause()
+            assert reply.get_selection(SELECT_ALL)[0] == before
+        assert reply._pending_markdown
+        await pilot.click("#input")
+        await pilot.pause()
+        assert not app.screen.selections
+        assert reply._pending_markdown is None
+        assert "Changed reply" in reply.get_selection(SELECT_ALL)[0]
+
+
+async def test_dragging_scrollbar_freezes_stream_layout(tmp_path):
+    app = build_app(tmp_path, [])
+    async with app.run_test(size=(100, 24)) as pilot:
+        app.add_user_turn("Synthetic question")
+        original = "\n\n".join(f"Paragraph {i}" for i in range(60))
+        app.add_assistant_turn(original, "12:00")
+        await pilot.pause()
+        await pilot.pause()
+        chat = app.query_one("#chat")
+        reply = app.query_one(".reply")
+        bar = chat.vertical_scrollbar
+        await pilot.mouse_down(bar, offset=(0, bar.size.height - 2))
+        try:
+            assert chat.is_vertical_scrollbar_grabbed
+            for i in range(5):
+                reply.update(original + "\n\nNew output" * (i + 1))
+                app._scroll_end()
+                await pilot.pause()
+                assert reply._markdown == original
+        finally:
+            await pilot.mouse_up(bar, offset=(0, bar.size.height - 2))
+        assert not chat.is_vertical_scrollbar_grabbed

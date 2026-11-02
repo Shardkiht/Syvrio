@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Callable
 
 from ..infra.tokens import truncate_to_tokens
+from ..infra.diagnostics import record_event
 from ..llm.client import complete
 from .detect import contains_secret
 from .inference import source_fingerprint
@@ -262,7 +263,8 @@ class ReflectionEngine:
                         self._record(key, "completed", mode=mode, sources=source_signatures)
                     result.remaining -= 1
                 except Exception as exc:
-                    # 只记录类别，不保存供应商异常原文，避免泄露请求正文或凭据。
+                    record_event("reflection.failed", exc)
+                    # 任务进度日志只保存类别；详细异常进入独立的本地诊断日志。
                     timed_out = isinstance(exc, TimeoutError) or type(exc).__name__ in {"Timeout", "APITimeoutError", "ReadTimeout", "ConnectTimeout"}
                     kind = "timeout" if timed_out else "validation" if isinstance(exc, ValueError) else "storage" if isinstance(exc, OSError) else "request"
                     self._record(key, "failed", error_kind=kind)

@@ -7,6 +7,7 @@ from rich.markup import escape
 from textual.widgets import Input
 
 from ..infra.tokens import format_tokens
+from ..infra.diagnostics import record_event
 from ..infra.documents import DocumentError, SUPPORTED_SUFFIXES, read_document
 from ..memory.extractor import split_chunks
 from ..llm import cached_provider_models, fetch_provider_models
@@ -93,6 +94,7 @@ class ChatCommandsMixin:
                 self.service.review_inference(item_id or "", action, text)
             items = self.service.list_inferences()
         except Exception as exc:
+            record_event("command.failed", exc)
             self.call_from_thread(self._finish_error, f"Inference action failed: {exc}")
             return
         self.call_from_thread(self._show_inferences, items)
@@ -344,6 +346,7 @@ class ChatCommandsMixin:
         try:
             events = self.runtime.force_compact()
         except Exception as exc:
+            record_event("command.failed", exc)
             self.call_from_thread(self._finish_error, f"Compaction failed: {exc}")
             return
         self.call_from_thread(self._after_compact, events)
@@ -393,11 +396,14 @@ class ChatCommandsMixin:
                         lines += [f"Pending [{item.topic}] {item.text}" for item in result.queued]
                         self.call_from_thread(self.add_card, escape("\n".join(lines)))
                 except DocumentError as exc:
+                    record_event("command.failed", exc)
                     self.call_from_thread(self.add_card, escape(f"{file.name} import failed: {exc}"))
-                except Exception:
+                except Exception as exc:
+                    record_event("command.failed", exc)
                     self.call_from_thread(self.add_card, escape(f"{file.name} import failed. Check the format, parser dependencies and model settings; completed changes are retained."))
             self.call_from_thread(self.refresh_pending)
         except Exception as exc:
+            record_event("command.failed", exc)
             self.call_from_thread(self._finish_error, f"Import failed: {exc}")
             return
         self.call_from_thread(self._after_import, "Import complete." if apply else "Preview complete; use /import <path> --apply to analyze again and save.")
@@ -418,6 +424,7 @@ class ChatCommandsMixin:
         try:
             entries = self._model_entries(fetched)
         except Exception as exc:
+            record_event("command.failed", exc)
             self.call_from_thread(self._finish_error, f"Loading models failed: {exc}")
             return
         self.call_from_thread(self._show_model_picker, entries, True, refresh)
@@ -458,7 +465,8 @@ class ChatCommandsMixin:
         try:
             fetched = fetch_provider_models(self.service.config.llm, refresh=refresh)
             entries = self._model_entries(fetched) if fetched else None
-        except Exception:
+        except Exception as exc:
+            record_event("command.failed", exc)
             return
         if entries is not None:
             self.call_from_thread(self._apply_fetched_models, picker, entries)

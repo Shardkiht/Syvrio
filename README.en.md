@@ -419,7 +419,7 @@ src/quiet_memo/
 ├── llm/          client.py, summarizer.py, commit_summary.py
 │                                                   # LiteLLM adapter, session/commit summaries
 └── infra/        config.py, providers.py, gitops.py, tokens.py,
-                  layout.py, dialogs.py, documents.py, search/ # Config, document conversion, web search
+                  layout.py, dialogs.py, documents.py, diagnostics.py, search/ # Config, diagnostics, document conversion, web search
 ```
 
 Dependency direction: `app → agent → memory → retrieval → infra`, `memory/agent → llm → infra`.
@@ -427,6 +427,8 @@ Dependency direction: `app → agent → memory → retrieval → infra`, `memor
 Development conventions (code style, storage invariants, testing, and docs sync) are in [AGENTS.md](AGENTS.md).
 
 README demo media lives in `docs/assets/` and contains no personal memory vault data.
+
+`qm` enables local diagnostics at startup in `logs/quiet-memo.log` beside the default configuration file (resolved using `QUIET_MEMO_CONFIG`). JSON lines include timestamps, version, process, OS, exception reasons and tracebacks, generation start/end, reading-follow/selection state and scroll positions. A background thread writes the file, capped at 2 MiB with three rotating backups; an unavailable log file produces a warning without blocking use. Logs stay local, do not copy entire chats or memories or capture local variables, and redact recognized credentials. Exception text can still contain local paths or application content, so inspect logs before sharing. Logs are separate from Vault and session history and can be deleted after exiting without affecting memories.
 
 - Retrieval defaults to hybrid: jieba + rank-bm25 and vector cosine runs are fused with RRF. Vectors come from local fastembed inference (optional extra) or an embedding API, cached as derived data in `.quiet-memo/vectors.npz` (gitignored inside the vault; delete it to force a rebuild; switching the embedding model invalidates it automatically). When the embedding backend is unavailable it falls back to plain BM25; `/status` and `qm status` show the active retrieval mode.
 - Token budgets are estimated with tiktoken, falling back to character estimation when offline.
@@ -603,3 +605,7 @@ The minimal home screen uses a large, uniformly soft-gray QuietMemo outline term
 The wordmark uses thin strokes and open counters. Narrow terminals fall back to the full plain QuietMemo title rather than cropping the lettering.
 
 AI output follows only while you are at the bottom. Scrolling up or selecting conversation text preserves your reading position; returning to the bottom resumes following. The input caret pauses during conversation selection and returns when you click the composer or type. User messages use a blue left marker.
+
+AI replies use semantic Markdown colors: soft-white body text, blue heading levels, brighter bold emphasis, pale-gold inline code, gray-blue quotes and underlined blue links. Fenced code keeps syntax highlighting on a gray surface. The theme is scoped to replies.
+
+While scrolling up, selecting text or dragging the scrollbar, the displayed reply stops reflowing and later text is buffered; generation and session persistence continue. Returning to the bottom reveals the latest text. Clicking the composer clears selection and flushes buffered text if already at the bottom. Wheel reading hides the input caret until typing or clicking the composer; background completion does not reactivate it.

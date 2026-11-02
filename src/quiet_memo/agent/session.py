@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ..infra.tokens import estimate_tokens
+from ..infra.diagnostics import record_event
 from ..memory.detect import redact_secrets
 
 _LOG = logging.getLogger(__name__)
@@ -328,6 +329,7 @@ class SessionStore:
                 session = self.load(path.stem)
             except (ValueError, KeyError, OSError) as exc:
                 _LOG.warning("Unable to list session %s (%s)", path.stem, type(exc).__name__)
+                record_event("session.scan_failed", exc)
                 return None
             row = {
                 "id": session.id,
@@ -347,6 +349,7 @@ class SessionStore:
                     row["tokens"] = self.load(path.stem).estimated_tokens()
                 except (ValueError, KeyError, OSError) as exc:
                     _LOG.warning("Unable to list session %s (%s)", path.stem, type(exc).__name__)
+                    record_event("session.scan_failed", exc)
                     return None
         result = dict(row)
         if not with_tokens:
@@ -395,6 +398,7 @@ class SessionStore:
                     session = self.load(path.stem)
                 except (ValueError, KeyError, OSError) as exc:
                     _LOG.warning("Unable to scan session %s (%s)", path.stem, type(exc).__name__)
+                    record_event("session.scan_failed", exc)
                     continue
                 found.append((session.updated_at, session))
                 continue
@@ -402,6 +406,7 @@ class SessionStore:
                 session = self.load(path.stem)
             except (ValueError, KeyError, OSError) as exc:
                 _LOG.warning("Unable to scan session %s (%s)", path.stem, type(exc).__name__)
+                record_event("session.scan_failed", exc)
                 continue
             count = len(session.user_texts_after_distilled())
             self._undistilled_cache[path.stem] = (signature, count)

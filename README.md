@@ -417,7 +417,7 @@ src/quiet_memo/
 ├── llm/          client.py, summarizer.py, commit_summary.py
 │                                                   # LiteLLM 适配、会话/提交摘要
 └── infra/        config.py, providers.py, gitops.py, tokens.py,
-                  layout.py, dialogs.py, documents.py, search/ # 配置、文档转换、联网搜索
+                  layout.py, dialogs.py, documents.py, diagnostics.py, search/ # 配置、诊断、文档转换、联网搜索
 ```
 
 依赖方向：`app → agent → memory → retrieval → infra`，`memory/agent → llm → infra`。
@@ -425,6 +425,8 @@ src/quiet_memo/
 开发约定（代码风格、存储不变量、测试与文档同步）见 [AGENTS.md](AGENTS.md)。
 
 README 的界面演示与截图保存在 `docs/assets/`，不包含个人记忆库数据。
+
+`qm` 启动时默认开启本地诊断日志，保存在默认配置文件旁的 `logs/quiet-memo.log`（默认配置位置遵循 `QUIET_MEMO_CONFIG`）。每行是 JSON，包含时间、版本、进程、系统、异常原因和调用堆栈；同时记录生成起止、阅读跟随/拖选状态与滚动位置，帮助排查界面问题。文件通过后台线程写入，单文件 2 MiB、最多保留 3 个轮转备份；日志不可写时提示但不阻止使用。日志不上传、不整段复制聊天或记忆、不采集局部变量，识别到的凭据会脱敏；异常原文仍可能带有本机路径或业务内容，分享前请检查。日志不属于 Vault 或会话历史，可在退出应用后删除，不影响记忆。
 
 - 检索默认 hybrid：jieba + rank-bm25 与向量余弦两路结果做 RRF 融合；向量由 fastembed 本地推理（可选 extra）或 embedding API 计算，缓存为 `.quiet-memo/vectors.npz` 派生数据（vault 内已 gitignore，删除后自动重建；换 embedding 模型自动失效）。向量后端不可用时回退纯 BM25，`/status` 和 `qm status` 显示当前检索模式。
 - token 预算用 tiktoken 估算，离线失败时回退字符估算。
@@ -599,3 +601,7 @@ evolution 的 TUI 使用中性灰背景与天蓝色强调（`#6CB6FF`），欢�
 字标用细线与留白区分笔画和字腔；终端过窄时回退为完整的普通 QuietMemo 标题，避免裁切。
 
 AI 输出只在当前位于底部时自动跟随；上滑阅读或拖选正文时保持阅读位置，回到底部后恢复跟随。选择正文期间暂停输入光标，点击输入框或继续键入时恢复。用户消息左侧使用蓝色标记。
+
+AI 回复按 Markdown 语义区分颜色：正文柔白，一级/二级标题采用不同亮度的蓝色，重点加粗提亮，行内代码淡金色，引用灰蓝，链接蓝色带下划线；代码块保留语法高亮与灰色底。只在回复局部应用，不改变终端其他输出。
+
+上滑、拖选或拖动滚动条时，当前回复暂停重排，后续全文保存在界面缓冲中；模型生成与会话保存继续。回到当前显示内容的底部后补齐最新输出；点击输入框清除选区后，若已在底部也会补齐。滚轮阅读期间隐藏输入光标，继续键入或点击输入框才恢复，后台完成不会重新抢回光标。

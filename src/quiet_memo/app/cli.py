@@ -14,6 +14,7 @@ from ..infra.config import (
     write_example_config,
 )
 from ..infra.gitops import GitError
+from ..infra.diagnostics import record_event, start_diagnostics, stop_diagnostics
 from ..infra.documents import DocumentError, SUPPORTED_SUFFIXES, read_document
 from ..memory.extractor import ExtractorError, split_chunks
 from ..memory.service import MemoryService, get_service
@@ -47,6 +48,7 @@ def _root(ctx: typer.Context) -> None:
     try:
         run_chat(service)
     except Exception as exc:
+        record_event("tui.failed", exc)
         console.print(padded(f"[#b8b8b8]无法启动对话界面：{exc}[/]"))
         console.print(ctx.get_help())
 
@@ -545,7 +547,14 @@ def main() -> None:
         for stream in (sys.stdout, sys.stderr):
             if not stream.isatty() and hasattr(stream, "reconfigure"):
                 stream.reconfigure(encoding="utf-8")
-    app()
+    start_diagnostics()
+    try:
+        app()
+    except Exception as exc:
+        record_event("cli.failed", exc)
+        raise
+    finally:
+        stop_diagnostics()
 
 
 if __name__ == "__main__":

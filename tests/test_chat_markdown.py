@@ -102,7 +102,7 @@ def test_heading_style_and_compact_spacing():
     assert text.plain.splitlines()[0].startswith("Heading")
     start = text.plain.index("Heading")
     styles = [s.style for s in text.spans if s.start <= start < s.end]
-    assert any(s.bold and s.color.get_truecolor() == (222, 222, 222) for s in styles)
+    assert any(s.bold and s.color.get_truecolor() == (108, 182, 255) for s in styles)
     assert not any(s.underline for s in styles)
     assert text.plain.splitlines()[1].startswith("Body")
     assert len(render(SAMPLE).plain.splitlines()) < len(render(SAMPLE, original=True).plain.splitlines())
@@ -211,3 +211,16 @@ async def test_long_reply_keeps_one_widget_and_all_text_on_resize():
             assert text.count("        return") == 4
             assert not reply.query("*")
             assert reply.size.width <= width
+
+
+def test_reply_markdown_has_readable_semantic_colors():
+    text = render("# Heading\n\nBody **important** and `code`.\n\n> Quoted text\n\n[Link](https://example.com)")
+    console = Console()
+    def color(word):
+        return text.get_style_at_offset(console, text.plain.index(word)).color.get_truecolor()
+    assert color("Heading") == (108, 182, 255)
+    assert color("Body") == (213, 213, 213)
+    assert color("important") == (240, 240, 240)
+    assert color("code") == (226, 192, 141)
+    assert color("Quoted") == (154, 175, 196)
+    assert color("Link") == (108, 182, 255)

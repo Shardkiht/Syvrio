@@ -17,6 +17,7 @@ from rich.console import Console, ConsoleOptions, RenderResult
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
+from textual.events import MouseScrollUp, MouseScrollDown
 from textual.content import Content
 from textual.containers import Center, Vertical, VerticalScroll
 from textual.screen import ModalScreen
@@ -27,6 +28,7 @@ from textual.visual import RenderOptions, RichVisual
 from textual.widgets import Input, Label, ListView, ListItem, Static
 
 from ..agent.session import Session
+from ..infra.diagnostics import record_event
 from .command_catalog import SLASH_COMMANDS
 from .chat_theme import MARKDOWN_THEME
 
@@ -63,7 +65,7 @@ class _ReplyCodeBlock(CodeBlock):
     def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
         # Remove only the fence's terminal newline, never code indentation/spaces.
         yield Syntax(str(self.text).removesuffix("\n"), self.lexer_name,
-                     theme=self.theme, background_color="#1a1c22",
+                     theme=self.theme, background_color="#202020",
                      word_wrap=True, padding=(0, 1))
 
 
@@ -74,7 +76,7 @@ class _ReplyMarkdown(RichMarkdown):
     def __init__(self, markdown: str) -> None:
         compatible = bool(_CJK_EMPHASIS.search(markdown))
         # Initialize Rich's rendering state without parsing an affected reply twice.
-        super().__init__("" if compatible else markdown, code_theme="github-dark")
+        super().__init__("" if compatible else markdown, code_theme="github-dark", style="markdown.text")
         if compatible:
             self.markup = markdown
             parser = MarkdownIt().enable("strikethrough").enable("table")
@@ -115,14 +117,27 @@ class ChatReply(Static):
 
     def __init__(self, content: str, **kwargs) -> None:
         self._markdown = content
+        self._pending_markdown: str | None = None
         super().__init__(**kwargs)
         super().update(_SelectableMarkdown(self, content))
 
     def update(self, content: str) -> None:
+        chat = next((node for node in self.ancestors if isinstance(node, TranscriptView)), None)
+        if chat is not None and chat.reading_paused:
+            # 只缓存最新全文；用户阅读的 Markdown 与选区坐标保持不变。
+            self._pending_markdown = content
+            return
+        self._pending_markdown = None
         if content == self._markdown:
             return
         self._markdown = content
         super().update(_SelectableMarkdown(self, content))
+
+    def flush_pending(self) -> bool:
+        if self._pending_markdown is None:
+            return False
+        self.update(self._pending_markdown)
+        return True
 
     def get_selection(self, selection: Selection) -> tuple[str, str]:
         content = self.visual.selectable_content(self.content_size.width)
@@ -154,6 +169,29 @@ class TranscriptView(VerticalScroll):
         self._more: HistoryMore | None = None
         self.follow_output = True
         self.selecting = False
+        self._reading_state: tuple | None = None
+
+    def record_reading_state(self) -> None:
+        state = (self.follow_output, self.selecting, bool(self.screen.selections),
+                 self.is_vertical_scrollbar_grabbed)
+        if state == self._reading_state:
+            return
+        self._reading_state = state
+        record_event("reading.changed", follow=state[0], selecting=state[1],
+                     selected=state[2], grabbed=state[3], scroll_y=self.scroll_y,
+                     scroll_max=self.max_scroll_y,
+                     streaming=getattr(self.app, "_ask_active", False))
+
+    def on_resize(self) -> None:
+        # Buffered Markdown can change virtual height one layout after flush.
+        # Follow the new bottom only while the user's follow intent is active.
+        if not self.reading_paused:
+            self.scroll_end(animate=False, immediate=True)
+
+    def watch_virtual_size(self) -> None:
+        # A reply may grow without changing the viewport or emitting Resize.
+        if self.is_mounted and not self.reading_paused:
+            self.app._scroll_end()
 
     def clear_transcript(self) -> None:
         self.follow_output = True
@@ -165,12 +203,37 @@ class TranscriptView(VerticalScroll):
         self._more = None
         self.remove_children()
 
+    @property
+    def reading_paused(self) -> bool:
+        return (not self.follow_output or self.selecting or self.is_vertical_scrollbar_grabbed
+                or any(self in widget.ancestors_with_self for widget in self.screen.selections))
+
+    def resume_output(self) -> None:
+        selected = any(self in widget.ancestors_with_self for widget in self.screen.selections)
+        if not self.is_vertical_scroll_end or self.selecting or selected or self.is_vertical_scrollbar_grabbed:
+            return
+        self.follow_output = True
+        changed = [reply.flush_pending() for reply in self.query(ChatReply)]
+        self.record_reading_state()
+        if any(changed):
+            self.app._scroll_end()
+
     def watch_scroll_y(self, old_value: float, new_value: float) -> None:
         super().watch_scroll_y(old_value, new_value)
         if new_value < old_value:
             self.follow_output = False
+            self.record_reading_state()
         elif self.is_vertical_scroll_end:
-            self.follow_output = True
+            self.call_after_refresh(self.resume_output)
+
+    def on_mouse_scroll_up(self, event: MouseScrollUp) -> None:
+        self.follow_output = False
+        self.record_reading_state()
+        self.app.query_one("#input").suspend_cursor()
+
+    def on_mouse_scroll_down(self, event: MouseScrollDown) -> None:
+        self.app.query_one("#input").suspend_cursor()
+        self.call_after_refresh(self.resume_output)
 
     def show_session(self, session: Session) -> None:
         self._turns = []

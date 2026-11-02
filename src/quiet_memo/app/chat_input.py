@@ -9,6 +9,8 @@ from textual.geometry import Offset
 from textual.strip import Strip
 from textual.widgets import Input
 
+from ..infra.diagnostics import record_event
+
 
 class BarInput(Input):
     """Input with a thin vertical-bar cursor instead of a full-cell block."""
@@ -70,7 +72,6 @@ class BarInput(Input):
             super()._toggle_cursor()
 
     def on_focus(self) -> None:
-        self._cursor_suspended = False
         self.call_after_refresh(self._show_native_cursor)
 
     def _show_native_cursor(self) -> None:
@@ -93,18 +94,29 @@ class BarInput(Input):
 
     def suspend_cursor(self) -> None:
         # 拖选正文时暂停输入区光标，避免终端每帧重定位硬件光标干扰选择。
+        changed = not self._cursor_suspended
         self._cursor_suspended = True
         self._hide_native_cursor()
+        if changed:
+            self._record_cursor_state()
         self.refresh()
 
     def _resume_cursor(self) -> None:
         if self._cursor_suspended:
             self._cursor_suspended = False
             self._show_native_cursor()
+            self._record_cursor_state()
             self.refresh()
+
+    def _record_cursor_state(self) -> None:
+        position = self.cursor_screen_offset
+        record_event("cursor.changed", native=self._native_cursor_active,
+                     suspended=self._cursor_suspended, cursor_x=position.x, cursor_y=position.y)
 
     def on_mouse_down(self) -> None:
         self._resume_cursor()
+        self.app.clear_selection()
+        self.app._chat().resume_output()
 
     def on_key(self) -> None:
         self._resume_cursor()
