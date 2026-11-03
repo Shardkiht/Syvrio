@@ -91,8 +91,8 @@ APP_CSS = """
     .card { border-left: solid $dim; background: $panel; padding: 0 2; margin: 1 0; color: #d4d4d4; width: 1fr; }
     /* 欢迎区只保留完整项目名字标，不用数据卡片填满留白。 */
     #chat.home { align: center middle; }
-    .welcome-shell { width: 60; max-width: 100%; height: auto; padding: 1 0; align: center top; }
-    .welcome-wordmark { width: 51; height: 5; margin-bottom: 1; }
+    .welcome-shell { width: 78; max-width: 100%; height: auto; padding: 1 0; align: center top; }
+    .welcome-wordmark { width: 69; height: 7; margin-bottom: 1; }
     .welcome-line { color: #929292; width: 1fr; content-align: center top; height: auto; }
 
     /* 输入框不做焦点整块提亮，避免像额外遮罩；只用边框区分焦点。 */

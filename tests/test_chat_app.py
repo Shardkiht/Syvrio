@@ -3027,15 +3027,19 @@ async def test_home_has_full_project_wordmark(tmp_path, size):
         await pilot.pause()
         logo = app.query_one(".welcome-wordmark", Static)
         for _ in range(30):
-            if logo.region.height == (1 if app.query_one(HomePanel).size.width < 51 else 5):
+            if logo.region.height == (1 if app.query_one(HomePanel).size.width < 69 else 7):
                 break
             await pilot.pause(0.02)
-        assert logo.region.height == (1 if app.query_one(HomePanel).size.width < 51 else 5)
+        assert logo.region.height == (1 if app.query_one(HomePanel).size.width < 69 else 7)
         assert abs(logo.region.center[0] - app.query_one(HomePanel).region.center[0]) <= 1
         assert logo.region.bottom <= app.query_one("#input").region.y
         assert len(app.query_one(HomePanel).children) == 2
         assert not app.query("#home-overview, #home-recents, .home-prompt")
-        assert all(cell_len(line) == 51 for line in HomePanel.wordmark().plain.splitlines())
+        wordmark = HomePanel.wordmark()
+        lines = wordmark.plain.splitlines()
+        assert len(lines) == 7
+        assert all(cell_len(line) == 69 for line in lines)
+        assert all(span.style == "#b0b0b0" for span in wordmark.spans)
         assert not app.query_one("#sidebar").display
 
 

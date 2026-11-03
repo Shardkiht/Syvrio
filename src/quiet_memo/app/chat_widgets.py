@@ -298,28 +298,32 @@ class TranscriptView(VerticalScroll):
 
 
 class HomePanel(Vertical):
-    """细线字标保留字腔与字距；窄窗口回退完整名称，不裁切字形。"""
+    """七行细线字标共享同一基线；窄窗口回退完整名称，不裁切字形。"""
 
     @staticmethod
     def wordmark() -> Text:
         glyphs = {
-            "Q": ("╭───╮", "│   │", "│   │", "│ ╲ │", "╰──╲╯"),
-            "u": ("     ", "     ", "╷   ╷", "│   │", "╰───╯"),
-            "i": (" ", "·", " ", "│", "╵"),
-            "e": ("     ", "     ", "╭───╮", "├───╯", "╰────"),
-            "t": ("   ", "╷  ", "├──", "│  ", "╰──"),
-            "M": ("╷     ╷", "│╲   ╱│", "│ ╲ ╱ │", "│  ╵  │", "╵     ╵"),
-            "m": ("       ", "       ", "╭──┬──╮", "│  │  │", "╵  ╵  ╵"),
-            "o": ("     ", "     ", "╭───╮", "│   │", "╰───╯"),
+            "Q": ("╭─────╮", "│     │", "│     │", "│     │", "│  ╲  │", "│   ╲ │", "╰────╲╯"),
+            "u": ("       ", "       ", "       ", "╷     ╷", "│     │", "│     │", "╰─────╯"),
+            "i": ("   ", "   ", " · ", " │ ", " │ ", " │ ", " ╵ "),
+            "e": ("       ", "       ", "       ", "╭─────╮", "│     │", "├─────╯", "╰──────"),
+            "t": ("     ", " ╷   ", " │   ", " ├───", " │   ", " │   ", " ╰───"),
+            "M": ("╷       ╷", "│╲     ╱│", "│ ╲   ╱ │", "│  ╲ ╱  │", "│   ╵   │", "│       │", "╵       ╵"),
+            "m": ("         ", "         ", "         ", "╭───┬───╮", "│   │   │", "│   │   │", "╵   ╵   ╵"),
+            "o": ("       ", "       ", "       ", "╭─────╮", "│     │", "│     │", "╰─────╯"),
         }
         result = Text(no_wrap=True)
-        for row in range(5):
+        for row in range(7):
             if row:
                 result.append("\n")
+            line = " ".join(glyphs[letter][row] for letter in "QuietMemo")
+            left = (69 - len(line)) // 2
+            result.append(" " * left)
             for index, letter in enumerate("QuietMemo"):
                 if index:
                     result.append(" ")
                 result.append(glyphs[letter][row], style="#b0b0b0")
+            result.append(" " * (69 - left - len(line)))
         return result
 
     def compose(self) -> ComposeResult:
@@ -340,10 +344,10 @@ class HomePanel(Vertical):
         logo = next(iter(self.query(".welcome-wordmark")), None)
         if logo is None:
             return
-        compact = self.size.width < 51
+        compact = self.size.width < 69
         logo.update(Text("QuietMemo", style="#b0b0b0") if compact else self.wordmark())
-        logo.styles.width = 9 if compact else 51
-        logo.styles.height = 1 if compact else 5
+        logo.styles.width = 9 if compact else 69
+        logo.styles.height = 1 if compact else 7
 
 
 class OptionItem(ListItem):
