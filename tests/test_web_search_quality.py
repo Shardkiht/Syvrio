@@ -440,6 +440,9 @@ def test_www_host_variants_dedupe():
     from quiet_memo.infra.search.router import CandidatePool, normalize_url
 
     assert normalize_url("https://WWW.Example.com/a/") == "https://example.com/a"
+    # 普通锚点合并；SPA 路由型片段保留，避免误合并不同页面。
+    assert normalize_url("https://example.com/a#section") == "https://example.com/a"
+    assert normalize_url("https://example.com/app#/item/1") == "https://example.com/app#/item/1"
     pool = CandidatePool()
     pool.add([SearchResult("Tibo", "https://www.example.com/a", "")])
     pool.add([SearchResult("Tibo", "https://example.com/a", "")])
@@ -703,6 +706,165 @@ def test_explicit_limit_overrides_default_with_hard_cap(requested, expected):
     ])
     router = SearchRouter({"fake": provider}, max_results=5)
     assert len(router.search(SearchQuery("Synthetic entity", limit=requested)).results) == expected
+
+
+def test_proper_noun_phrase_outranks_partial_word_match():
+    """完整专有名词优先：只命中 Clash 单词的代理工具不能压过游戏结果。"""
+    from quiet_memo.infra.search.quality import is_strong_hit
+    from quiet_memo.infra.search.router import CandidatePool
+
+    analysis = analyze_query("Clash of Clans Town Hall 15 meta")
+    assert any(term.kind == "latin_phrase" for term in analysis.core_terms)
+    game = SearchResult(
+        "Clash of Clans Town Hall 15 Meta Guide", "https://example.com/game", ""
+    )
+    proxy = SearchResult(
+        "Clash of Clans proxy 使用教程", "https://example.com/proxy", "Clash meta"
+    )
+    assert is_strong_hit(game, analysis)
+    assert not is_strong_hit(proxy, analysis)
+    pool = CandidatePool()
+    pool.add([proxy, game])
+    assert pool.ranked(analysis)[0].url == game.url
+
+
+def test_partial_proper_noun_match_does_not_stop_fallback():
+    """首选只有部分词命中的跑题结果时，质量门控不能早停。"""
+    from quiet_memo.infra.search.quality import is_strong_hit
+
+    analysis = analyze_query("GPT-6.2 Astra 是否正式发布")
+    rumor = SearchResult(
+        "GPT-6.2 rumor roundup", "https://example.com/rumor", "unconfirmed"
+    )
+    official = SearchResult(
+        "GPT-6.2 Astra 正式发布公告",
+        "https://example.com/official",
+        "官方公告",
+    )
+    assert not is_strong_hit(rumor, analysis)
+    assert is_strong_hit(official, analysis)
+
+
+@pytest.mark.parametrize(
+    ("query", "rows", "top"),
+    [
+        (
+            "Clash of Clans Town Hall 15 meta",
+            [
+                ("Clash of Clans proxy 使用教程", "https://example.com/proxy", "Clash meta", None),
+                (
+                    "Clash of Clans Town Hall 15 Meta Guide",
+                    "https://example.com/game",
+                    "",
+                    None,
+                ),
+            ],
+            "https://example.com/game",
+        ),
+        (
+            "GPT 最新消息",
+            [
+                ("GPT rumor roundup", "https://example.com/rumor", "unconfirmed", None),
+                (
+                    "OpenAI GPT update",
+                    "https://example.com/official",
+                    "official announcement",
+                    "2026-10-30",
+                ),
+            ],
+            "https://example.com/official",
+        ),
+        (
+            "GPT-6.2 Astra 是否正式发布",
+            [
+                ("GPT-6.2 rumors", "https://example.com/rumor", "unconfirmed", None),
+                (
+                    "GPT-6.2 Astra 正式发布公告",
+                    "https://example.com/official",
+                    "官方公告",
+                    "2026-10-29",
+                ),
+            ],
+            "https://example.com/official",
+        ),
+        (
+            "Tibo 最新消息",
+            [
+                ("Tibo rumor", "https://example.com/rumor", "unconfirmed", None),
+                (
+                    "Tibo announces roadmap update",
+                    "https://example.com/official",
+                    "official announcement",
+                    "2026-10-30",
+                ),
+            ],
+            "https://example.com/official",
+        ),
+        (
+            "Spring Boot 3.5 Java 版本要求",
+            [
+                ("Spring Boot 3 tutorial", "https://example.com/old", "Java basics", None),
+                (
+                    "Spring Boot 3.5 requires Java 21",
+                    "https://example.com/new",
+                    "版本要求与迁移说明",
+                    "2025-05-20",
+                ),
+            ],
+            "https://example.com/new",
+        ),
+    ],
+)
+def test_fixed_search_quality_cases_offline(query, rows, top):
+    """固定案例只验证离线排序与门控，不代表线上搜索质量结论。"""
+    from quiet_memo.infra.search.router import CandidatePool
+
+    analysis = analyze_query(query)
+    pool = CandidatePool()
+    # 每行单独入池，避免上游名次差异掩盖内容相关性/日期信号。
+    for title, url, snippet, published in rows:
+        pool.add([SearchResult(title, url, snippet, published)])
+    assert pool.ranked(analysis)[0].url == top
+
+
+def test_parallel_equivalent_urls_dedupe_with_shared_rules():
+    """www./utm 差异按统一规则合并，路径与查询差异仍保留。"""
+    from quiet_memo.infra.search.parallel_mcp import _map_results
+
+    results = _map_results(
+        [
+            {
+                "title": "first",
+                "url": "https://www.example.com/a/?utm_source=parallel",
+                "excerpts": ["a"],
+            },
+            {
+                "title": "second",
+                "url": "https://example.com/a?utm_medium=social",
+                "excerpts": ["b"],
+            },
+            {"title": "other", "url": "https://example.com/a?page=2", "excerpts": []},
+        ],
+        10,
+    )
+    assert [item.title for item in results] == ["first", "other"]
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("2025-05-20", "2025-05-20"),
+        ("2025/5/2T08:00:00Z", "2025-05-02"),
+        ("2099-01-01", None),
+        ("2025-02-30", None),
+        ("yesterday", None),
+        (None, None),
+    ],
+)
+def test_published_date_trust_rules(value, expected):
+    from quiet_memo.infra.search.base import parse_published_date
+
+    assert parse_published_date(value) == expected
 
 
 def test_cached_low_relevance_keeps_warning(tmp_path):

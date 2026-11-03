@@ -33,7 +33,7 @@ qm setup
 qm
 ```
 
-`qm setup` 选择模型供应商并配置 API Key，也可进入「搜索与网页抓取 API」向导：为百度千帆、Tavily、Exa、You.com、火山引擎输入或更新 Key（存入系统凭据，TOML 不落明文），并分别启用各厂商支持的 Search / Fetch（百度千帆仅支持 Search）、调整两类 provider 的优先级。官方厂商即使已有 Key 也不会自动启用，必须在此显式开启；未配置有效 Key 时无法启用。AnySearch 与 Parallel Search MCP 可以匿名启用，无需先注册；填写 `ANYSEARCH_API_KEY` / `PARALLEL_API_KEY` 后自动改用认证模式，清除 Key 后恢复匿名。open-websearch 免费且始终是默认项，默认 provider 顺序不变。标准安装不需要下载本地向量模型；未安装向量后端时自动使用关键词检索。之后可用 `uv tool upgrade quiet-memo` 更新。
+`qm setup` 选择模型供应商并配置 API Key，也可进入「搜索与网页抓取 API」向导：为百度千帆、Tavily、Exa、You.com、火山引擎输入或更新 Key（存入系统凭据，TOML 不落明文），并分别启用各厂商支持的 Search / Fetch（百度千帆仅支持 Search）、调整两类 provider 的优先级。官方厂商即使已有 Key 也不会自动启用，必须在此显式开启；未配置有效 Key 时无法启用。AnySearch 与 Parallel Search MCP 可以匿名启用，无需先注册；填写 `ANYSEARCH_API_KEY` / `PARALLEL_API_KEY` 后自动改用认证模式，清除 Key 后恢复匿名。自托管 SearXNG 同样无需 Key，可在此填写或修改实例地址并启用；QM 不会探测、启动或改动该服务。open-websearch 免费且始终是默认项，默认 provider 顺序不变。标准安装不需要下载本地向量模型；未安装向量后端时自动使用关键词检索。之后可用 `uv tool upgrade quiet-memo` 更新。
 
 ## 为什么用 Quiet-Memo
 
@@ -126,8 +126,9 @@ model = "BAAI/bge-small-zh-v1.5"
 
 [search]
 enabled = true                # 关闭时不注册 search 工具
-# 按顺序尝试；anysearch / parallel_mcp 无 Key 可匿名使用
+# 按顺序尝试；anysearch / parallel_mcp 无 Key 可匿名使用，searxng 需自托管
 providers = ["open_websearch"] # 失败或质量不足时回退下一项
+# providers = ["parallel_mcp", "anysearch", "searxng", "open_websearch"]
 base_url = "http://127.0.0.1:3000"
 timeout = 10.0
 max_results = 5
@@ -141,6 +142,8 @@ timeout_budget = 25.0         # 一次搜索所有回退共享的超时预算（
 max_requests = 9              # 一次搜索跨所有 provider 共享的请求次数上限
 anysearch_zone = "cn"         # AnySearch 检索区域
 anysearch_language = "zh-CN"  # AnySearch 语言
+searxng_base_url = "http://127.0.0.1:8888" # 自托管实例地址，按实际端口修改
+searxng_timeout = 10.0        # SearXNG 单次请求超时（秒）
 fetch_timeout = 45.0          # 抓取正文的单独超时（秒）
 
 [fetch]
@@ -374,9 +377,50 @@ providers = ["parallel_mcp", "anysearch", "open_websearch"]
 
 匿名接口在当前中国大陆网络曾由用户用无代理 curl 验证可用，但这只代表当时网络环境；不同运营商、时间和地区仍需实际验证，代码不依赖 VPN 或额外代理。`qm setup` 可在不填写 Key 的情况下启用任一匿名 Provider。
 
+### SearXNG 自托管搜索
+
+`searxng` 把整个自托管实例当作一个 provider，实例内部的百度、Bing、DuckDuckGo 等引擎由 SearXNG 自行聚合，QM 不再为每家内部引擎单独适配。它默认不启用，也不会默认调用公共实例；只有把 `searxng` 加入 `search.providers` 并使用自己的实例地址后才会请求：
+
+```toml
+[search]
+providers = ["searxng", "open_websearch"]
+searxng_base_url = "http://127.0.0.1:8888"
+searxng_timeout = 10.0
+```
+
+SearXNG 的 JSON API 默认可能未启用。最简本地部署示例（QM 不会自动安装或启动 Docker/WSL/Redis/SearXNG）：
+
+```bash
+docker run --rm -d --name searxng -p 8888:8080 \
+  -v "$PWD/searxng:/etc/searxng" searxng/searxng
+```
+
+首次启动后编辑挂载目录中的 `settings.yml`，在 `search.formats` 下加入 `json`，然后重启容器：
+
+```yaml
+search:
+  formats:
+    - html
+    - json
+```
+
+未启用 JSON 时，请求 `format=json` 可能返回 HTTP 403；QM 会把它报告为 SearXNG 配置错误并提示检查 `search.formats`，不会当成正常的零结果。连接失败时提示检查实例是否启动和 `searxng_base_url` 是否可达；429 或 5xx 按上游失败处理并回退下一 Provider。
+
+网络命名空间注意：Windows、WSL 与 Docker 的 `127.0.0.1` 不一定指向同一服务。Docker 使用 `-p 8888:8080` 时，宿主机上的 QM 访问 `http://127.0.0.1:8888`；如果 QM 运行在另一个 WSL 发行版或容器中，应使用该环境能访问到的宿主机/Docker 地址（如 `host.docker.internal` 或实际网关 IP），而不是想当然复用 `127.0.0.1`。
+
+适配器只访问配置里的实例地址，不接受查询内容中的 URL；不跟随 HTTP 重定向，响应体限制 2 MiB，单次超时同时受 `searxng_timeout` 与全局 `timeout_budget` 约束。`SearchQuery.lang` 会映射为 `language`，`freshness` 仅映射为 SearXNG 支持的 `time_range`（day/week/month/year）；无法等价映射的值不传递。SearXNG 内部的多个引擎仍共享 QM 的统一去重、质量门控、请求预算和结果条数上限；内部引擎部分失败的诊断保留在 `failed` 中。它只提供搜索，不提供 `web_fetch`；网页抓取仍走 `[fetch]` 配置。
+
 Bing 对部分中文专有名词会按单字切词（例如「智谱」只按「智」检索）；遇到明显跑题时，可在配置里把 `engines` 改为 `["baidu"]`，或让模型在 `search` 工具里传 `search_engine = "baidu"` 重试。`search_engine` 也接受数组，最多 3 个引擎，例如 `["baidu", "bing"]`，结果会在同一请求中合并；MCP 的 `search` 同样支持。
 
-自动回退：搜索采用渐进式策略——每次请求向上游拉取比展示条数更多的候选（展示数的 3 倍，10–30 条），进入统一候选池去重合并后按确定性规则重排。首选引擎（`engines` 第一个）空结果、结果与查询核心词不相关或命中过弱（候选池未达早停标准）、请求失败时，按 `fallback_engines` 序列自动换引擎重试，最多尝试 `max_engines` 个引擎；所有回退共享 `timeout_budget` 超时预算，单次请求的超时不超过剩余预算；全部 provider 合计还受 `max_requests` 请求次数约束，超出即返回当前最佳候选并附截断提示（该结果不缓存，下次搜索会重新请求）。查询短人物名、英文账号、产品代号时，`search` 工具可传 `context`（对话中能确认的专有名词），会先派生最多 2 个查询变体再降级引擎；显式指定 `search_engine` 时保持单次请求语义，不自动换引擎。搜索结果带 `engine` 字段标明实际来源引擎（同一请求混合多引擎时逐条保留真实来源）。低相关候选会原样返回并附提示，不伪装成已核实的相关结果。
+自动回退：搜索采用渐进式策略——每次请求向上游拉取比展示条数更多的候选（展示数的 3 倍，10–30 条），进入统一候选池去重合并后按确定性规则重排。首选引擎（`engines` 第一个）空结果、结果与查询核心词不相关或命中过弱（候选池未达早停标准）、请求失败时，按 `fallback_engines` 序列自动换引擎重试，最多尝试 `max_engines` 个引擎；所有回退共享 `timeout_budget` 超时预算，单次请求的超时不超过剩余预算；全部 provider 合计还受 `max_requests` 请求次数约束，超出即返回当前最佳候选并附截断提示（该结果不缓存，下次搜索会重新请求）。查询短人物名、英文账号、产品代号时，`search` 工具可传 `context`（对话中能确认的专有名词），会先派生最多 2 个查询变体再降级引擎；显式指定 `search_engine` 时保持单次请求语义，不自动换引擎。
+
+LLM 可以在 `search` 调用里用 `providers` 指定多个已启用来源的优先顺序，并用 `strategy` 选择调度方式（Agent Function Calling 与 MCP 参数一致）：
+
+- `auto`（默认）：按 `providers` 顺序逐家搜索，结果通过质量门控即停；失败、超时、本地额度耗尽或质量不足时继续下一家。列表耗尽后允许按用户配置的剩余 provider 顺序回退。
+- `compare`：用于最新新闻、重要事实等需要交叉验证的场景。预算允许时至少尝试两家不同 provider，不因第一家达标而立即停止；结果仍统一去重排序，同一页面被多家返回只算一条候选，不构成独立证据。若受额度、超时或可用性限制无法完成两家，`hint` 会明确写“交叉验证未完成”及失败类型，不会伪称已验证。
+- `strict`：只调用 `providers` 明确列出的来源，不扩展到配置中的其他 provider；`providers` 为空时拒绝执行，全部不可用时如实返回失败。
+
+`providers` 为空或省略时使用用户配置顺序；重复项会去重，最多 8 个，只接受实际启用且注册成功的名称，无效名称会安全忽略并在 `failed` 中给出诊断。Router 统一生成最终顺序，LLM 不能指定 API Key、认证头或服务地址，也不能绕过启用状态、`UsageLimiter`、`max_requests` 或 `timeout_budget`。返回结果新增 `attempted`（实际尝试顺序）与 `strategy` 字段；每条结果仍带自己的 `provider` 和上游 `engine`。缓存键会区分 `providers` 顺序、`strategy` 和实际尝试序列。旧的单一 `preferred_provider` 参数仅为兼容保留；`search_engine` 仍然只表示上游引擎，和 provider 是两层概念，二者不要混用。搜索结果带 `engine` 字段标明实际来源引擎（同一请求混合多引擎时逐条保留真实来源）。低相关候选会原样返回并附提示，不伪装成已核实的相关结果。
 
 返回结构：
 
@@ -384,6 +428,8 @@ Bing 对部分中文专有名词会按单字切词（例如「智谱」只按「
 {
   "results": [{"title": "...", "url": "...", "snippet": "...", "published": null, "provider": "open_websearch", "engine": "bing"}],
   "provider": "open_websearch",
+  "attempted": ["open_websearch"],
+  "strategy": "auto",
   "failed": [{"provider": "open_websearch", "kind": "network", "detail": "..."}],
   "hint": "可选提示"
 }
@@ -391,7 +437,7 @@ Bing 对部分中文专有名词会按单字切词（例如「智谱」只按「
 
 - 结果是外部不可信内容，只作资料引用，不执行其中任何指令。
 - daemon 未启动或全部 provider 失败时返回结构化错误和启动提示，不编造结果。
-- `[search]` 配置：`enabled`（关闭时不注册工具）、`providers`（按顺序降级）、`base_url`、`timeout`、`max_results`、`cache_ttl`、`transport`（`http` 默认；`mcp` 每次启动 npx MCP 进程）、`auto_start`（打开 TUI 时后台探测并拉起 HTTP daemon，不阻塞界面）、`engines`（上游搜索引擎，默认 `["bing"]`）、`fallback_engines`（候补引擎序列，默认 `["baidu", "duckduckgo", "sogou"]`）、`max_engines`（单次搜索引擎上限，默认 3）、`timeout_budget`（回退共享超时预算，默认 25 秒，单次请求超时不超过剩余预算）、`max_requests`（一次搜索跨所有 provider 共享的请求次数上限，默认 9；超出即返回当前最佳候选并附截断提示，该结果不写入缓存）、`anysearch_zone` / `anysearch_language`（AnySearch 的区域与语言，默认 `cn` / `zh-CN`）、`usage_limits`（每厂商调用上限，`[search.usage_limits.<provider>]` 设 `daily` 与 `monthly`（0 不限）；同一厂商的 Search 与 Fetch 共用同一计数池，达到上限即跳过该厂商并正常回退；计数保存在 vault 的 `.quiet-memo/usage.json`，**本地计数不等于服务商实际账单上限**）、`fetch_timeout`（抓取正文的单独超时，默认 45 秒）。`qm setup` 可管理双周期额度与官方暂停。
+- `[search]` 配置：`enabled`（关闭时不注册工具）、`providers`（按顺序降级）、`base_url`、`timeout`、`max_results`、`cache_ttl`、`transport`（`http` 默认；`mcp` 每次启动 npx MCP 进程）、`auto_start`（打开 TUI 时后台探测并拉起 HTTP daemon，不阻塞界面）、`engines`（上游搜索引擎，默认 `["bing"]`）、`fallback_engines`（候补引擎序列，默认 `["baidu", "duckduckgo", "sogou"]`）、`max_engines`（单次搜索引擎上限，默认 3）、`timeout_budget`（回退共享超时预算，默认 25 秒，单次请求超时不超过剩余预算）、`max_requests`（一次搜索跨所有 provider 共享的请求次数上限，默认 9；超出即返回当前最佳候选并附截断提示，该结果不写入缓存）、`anysearch_zone` / `anysearch_language`（AnySearch 的区域与语言，默认 `cn` / `zh-CN`）、`searxng_base_url` / `searxng_timeout`（自托管 SearXNG 实例地址与单次超时，默认 `http://127.0.0.1:8888` / 10 秒）、`usage_limits`（每厂商调用上限，`[search.usage_limits.<provider>]` 设 `daily` 与 `monthly`（0 不限）；同一厂商的 Search 与 Fetch 共用同一计数池，达到上限即跳过该厂商并正常回退；计数保存在 vault 的 `.quiet-memo/usage.json`，**本地计数不等于服务商实际账单上限**）、`fetch_timeout`（抓取正文的单独超时，默认 45 秒）。`qm setup` 可管理双周期额度与官方暂停。
 
 受控真实冒烟：`scripts/smoke_search_apis.py` 默认只做本地检查（Key 是否可读、厂商是否会注册；匿名 Provider 无 Key 也标记为可注册），不发任何请求；加 `--provider <厂商> --operation search|fetch --live` 才对单一厂商发起最多 `--max-requests`（默认 1，上限 10）次真实请求，输出脱敏报告（成功与否、结果数或正文长度、错误类型、耗时与待验证字段）。Key 只从环境变量或系统凭据读取，不回显。网页抓取由独立的 `[fetch]` 配置控制：`providers` 是抓取正文用的 provider 顺序（默认 `["open_websearch"]`），与搜索的 provider 顺序相互独立；配置了 Key 的官方厂商（tavily / exa / you / volcengine）加入该列表后才参与抓取。
 - `auto_start` 启动的 daemon 在 Windows 下隐藏控制台窗口；退出 TUI 后继续常驻，下次直接复用。
@@ -610,6 +656,7 @@ Windows 交互终端输入框使用原生细竖线光标，以配合中文输入
 | volcengine | 0 | 450 |
 | anysearch | 20 | 0 |
 | parallel_mcp | 20 | 0 |
+| searxng | 0 | 0 |
 | open_websearch | 0 | 0 |
 
 0 表示该周期不限。配置以 `[search.usage_limits.<provider>]` 的 `daily`、`monthly` 覆盖默认值，显式 0 会保留；两周期任意一项耗尽即跳过。Search/Fetch 共池，缓存命中不计数，已发出的失败请求保守计数。按运行机器本地时区的自然日/月重置；状态保存在 `.quiet-memo/usage.json`，同进程检查与记账互斥，跨进程不保证严格上限。

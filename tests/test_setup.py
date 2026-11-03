@@ -622,6 +622,36 @@ def test_search_setup_enables_optional_provider_anonymously(tmp_path, monkeypatc
     assert data["search"]["usage_limits"]["anysearch"] == {"daily": 20, "monthly": 0}
 
 
+def test_search_setup_configures_searxng_without_key(tmp_path, monkeypatch):
+    import tomllib
+
+    from quiet_memo.infra import providers as providers_module
+
+    config_path = tmp_path / "quiet-memo.toml"
+    config_path.write_text("[search]\n", encoding="utf-8")
+    _install_fake_keyring(monkeypatch, {})
+    _script_answers(
+        monkeypatch,
+        [
+            "search",
+            "providers",
+            "searxng",
+            "http://127.0.0.1:9999/",
+            "search",
+            "back",
+            "done",
+        ],
+    )
+
+    result = providers_module.run_setup(config_path, None)
+
+    assert result["search_providers"] == ["open_websearch", "searxng"]
+    data = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    assert data["search"]["searxng_base_url"] == "http://127.0.0.1:9999"
+    assert data["search"]["usage_limits"]["searxng"] == {"daily": 0, "monthly": 0}
+    assert any("SearXNG 实例地址" in message for message in result["messages"])
+
+
 def test_search_setup_clears_optional_key_back_to_anonymous(tmp_path, monkeypatch):
     from quiet_memo.infra import providers as providers_module
 

@@ -7,7 +7,6 @@ from typing import Any
 import dataclasses
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from ..config import SearchConfig, read_api_key
 from .base import (
@@ -19,6 +18,8 @@ from .base import (
     SearchProvider,
     SearchQuery,
     SearchResult,
+    normalize_search_providers,
+    normalize_url,
 )
 from .cache import SearchCache
 from .fetch_router import FetchRouter
@@ -34,6 +35,8 @@ from .quality import (
 
 DEFAULT_PROVIDER = "open_websearch"
 KNOWN_PROVIDERS = {DEFAULT_PROVIDER}
+SEARCH_STRATEGIES = ("auto", "compare", "strict")
+MAX_SELECTED_PROVIDERS = 8
 
 # 需要厂商 API Key 的外部搜索服务；列进 providers 且 Key 可读才会注册。
 _EXTERNAL_PROVIDERS = {
@@ -142,6 +145,13 @@ class CandidatePool:
     def size(self) -> int:
         return len(self._order)
 
+    def has_provider(self, name: str) -> bool:
+        """该 Provider 是否为本池贡献过结果（即使 URL 与已有条目重复）。"""
+        return any(
+            any(provider == name for provider, _, _ in entry.ranks)
+            for entry in self._entries.values()
+        )
+
     def add(self, results: list[SearchResult]) -> None:
         for rank, result in enumerate(results, 1):
             url = normalize_url(result.url)
@@ -209,6 +219,12 @@ def build_registry(config: SearchConfig) -> dict[str, SearchProvider]:
             # 无 Key 也注册：适配器按空 Key 走匿名模式，配置 Key 后自动认证。
             registry[name] = _build_optional_provider(
                 name, read_api_key(_OPTIONAL_KEY_PROVIDERS[name]), config
+            )
+        elif name == "searxng":
+            from .searxng import SearxngProvider
+
+            registry[name] = SearxngProvider(
+                config.searxng_base_url, timeout=config.searxng_timeout
             )
     return registry
 
@@ -288,18 +304,53 @@ class SearchRouter:
             raise ValueError("搜索关键词为空")
         limit = max(1, min(query.limit or self.max_results, 15))
         engine = (query.engine or "auto").strip()
-        names = [engine] if engine != "auto" else self.order
+        strategy = (query.strategy or "auto").strip().lower()
+        if strategy not in SEARCH_STRATEGIES:
+            raise ValueError(f"unsupported search strategy: {strategy}")
+        requested = normalize_search_providers(
+            query.providers, limit=MAX_SELECTED_PROVIDERS
+        )
+        preferred = (query.preferred_provider or "auto").strip().lower()
+        selection_failures: list[SearchFailure] = []
+        if engine != "auto":
+            # 历史兼容：显式 SearchQuery.engine 直接指定单一 provider。
+            names = [engine]
+            strategy = "auto"
+        else:
+            enabled = [name for name in self.order if name in self.registry]
+            if strategy == "strict" and not requested:
+                raise ValueError("strict strategy requires at least one provider")
+            if not requested and preferred not in ("", "auto"):
+                requested = (preferred,)
+            valid = [name for name in requested if name in enabled]
+            for name in requested:
+                if name not in enabled:
+                    selection_failures.append(
+                        SearchFailure(name, "unavailable", "未启用或未注册的搜索 provider")
+                    )
+            if strategy == "strict":
+                # strict 只信任用户/LLM 明确列出且实际启用的来源。
+                names = valid
+            else:
+                # auto/compare 在显式列表之后补齐配置中的剩余来源，保留可靠回退。
+                names = valid + [name for name in enabled if name not in valid]
         # 缓存必须区分实际使用的上游引擎，否则改配置后会命中旧引擎的结果。
-        # v7：context 影响变体与相关性判断、auto/explicit 决定回退策略、
-        # 回退配置改变尝试序列——都要进键，与旧策略缓存隔离。
+        # v7：context、策略、首选/显式 Provider 与实际尝试顺序都进键。
         engines = tuple(query.engines) or self.engines
         analysis = analyze_query(text, query.context_terms)
         # 向上游多拉候选（展示条数的 3 倍，10~30），重排后仍只输出 limit；
         # 不能为了默认展示 5 条就只向上游要 5 条。
         fetch_limit = min(30, max(10, limit * 3))
         cache_key = self._cache_key(
-            text, limit, engine, query.lang, query.freshness, names, engines, query
+            text, limit, engine, query.lang, query.freshness, names, engines, query,
+            strategy, requested,
         )
+        if strategy == "strict" and not names:
+            return SearchOutcome(
+                failed=selection_failures,
+                hint="strict 指定的 Provider 均未启用或未注册。",
+                strategy=strategy,
+            )
         if self.cache is not None:
             cached = self.cache.get(cache_key)
             if cached is not None:
@@ -314,10 +365,14 @@ class SearchRouter:
                     provider=provider,
                     cached=True,
                     hint=hint,
+                    failed=selection_failures,
+                    strategy=strategy,
                 )
 
-        failures: list[SearchFailure] = []
+        failures: list[SearchFailure] = list(selection_failures)
         pool = CandidatePool()
+        attempted: list[str] = []
+        successful: list[str] = []
         # 查询变体只用于第一个引擎槽位：上下文消歧针对的是原始查询，不值得
         # 为每个候补引擎都放大请求数。显式指定引擎时保持单次请求语义。
         slot_queries = [text]
@@ -342,13 +397,58 @@ class SearchRouter:
             outcome = self._search_one_provider(
                 provider, name, query, text, limit, fetch_limit, engine, engines,
                 provider_queries, analysis, pool, cache_key, failures, started, budget,
+                allow_early_stop=strategy != "compare",
+                attempted=attempted,
+                strategy=strategy,
             )
-            if outcome is not None:
+            if strategy == "compare":
+                if pool.has_provider(name):
+                    successful.append(name)
+                if outcome is not None:
+                    # 预算/超时收尾：如实标注交叉验证是否完成。
+                    return self._with_compare_hint(outcome, successful, failures)
+                if len(successful) >= 2 and quality_gate(
+                    pool.ranked(analysis), analysis
+                ).should_stop:
+                    final = self._final_outcome(
+                        failures, pool, analysis, limit, cache_key,
+                        name_hint=successful[-1],
+                        attempted=attempted,
+                        strategy=strategy,
+                    )
+                    return self._with_compare_hint(final, successful, failures)
+            elif outcome is not None:
                 return outcome
-        return self._final_outcome(
+        final = self._final_outcome(
             failures, pool, analysis, limit, cache_key,
             name_hint=names[-1] if names else "",
+            attempted=attempted,
+            strategy=strategy,
         )
+        if strategy == "compare":
+            return self._with_compare_hint(final, successful, failures)
+        return final
+
+    def _with_compare_hint(
+        self,
+        outcome: SearchOutcome,
+        successful: list[str],
+        failures: list[SearchFailure],
+    ) -> SearchOutcome:
+        """compare 必须如实说明是否真正完成多源检索，不把单源结果说成交叉验证。"""
+        if len(successful) >= 2:
+            note = (
+                f"交叉验证：已合并 {len(successful)} 家 Provider 的结果；"
+                "同一页面被多家返回不构成独立证据。"
+            )
+        else:
+            kinds = sorted({item.kind for item in failures})
+            suffix = f"（失败类型：{', '.join(kinds)}）" if kinds else ""
+            note = (
+                f"交叉验证未完成：仅 {len(successful)} 家 Provider 返回结果{suffix}。"
+            )
+        outcome.hint = f"{outcome.hint} {note}".strip()
+        return outcome
 
     def _search_one_provider(
         self,
@@ -367,6 +467,10 @@ class SearchRouter:
         failures: list[SearchFailure],
         started: float,
         budget: dict[str, int],
+        *,
+        allow_early_stop: bool = True,
+        attempted: list[str] | None = None,
+        strategy: str = "auto",
     ) -> SearchOutcome | None:
         """渐进式尝试：原始查询优先，逐槽位补候补；候选池质量够好才早停。
 
@@ -390,7 +494,8 @@ class SearchRouter:
                         SearchFailure(name, "timeout", "搜索超时预算已用尽，停止引擎回退")
                     )
                     return self._final_outcome(
-                        failures, pool, analysis, limit, cache_key, name_hint=name
+                        failures, pool, analysis, limit, cache_key, name_hint=name,
+                        attempted=attempted, strategy=strategy,
                     )
                 if budget["requests"] >= self.max_requests:
                     # 本地请求预算耗尽不是厂商配额问题，用独立分类区分。
@@ -404,6 +509,7 @@ class SearchRouter:
                     return self._final_outcome(
                         failures, pool, analysis, limit, cache_key,
                         name_hint=name, budget_exhausted=True,
+                        attempted=attempted, strategy=strategy,
                     )
                 if self.usage_limiter is not None:
                     # 达到厂商上限即跳过该厂商，交给后续 provider 回退。
@@ -418,6 +524,11 @@ class SearchRouter:
                         return None
                     # 请求失败也保守计数：在实际发起前记账。
                 budget["requests"] += 1
+                # 只有真正发起请求才计入 attempted（额度/预算拦截不算尝试）。
+                if attempted is not None and (
+                    not attempted or attempted[-1] != name
+                ):
+                    attempted.append(name)
                 try:
                     raw = provider.search(
                         SearchQuery(
@@ -452,6 +563,10 @@ class SearchRouter:
                 pool.add(results)
                 decision = quality_gate(pool.ranked(analysis), analysis)
                 if decision.should_stop:
+                    if not allow_early_stop:
+                        # compare 需要至少两家来源：本 Provider 已达标，但先停止
+                        # 继续消耗它的候补引擎，交给上层换下一家 Provider。
+                        return None
                     # 缓存与返回必须是同一份最终结果：先排序截断再入缓存，
                     # 否则缓存命中后顺序与首查不一致。
                     merged = pool.ranked(analysis)[:limit]
@@ -461,6 +576,8 @@ class SearchRouter:
                         provider=name,
                         failed=failures,
                         hint=weak_share_hint(merged, analysis),
+                        attempted=list(attempted or [name]),
+                        strategy=strategy,
                     )
                 # 质量不足：保留候选继续候补引擎/变体/下一个 provider，
                 # 由 search() 在全部遍历或预算耗尽后统一收尾。
@@ -475,6 +592,8 @@ class SearchRouter:
         cache_key: str,
         name_hint: str = "",
         budget_exhausted: bool = False,
+        attempted: list[str] | None = None,
+        strategy: str = "auto",
     ) -> SearchOutcome:
         merged = pool.ranked(analysis)[:limit]
         # 预算耗尽时如实告知是截断收尾，不能伪装成正常完成。
@@ -494,6 +613,8 @@ class SearchRouter:
                 provider=name_hint,
                 failed=failures,
                 hint=" ".join(hints),
+                attempted=list(attempted or []),
+                strategy=strategy,
             )
         if merged:
             # 候补都没命中核心词：返回候选但如实提示低相关，不伪装成精准命中；
@@ -506,6 +627,8 @@ class SearchRouter:
                 provider=name_hint,
                 failed=failures,
                 hint=f"{base}{budget_hint}" if budget_hint else base,
+                attempted=list(attempted or []),
+                strategy=strategy,
             )
         if self.cache is not None and not failures:
             # 真正的零命中（没有任何上游失败）才短 TTL 缓存；失败导致的空
@@ -526,9 +649,24 @@ class SearchRouter:
             hint += " 存在鉴权失败：请检查对应厂商的 API Key 环境变量。"
         if any(failure.kind == "budget_exhausted" for failure in failures):
             hint += " 已达到单次搜索的请求次数上限。"
+        if any(
+            failure.provider == "searxng" and "settings.yml" in failure.detail
+            for failure in failures
+        ):
+            hint += " SearXNG 返回 403：请确认实例已在 settings.yml 的 search.formats 中启用 json。"
+        if any(
+            failure.provider == "searxng" and failure.kind == "network"
+            for failure in failures
+        ):
+            hint += " 请确认 SearXNG 实例已启动且 searxng_base_url 可达。"
         if any("open-websearch" in failure.detail or "daemon" in failure.detail for failure in failures):
             hint += " 请确认 open-websearch 已启动：npx open-websearch@latest serve"
-        return SearchOutcome(failed=failures, hint=hint)
+        return SearchOutcome(
+            failed=failures,
+            hint=hint,
+            attempted=list(attempted or []),
+            strategy=strategy,
+        )
 
     def _cache_put(
         self,
@@ -591,22 +729,26 @@ class SearchRouter:
         names: list[str],
         engines: tuple[str, ...],
         query: SearchQuery,
+        strategy: str = "auto",
+        requested: tuple[str, ...] = (),
     ) -> str:
-        # v5：context（保留顺序，影响变体生成）、auto/explicit 策略、回退
-        # 引擎序列与预算都参与键；策略或配置一变即视为新查询。
-        strategy = "explicit" if query.engines else "auto"
+        # context（保留顺序，影响变体生成）、auto/explicit 引擎策略、回退
+        # 序列与预算、Provider 选择策略都参与键；任一变化即视为新查询。
+        engine_strategy = "explicit" if query.engines else "auto"
         context_sig = "\x1e".join(
             term.strip() for term in query.context_terms if term.strip()
         )
         raw = "\x1f".join(
             [
-                "search-v6",
+                "search-v7",
                 text,
                 str(limit),
                 engine,
                 lang or "",
                 freshness or "",
                 strategy,
+                engine_strategy,
+                ",".join(requested),
                 context_sig,
                 str(self.max_engines),
                 ",".join(self.fallback_engines),
@@ -617,39 +759,6 @@ class SearchRouter:
             ]
         )
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
-
-def normalize_url(url: str) -> str:
-    url = url.strip()
-    if not url:
-        return ""
-    try:
-        parts = urlsplit(url)
-    except ValueError:
-        return url.rstrip("/")
-    if not parts.scheme or not parts.netloc:
-        return url.rstrip("/")
-    # 谨慎规范化：只合并 www. 前缀差异；m. 等站点变体内容可能不同，不动。
-    host = parts.netloc.lower()
-    if host.startswith("www.") and "@" not in host:
-        host = host[4:]
-    query = urlencode(
-        [
-            (key, value)
-            for key, value in parse_qsl(parts.query, keep_blank_values=True)
-            if not key.lower().startswith("utm_")
-        ],
-        doseq=True,
-    )
-    return urlunsplit(
-        (
-            parts.scheme.lower(),
-            host,
-            parts.path.rstrip("/"),
-            query,
-            parts.fragment,
-        )
-    )
 
 
 def normalize_results(results: list[SearchResult]) -> list[SearchResult]:

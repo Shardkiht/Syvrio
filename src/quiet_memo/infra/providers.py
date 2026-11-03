@@ -359,6 +359,8 @@ timeout_budget = {config.search.timeout_budget}
 max_requests = {config.search.max_requests}
 anysearch_zone = {toml_literal(config.search.anysearch_zone)}
 anysearch_language = {toml_literal(config.search.anysearch_language)}
+searxng_base_url = {toml_literal(config.search.searxng_base_url)}
+searxng_timeout = {config.search.searxng_timeout}
 {usage_limits_toml(config.search.usage_limits)}
 [fetch]
 providers = {toml_literal(config.fetch.providers)}
@@ -414,6 +416,7 @@ SEARCH_PROVIDER_LABELS = {
     "open_websearch": "open-websearch（免费，无需 Key）",
     "anysearch": "AnySearch（匿名可用，可选 Key）",
     "parallel_mcp": "Parallel Search MCP（匿名可用，可选 Key）",
+    "searxng": "自托管 SearXNG（无需 Key）",
     "baidu_search": "百度千帆 AI 搜索",
     "tavily": "Tavily",
     "exa": "Exa",
@@ -542,7 +545,27 @@ def _configure_search_provider(config: Config, messages: list[str]) -> None:
     if name is None:
         raise KeyboardInterrupt
     env_name = SEARCH_KEY_ENVS.get(name)
-    if env_name is None:
+    if name == "searxng":
+        console.print(
+            "[dim]自托管 SearXNG 无需 API Key；请确认实例已在 settings.yml 启用 JSON 输出。[/dim]"
+        )
+        from .search.searxng import normalize_base_url
+
+        current = config.search.searxng_base_url
+        raw = ask(
+            questionary.text(
+                f"SearXNG 实例地址（当前 {current}；留空保持不变）"
+            )
+        )
+        if raw is not None and str(raw).strip():
+            try:
+                config.search.searxng_base_url = normalize_base_url(str(raw))
+                messages.append(
+                    f"SearXNG 实例地址已设为 {config.search.searxng_base_url}。"
+                )
+            except ValueError as exc:
+                messages.append(f"SearXNG 地址未保存：{exc}")
+    elif env_name is None:
         console.print("[dim]open-websearch 免费且无需 Key，本地 daemon 即可用。[/dim]")
     else:
         current_key = read_api_key(env_name)

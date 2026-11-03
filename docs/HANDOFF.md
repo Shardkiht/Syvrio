@@ -1,5 +1,16 @@
 # 开发交接
 
+## SearXNG、多 Provider 调度与搜索质量修复（2026-11-03）
+
+- 分支 `evolution`（跟踪 `origin/feature-memory-evolution`），基线 `4ac7839`；本轮改动未 commit、未 push。
+- SearXNG：新增 `infra/search/searxng.py`，以 `GET /search?q=...&format=json` 接入自托管实例，整个实例视为一个 Provider。校验 http(s) 地址（允许本机/私网、拒绝凭据与查询串）、不跟随重定向、响应体上限 2 MiB、单次超时取 `searxng_timeout` 与剩余预算较小值；映射 `title/url/content/publishedDate/engine`，过滤特殊对象与非法 URL，按统一 `normalize_url` 去重并限制条数；`unresponsive_engines` 转为 `last_partial_failures`，零结果且内部引擎全失败时抛 `ProviderError`。403 明确提示在 `settings.yml` 的 `search.formats` 启用 json，连接失败提示检查实例与地址。
+- 配置与向导：`[search]` 新增 `searxng_base_url` / `searxng_timeout`；`searxng` 默认不启用、无 Key，默认本地额度 `(0,0)`；`qm setup` 可填写/修改地址、启停 Search 和调整优先级，不探测或启动用户服务。
+- 多 Provider 调度：`SearchQuery` 新增 `providers` 与 `strategy`，保留 `preferred_provider` 兼容。Router 校验名称、去重、最多 8 个，只接受已启用且注册成功的来源；`auto` 按推荐顺序执行并追加配置剩余来源，质量达标早停；`compare` 不因第一家达标而停止，预算允许时至少完成两家，未完成时在 `hint` 明确写“交叉验证未完成”及失败类型；`strict` 只调用明确列出的来源，空列表拒绝。`SearchOutcome` 新增 `attempted` 与 `strategy`，Agent 与 MCP 工具均开放 `providers` / `strategy`。
+- 缓存与保护：缓存键升到 `search-v7`，包含策略、推荐列表、实际尝试顺序等；`max_requests`、`timeout_budget`、`UsageLimiter` 与请求失败回退均保持共享，LLM 参数不能绕过。
+- 质量修复：`quality.py` 提取首字母大写专有名词短语（如 “Clash of Clans”、“Town Hall”），短语标题命中加权；含短语时强命中要求标题至少命中一个完整短语且核心词覆盖过半，避免只命中部分单词的代理/跑题结果早停。URL 规范化统一到 `base.normalize_url`（www.、utm_*、普通锚点合并，SPA 路由片段保留），Parallel 内部去重改用同一规则。日期统一由 `parse_published_date` 校验，非法或明显未来日期返回 `None`。`search` 工具与 MCP 文档补充官方公告/媒体报道/个人爆料/推测的区分要求。
+- 测试：`uv run pytest -m search -q` 为 359 passed；`tests/test_agent.py tests/test_server.py tests/test_setup.py` 为 115 passed。`tests/test_chat_app.py` 两个 Git 界面用例在默认 GBK 控制台下因 subprocess 读取 UTF-8 git 输出失败，设置 `PYTHONUTF8=1` 后通过，属于本机终端编码环境问题，不是本轮搜索改动。
+- 未验证：未发起真实 SearXNG/AnySearch/Parallel 请求，未实测真实搜索质量对比；SearXNG JSON 字段、`publishedDate` 形状、`unresponsive_engines` 真实组合仍待授权冒烟。`scripts/smoke_search_apis.py --live` 可用但需先报告目标、关键词、次数与额度消耗。
+
 ## AnySearch 与 Parallel MCP 搜索扩展（2026-11-03）
 
 - 分支 `evolution`（跟踪 `origin/feature-memory-evolution`）。新增 `infra/search/anysearch.py`（REST，`POST /v1/search`，可选 Bearer）与 `infra/search/parallel_mcp.py`（固定 `https://search.parallel.ai/mcp`，FastMCP Streamable HTTP，工具 `web_search`，可选 Bearer）。两者都支持匿名使用，无 Key 时不发送认证头；提供 Key 时只加 `Authorization: Bearer`。

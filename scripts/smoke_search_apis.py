@@ -52,6 +52,7 @@ UNVERIFIED_FIELDS = {
     "open_websearch": "无",
     "anysearch": "匿名 zone/language 行为与免费调用限制",
     "parallel_mcp": "web_search 完整 Schema、匿名限制；web_fetch 尚未接入",
+    "searxng": "实例是否启用 JSON 输出与 publishedDate 字段形状",
 }
 
 

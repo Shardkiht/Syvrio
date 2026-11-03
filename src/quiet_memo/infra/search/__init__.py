@@ -10,6 +10,7 @@ from .base import (
     SearchQuery,
     SearchResult,
     normalize_search_engines,
+    normalize_search_providers,
 )
 from .open_websearch import OpenWebSearchProvider, SEARCH_ENGINES
 from .router import SearchRouter, build_search_router
@@ -34,4 +35,5 @@ __all__ = [
     "build_fetch_router",
     "build_search_router",
     "normalize_search_engines",
+    "normalize_search_providers",
 ]

@@ -133,6 +133,9 @@ class SearchConfig:
     # AnySearch 的检索区域与语言；匿名和 Key 模式共用。
     anysearch_zone: str = "cn"
     anysearch_language: str = "zh-CN"
+    # 自托管 SearXNG 实例；与 open-websearch 的 base_url 相互独立。
+    searxng_base_url: str = "http://127.0.0.1:8888"
+    searxng_timeout: float = 10.0
     # 每厂商调用上限（Search/Fetch 共池）；键为 provider 名。
     usage_limits: dict[str, UsageLimit] = field(default_factory=lambda: default_usage_limits())
 
@@ -170,6 +173,8 @@ DEFAULT_USAGE_LIMITS = {
     "you": (0, 1500), "volcengine": (0, 450), "open_websearch": (0, 0),
     # 匿名服务也可用；本地默认仅作请求量保护，不代表服务商额度。
     "anysearch": (20, 0), "parallel_mcp": (20, 0),
+    # 自托管实例默认不限制本地计数，实际调用仍受全局请求/超时预算约束。
+    "searxng": (0, 0),
 }
 
 
@@ -433,6 +438,10 @@ def load_config(path: Path | str | None = None) -> Config:
         max_requests=int(search_raw.get("max_requests", 9)),
         anysearch_zone=str(search_raw.get("anysearch_zone", "cn")),
         anysearch_language=str(search_raw.get("anysearch_language", "zh-CN")),
+        searxng_base_url=str(
+            search_raw.get("searxng_base_url", "http://127.0.0.1:8888")
+        ),
+        searxng_timeout=float(search_raw.get("searxng_timeout", 10.0)),
         usage_limits=usage_limits,
     )
     fetch_raw = data.get("fetch", {})
@@ -541,6 +550,9 @@ max_requests = 9
 # AnySearch 的检索区域与语言；匿名和 Key 模式共用。
 anysearch_zone = "cn"
 anysearch_language = "zh-CN"
+# 自托管 SearXNG：需显式加入 providers；实例须启用 format=json。
+searxng_base_url = "http://127.0.0.1:8888"
+searxng_timeout = 10.0
 # 每厂商调用上限（Search/Fetch 共用同一计数池）；按需取消注释并修改。
 # 本地计数不等于服务商实际账单上限。
 # [search.usage_limits.tavily]

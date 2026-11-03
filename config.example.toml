@@ -66,11 +66,15 @@ model = "BAAI/bge-small-zh-v1.5"
 [search]
 # 联网搜索开关；关闭时不注册 search 工具，行为与旧版本一致。
 enabled = true
-# 按顺序尝试的 provider，失败或质量不足时自动回退。
-# 可选：open_websearch / anysearch / parallel_mcp / baidu_search / tavily / exa / you / volcengine。
+# 按顺序尝试的 provider，失败或质量不足时自动回退。LLM 可在单次调用中用
+# providers 指定多个来源的优先顺序，并用 strategy 选 auto / compare / strict；
+# 这些只是调度建议，不能绕过启停、额度、请求次数与超时预算。
+# 可选：open_websearch / anysearch / parallel_mcp / searxng / baidu_search /
+# tavily / exa / you / volcengine。
 # anysearch 与 parallel_mcp 不填 Key 也以匿名模式启用；配置 ANYSEARCH_API_KEY /
-# PARALLEL_API_KEY 后自动改用 Bearer 认证。
+# PARALLEL_API_KEY 后自动改用 Bearer 认证。searxng 默认不启用，需显式加入。
 providers = ["open_websearch"]
+# providers = ["parallel_mcp", "anysearch", "searxng", "open_websearch"]
 # 本地 open-websearch daemon 地址。
 base_url = "http://127.0.0.1:3000"
 timeout = 10.0
@@ -98,6 +102,12 @@ max_requests = 9
 # AnySearch 的检索区域与语言；匿名和 Key 模式共用。
 anysearch_zone = "cn"
 anysearch_language = "zh-CN"
+# 自托管 SearXNG（无 API Key）：地址按实际部署修改，不默认调用公共实例。
+# 实例须在 settings.yml 的 search.formats 中启用 json，否则 format=json 会返回 403。
+# Windows、WSL 与 Docker 的 127.0.0.1 不一定是同一网络命名空间：
+# Docker 容器内应访问宿主机映射地址，WSL 跨子系统时用宿主/IP 或端口转发。
+searxng_base_url = "http://127.0.0.1:8888"
+searxng_timeout = 10.0
 # 抓取正文的单独超时（秒）；搜索用上面的 timeout。
 fetch_timeout = 45.0
 # 每厂商调用上限（Search/Fetch 共用同一计数池）；按需取消注释并修改。
@@ -109,6 +119,10 @@ fetch_timeout = 45.0
 # daily = 20
 # [search.usage_limits.parallel_mcp]
 # daily = 20
+# SearXNG 为自托管实例，默认不限制本地计数；仍受 max_requests 与 timeout_budget 约束。
+# [search.usage_limits.searxng]
+# daily = 0
+# monthly = 0
 
 [fetch]
 # 网页抓取的 provider 顺序，与搜索的 providers 相互独立。

@@ -5,19 +5,24 @@ import asyncio
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
 from typing import Any, Callable
 
 import httpx
 
-from .base import ProviderError, ProviderErrorKind, SearchQuery, SearchResult
+from .base import (
+    ProviderError,
+    ProviderErrorKind,
+    SearchQuery,
+    SearchResult,
+    normalize_url,
+    parse_published_date,
+)
 
 NAME = "parallel_mcp"
 MCP_URL = "https://search.parallel.ai/mcp"
 MAX_SNIPPET_CHARS = 600
 MAX_TITLE_CHARS = 300
 MAX_RESULTS = 20
-_DATE_PREFIX = re.compile(r"^(\d{4})[-/](\d{2})[-/](\d{2})")
 
 # 注入点接收 (headers, timeout)，返回说明符协议的异步上下文管理器。
 ClientFactory = Callable[[dict[str, str], float], Any]
@@ -151,7 +156,7 @@ def _map_results(items: list[Any], limit: int) -> list[SearchResult]:
         url = str(item.get("url") or "").strip()
         if not url:
             continue
-        key = _url_key(url)
+        key = normalize_url(url)
         if key in seen:
             continue
         seen.add(key)
@@ -163,7 +168,7 @@ def _map_results(items: list[Any], limit: int) -> list[SearchResult]:
                 title=title,
                 url=url,
                 snippet=_excerpt(item.get("excerpts")),
-                published=_clean_published(item.get("publish_date")),
+                published=parse_published_date(item.get("publish_date")),
                 provider=NAME,
             )
         )
@@ -195,27 +200,6 @@ def _excerpt(value: Any) -> str:
     if len(result) > MAX_SNIPPET_CHARS:
         result = result[:MAX_SNIPPET_CHARS].rstrip() + "…"
     return result
-
-
-def _clean_published(value: Any) -> str | None:
-    """只保留可信日期前缀，无法验证或明显越界时返回 None。"""
-    if not isinstance(value, str):
-        return None
-    match = _DATE_PREFIX.match(value.strip())
-    if not match:
-        return None
-    try:
-        day = date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
-    except ValueError:
-        return None
-    if not 1990 <= day.year <= date.today().year + 1:
-        return None
-    return day.isoformat()
-
-
-def _url_key(url: str) -> str:
-    value = url.split("#", 1)[0].strip().rstrip("/")
-    return value.lower()
 
 
 def _translate_error(exc: Exception) -> ProviderError:
