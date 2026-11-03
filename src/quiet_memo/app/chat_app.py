@@ -93,7 +93,7 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
         self._undo_requested = False
         self._undo_target_session_id: str | None = None
         self._undo_target_message_id: str | None = None
-        self._pending_undo_restore: tuple[str, str | None] | None = None
+        self._pending_undo_restore: dict[str, str] = {}
         # 撤销后暂停旧队列，避免自动发送下一条覆盖回填文本；直到用户下一次提交。
         self._queue_paused_after_undo = False
         self._stream_widget: ChatReply | None = None

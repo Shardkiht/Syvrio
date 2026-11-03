@@ -1,5 +1,16 @@
 # 开发交接
 
+## 搜索超时缓存与 /undo 边界收尾（2026-11-03）
+
+- 分支 `evolution`（跟踪 `origin/feature-memory-evolution`），基线 `8d54e1e`；本轮改动仅在工作区，未 commit、未 push。
+- P1 早停超时：`SearchRouter` 新增 `_timed_out(started)`；Provider 返回后先归一化并保留候选，再检查总预算。即使结果能通过 `quality_gate()`，预算耗尽时也立即以 `timed_out=True` 收尾、不再尝试查询变体或后续 Provider，并且不写缓存。Provider 抛出超时/其他异常后也复用同一预算判定。compare 截断使用候选池实际贡献来源计算 `verification`，不虚构来源；auto/strict 同规则。
+- P2 失败诊断去重：新增 `_dedupe_failures()`，按 `(provider, kind, detail)` 稳定去重并保留首次顺序；同时用于缓存命中合并与 `_final_outcome()`，避免无效 Provider 在首次搜索和缓存命中时重复出现，也不会把同类不同原因的失败误合并。
+- P2 多会话回填：`_pending_undo_restore` 改为 `dict[session_id, text]`。切回会话只消费该会话的待回填；同一会话的新撤销覆盖尚未应用的旧文本；输入框已有未发送内容时不静默覆盖，通知并保留待回填，之后输入为空再应用；成功应用后立即移除。
+- P2 撤销失败队列：`_finish_undo` 区分 success / no_target / failed。成功且有排队消息时沿用暂停策略；无目标或加载/写入失败时不暂停队列，Worker 已退出后调用 `_drain_pending_intent()` 接续已排队消息，并给出 “No generated turn to undo.” / “Undo failed: …” / “queued message(s) resumed.” 提示。无绑定消息时仍不会回退撤销更早回合。
+- 测试：`uv run pytest -m search -q` 为 376 passed；`PYTHONUTF8=1 uv run pytest tests/test_chat_app.py -q` 为 145 passed；`tests/test_agent.py tests/test_session.py tests/test_server.py` 为 104 passed。全量离线套件 1111 passed / 1 failed：唯一失败为既有 `test_sidebar_items_are_compact_and_clickable` 的焦点就绪时序，单测复跑通过，与本轮改动无直接关联。默认 GBK 控制台下涉及 UTF-8 子进程输出的 Git 界面用例仍需 `PYTHONUTF8=1`。
+- 未验证：未调用真实 LLM、付费 API 或公网搜索；未读取真实 Vault/Keyring。全部使用临时 Vault、Mock Provider、模拟时钟与模拟 Worker。
+- 剩余边界：Provider 同步阻塞时仍无法被线程事件即时打断；撤销只能等 Worker 退出。进程崩溃不会执行撤销。缓存仍是单文件派生数据，多进程并发的最后写入者生效，未引入事务。测试侧会话切换后的焦点就绪存在独立时序抖动，未修改产品逻辑。
+
 ## /undo 即时撤销与搜索缓存可靠性修复（2026-11-03）
 
 - 分支 `evolution`（跟踪 `origin/feature-memory-evolution`），基线 `4129ca6`；本轮改动仅在工作区，未 commit、未 push，远端的 `main` 未改动。

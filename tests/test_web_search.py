@@ -749,6 +749,170 @@ def test_global_timeout_truncated_results_are_not_cached(tmp_path, monkeypatch):
     assert "超时预算已用尽" in second.hint
 
 
+def test_high_quality_result_returned_after_timeout_is_not_cached(tmp_path, monkeypatch):
+    """Provider 超时返回高质量结果也不能走早停缓存：先判预算，再判质量。"""
+    from quiet_memo.infra.search import router as router_module
+
+    clock = [0.0]
+
+    class SlowStrongProvider:
+        name = "slow"
+        capabilities = {"search"}
+
+        def __init__(self):
+            self.calls = 0
+
+        def search(self, query):
+            self.calls += 1
+            clock[0] += 12.0
+            return [
+                SearchResult(
+                    "Tibo roadmap", "https://example.com/tibo", "details", None, "slow"
+                )
+            ]
+
+    provider = SlowStrongProvider()
+    monkeypatch.setattr(router_module.time, "perf_counter", lambda: clock[0])
+    router = SearchRouter(
+        {"slow": provider},
+        order=["slow"],
+        cache=SearchCache(tmp_path / "cache.json", ttl=60),
+        timeout_budget=10.0,
+    )
+
+    first = router.search(SearchQuery("tibo"))
+    assert first.results
+    assert "超时预算已用尽" in first.hint
+    assert first.cached is False
+    assert provider.calls == 1
+
+    second = router.search(SearchQuery("tibo"))
+    assert second.cached is False
+    assert provider.calls == 2
+    assert "超时预算已用尽" in second.hint
+
+
+def test_provider_timeout_after_partial_candidates_is_not_cached(tmp_path, monkeypatch):
+    """后一家抛出超时并耗尽预算时，保留已有候选但按截断收尾，不写缓存。"""
+    from quiet_memo.infra.search import router as router_module
+
+    clock = [0.0]
+
+    class WeakProvider:
+        name = "weak"
+        capabilities = {"search"}
+
+        def __init__(self):
+            self.calls = 0
+
+        def search(self, query):
+            self.calls += 1
+            return [
+                SearchResult(
+                    "Unrelated page", "https://example.com/w", "tibo", None, "weak"
+                )
+            ]
+
+    class TimeoutProvider:
+        name = "slow"
+        capabilities = {"search"}
+
+        def __init__(self):
+            self.calls = 0
+
+        def search(self, query):
+            self.calls += 1
+            clock[0] += 12.0
+            raise ProviderError("slow", ProviderErrorKind.TIMEOUT, "upstream timeout")
+
+    weak = WeakProvider()
+    slow = TimeoutProvider()
+    monkeypatch.setattr(router_module.time, "perf_counter", lambda: clock[0])
+    router = SearchRouter(
+        {"weak": weak, "slow": slow},
+        order=["weak", "slow"],
+        cache=SearchCache(tmp_path / "cache.json", ttl=60),
+        timeout_budget=10.0,
+    )
+
+    first = router.search(SearchQuery("tibo codex"))
+    assert first.results
+    assert any(
+        failure.provider == "slow" and failure.kind == "timeout"
+        for failure in first.failed
+    )
+    assert "超时预算已用尽" in first.hint
+    assert first.cached is False
+
+    second = router.search(SearchQuery("tibo codex"))
+    assert second.cached is False
+    assert weak.calls == 2 and slow.calls == 2
+
+
+def test_normal_quality_early_stop_is_cached(tmp_path):
+    """预算内正常早停仍按原规则写缓存，第二次直接命中。"""
+    provider = FakeProvider(
+        [SearchResult("Tibo roadmap", "https://example.com/tibo", "details", None, "fake")]
+    )
+    router = SearchRouter(
+        {"fake": provider},
+        order=["fake"],
+        cache=SearchCache(tmp_path / "cache.json", ttl=60),
+        timeout_budget=10.0,
+    )
+
+    first = router.search(SearchQuery("tibo"))
+    second = router.search(SearchQuery("tibo"))
+
+    assert first.cached is False and "超时" not in first.hint
+    assert second.cached is True
+    assert provider.calls == 1
+
+
+def test_compare_timeout_keeps_actual_verification_and_skips_cache(
+    tmp_path, monkeypatch
+):
+    """compare 第二家耗尽预算：验证状态按实际贡献来源，截断结果不缓存。"""
+    from quiet_memo.infra.search import router as router_module
+
+    clock = [0.0]
+
+    class StrongProvider:
+        capabilities = {"search"}
+
+        def __init__(self, name, url, slow=False):
+            self.name = name
+            self.url = url
+            self.slow = slow
+            self.calls = 0
+
+        def search(self, query):
+            self.calls += 1
+            if self.slow:
+                clock[0] += 12.0
+            return [SearchResult("Tibo roadmap", self.url, "details", None, self.name)]
+
+    first = StrongProvider("first", "https://example.com/1")
+    second = StrongProvider("second", "https://example.com/2", slow=True)
+    monkeypatch.setattr(router_module.time, "perf_counter", lambda: clock[0])
+    router = SearchRouter(
+        {"first": first, "second": second},
+        order=["first", "second"],
+        cache=SearchCache(tmp_path / "cache.json", ttl=60),
+        timeout_budget=10.0,
+    )
+
+    outcome = router.search(
+        SearchQuery("tibo", providers=("first", "second"), strategy="compare")
+    )
+    assert outcome.verification == "complete"
+    assert "已合并 2 家" in outcome.hint and "超时预算已用尽" in outcome.hint
+    assert outcome.cached is False
+
+    router.search(SearchQuery("tibo", providers=("first", "second"), strategy="compare"))
+    assert first.calls == 2 and second.calls == 2
+
+
 def test_cache_expires(tmp_path):
     now = [0.0]
     provider = FakeProvider([SearchResult("ok", "https://example.com", "")])

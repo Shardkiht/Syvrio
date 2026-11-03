@@ -38,6 +38,20 @@ KNOWN_PROVIDERS = {DEFAULT_PROVIDER}
 SEARCH_STRATEGIES = ("auto", "compare", "strict")
 MAX_SELECTED_PROVIDERS = 8
 
+
+def _dedupe_failures(failures: Sequence[SearchFailure]) -> list[SearchFailure]:
+    """按 (provider, kind, detail) 稳定去重，保留首次出现的顺序。"""
+    seen: set[tuple[str, str, str]] = set()
+    unique: list[SearchFailure] = []
+    for failure in failures:
+        key = (failure.provider, failure.kind, failure.detail)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(failure)
+    return unique
+
+
 # 需要厂商 API Key 的外部搜索服务；列进 providers 且 Key 可读才会注册。
 _EXTERNAL_PROVIDERS = {
     "baidu_search": ("baidu.py:BaiduSearchProvider", "BAIDU_SEARCH_API_KEY"),
@@ -376,7 +390,7 @@ class SearchRouter:
                     provider=cached.provider,
                     cached=True,
                     hint=hint,
-                    failed=[*selection_failures, *cached.failed],
+                    failed=_dedupe_failures([*selection_failures, *cached.failed]),
                     attempted=cached.attempted,
                     strategy=cached.strategy or strategy,
                     verification=cached.verification,
@@ -434,9 +448,7 @@ class SearchRouter:
             elif outcome is not None:
                 return outcome
         # 最后一个 Provider 自己的超时也可能刚好耗尽全局预算：收尾时再核验一次。
-        timed_out = (
-            self.timeout_budget - (time.perf_counter() - started) <= 0
-        )
+        timed_out = self._timed_out(started)
         final = self._final_outcome(
             failures, pool, analysis, limit, cache_key,
             name_hint=names[-1] if names else "",
@@ -479,6 +491,9 @@ class SearchRouter:
         note = self._compare_note(outcome.verification, successful, failures)
         outcome.hint = f"{outcome.hint} {note}".strip()
         return outcome
+
+    def _timed_out(self, started: float) -> bool:
+        return self.timeout_budget - (time.perf_counter() - started) <= 0
 
     def _search_one_provider(
         self,
@@ -577,10 +592,25 @@ class SearchRouter:
                     if self.usage_limiter is not None:
                         self.usage_limiter.note_error(name, exc)
                     failures.append(SearchFailure.from_error(exc))
+                    # 异常本身已耗尽总预算：按截断收尾，不再换引擎/Provider。
+                    if self._timed_out(started):
+                        return self._final_outcome(
+                            failures, pool, analysis, limit, cache_key,
+                            name_hint=name, attempted=attempted,
+                            strategy=strategy, timed_out=True,
+                            contributors=pool.providers(),
+                        )
                     # 请求级失败（超时/网络/限流）：换下一个引擎，不再变体。
                     break
                 except Exception as exc:
                     failures.append(SearchFailure(name, "unavailable", str(exc)))
+                    if self._timed_out(started):
+                        return self._final_outcome(
+                            failures, pool, analysis, limit, cache_key,
+                            name_hint=name, attempted=attempted,
+                            strategy=strategy, timed_out=True,
+                            contributors=pool.providers(),
+                        )
                     break
 
                 # daemon 报告的部分引擎失败转成结构化诊断，不静默吞掉。
@@ -590,9 +620,21 @@ class SearchRouter:
                     # daemon 已逐条标注真实引擎时保留；缺失才补槽位引擎。
                     if not result.engine and slot_engines:
                         result.engine = slot_engines[0]
+                if results:
+                    pool.add(results)
+                # Provider 可能超出请求前的剩余预算才返回：先保留候选，
+                # 再按总超时收尾，不能让质量门控早停把结果写进缓存。
+                if self._timed_out(started):
+                    failures.append(
+                        SearchFailure(name, "timeout", "搜索总超时预算已用尽，停止后续检索")
+                    )
+                    return self._final_outcome(
+                        failures, pool, analysis, limit, cache_key, name_hint=name,
+                        attempted=attempted, strategy=strategy, timed_out=True,
+                        contributors=pool.providers(),
+                    )
                 if not results:
                     continue
-                pool.add(results)
                 decision = quality_gate(pool.ranked(analysis), analysis)
                 if decision.should_stop:
                     if not allow_early_stop:
@@ -634,6 +676,7 @@ class SearchRouter:
         strategy: str = "auto",
         contributors: list[str] | None = None,
     ) -> SearchOutcome:
+        failures = _dedupe_failures(failures)
         merged = pool.ranked(analysis)[:limit]
         truncated = budget_exhausted or timed_out
         contributors = list(dict.fromkeys(contributors or []))

@@ -11,11 +11,12 @@ from quiet_memo.infra.config import ChatConfig, Config, LLMConfig, SearchConfig,
 from quiet_memo.infra.search.base import (
     ProviderError,
     ProviderErrorKind,
+    SearchFailure,
     SearchQuery,
     SearchResult,
 )
 from quiet_memo.infra.search.cache import SearchCache
-from quiet_memo.infra.search.router import SearchRouter
+from quiet_memo.infra.search.router import SearchRouter, _dedupe_failures
 from quiet_memo.infra.search.usage import UsageLimiter
 from quiet_memo.memory.service import MemoryService
 
@@ -532,6 +533,45 @@ def test_compare_cache_missing_verification_is_unknown(tmp_path):
     assert record is not None
     assert record.verification == "unknown"
     assert cache.get("legacy") == ([result], "searxng")
+
+
+def test_cache_hit_deduplicates_repeated_selection_failures(tmp_path):
+    provider = _Provider(
+        "fake", [_strong("fake", "https://example.com/result")]
+    )
+    router = SearchRouter(
+        {"fake": provider},
+        order=["fake"],
+        cache=SearchCache(tmp_path / "cache.json", 60),
+    )
+    query = SearchQuery("tibo", providers=("fake", "missing"))
+
+    first = router.search(query)
+    cached = router.search(query)
+
+    assert first.cached is False and cached.cached is True
+    assert len(first.failed) == 1
+    assert [item.to_dict() for item in cached.failed] == [
+        item.to_dict() for item in first.failed
+    ]
+    assert len(provider.calls) == 1
+
+
+def test_failure_dedupe_keeps_distinct_kinds_and_details():
+    failures = [
+        SearchFailure("p", "timeout", "a"),
+        SearchFailure("p", "timeout", "b"),
+        SearchFailure("p", "network", "a"),
+        SearchFailure("p", "timeout", "a"),
+    ]
+    assert [
+        (item.provider, item.kind, item.detail)
+        for item in _dedupe_failures(failures)
+    ] == [
+        ("p", "timeout", "a"),
+        ("p", "timeout", "b"),
+        ("p", "network", "a"),
+    ]
 
 
 def test_tool_exposes_multi_provider_schema_and_rejects_strict_without_list(tmp_path):

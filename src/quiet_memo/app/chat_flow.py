@@ -138,6 +138,7 @@ class ChatFlowMixin:
         )
         target_mid = user_message_id or self._undo_target_message_id
         restored: str | None = None
+        undo_failed = False
         # 没有绑定到具体用户消息时绝不回退撤销上一轮：那可能是请求落盘前的
         # 失败，撤销更早的对话会破坏用户上下文。
         if target_sid and target_mid:
@@ -149,44 +150,51 @@ class ChatFlowMixin:
                     target_session, message_id=target_mid
                 )
             except Exception as exc:
+                undo_failed = True
                 record_event("undo.failed", exc)
                 self.notify(f"Undo failed: {exc}")
         if error:
             record_event("chat.failed", error)
             self.notify(f"Request failed before undo: {error}")
-        if restored is None:
+        if restored is None and not undo_failed:
             self.notify("No generated turn to undo.")
 
         current_id = self.runtime.current.id if self.runtime.has_session else None
-        if restored is not None and target_sid and current_id == target_sid:
-            if self._navigation_busy:
-                # 切换会话仍在进行：等切换完成后重载并回填，避免读到旧视图。
-                self._pending_undo_restore = (target_sid, restored)
-            else:
-                self._apply_undo_view(target_sid, restored)
-        elif restored is not None and target_sid:
-            # 后台会话：不修改当前视图与输入框；切回目标会话时再回填。
-            self._pending_undo_restore = (target_sid, restored)
-            self.notify("Generation stopped and message undone in background session")
+        if restored is not None and target_sid:
+            # 按会话保存待回填，后台撤销互不覆盖；同一会话的新撤销覆盖
+            # 尚未应用的旧文本（旧回合已撤销，输入框未被占用）。
+            self._pending_undo_restore[target_sid] = restored
+            if current_id == target_sid and not self._navigation_busy:
+                self._flush_undo_refresh()
+            elif current_id != target_sid:
+                # 后台会话：不修改当前视图与输入框；切回目标会话时再回填。
+                self.notify("Generation stopped and message undone in background session")
         self._heal_current_session(target_sid)
         self.refresh_sessions()
         self.refresh_pending()
         self._end_ask()
-        self._queue_paused_after_undo = bool(self._queue)
+        queued_count = len(self._queue)
+        self._queue_paused_after_undo = restored is not None and bool(self._queue)
         self._undo_requested = False
         self._undo_target_session_id = None
         self._undo_target_message_id = None
         self.update_status()
         if self._queue_paused_after_undo:
             self.notify(
-                f"{len(self._queue)} queued message(s) paused after undo; "
+                f"{queued_count} queued message(s) paused after undo; "
                 "they resume after your next reply."
             )
+        else:
+            # 撤销失败/无目标时不能把 FIFO 永久留在暂停状态；Worker 已退出，
+            # 可安全接续队列（成功后 pause 分支不会走到这里）。
+            if queued_count:
+                self.notify(f"{queued_count} queued message(s) resumed.")
+            self._drain_pending_intent()
 
-    def _apply_undo_view(self, session_id: str, text: str | None) -> None:
+    def _apply_undo_view(self, session_id: str, text: str) -> bool:
         """目标会话就是当前视图：从磁盘重载，清除已撤销回合并回填原文。"""
         if not self.runtime.has_session or self.runtime.current.id != session_id:
-            return
+            return False
         try:
             self.runtime.session = self.runtime.sessions.load(session_id)
         except Exception as exc:
@@ -195,22 +203,32 @@ class ChatFlowMixin:
         self.build_transcript()
         self.refresh_sessions()
         self.update_status()
-        if text is not None:
-            widget = self.query_one("#input", Input)
-            widget.value = text
-            widget.cursor_position = len(text)
-            widget.focus()
+        widget = self.query_one("#input", Input)
+        # 用户已在输入框写了新内容时不能静默覆盖；保留待回填，
+        # 等之后带回填会话且输入为空时再应用。
+        if widget.value.strip() and widget.value != text:
+            self.notify(
+                "Undo text not restored: the input has unsent text. "
+                "It will be restored when you return with an empty input."
+            )
+            return False
+        widget.value = text
+        widget.cursor_position = len(text)
+        widget.focus()
+        return True
 
     def _flush_undo_refresh(self) -> None:
-        """切换完成后补一次撤销视图刷新/回填；目标不是当前会话则继续等待。"""
-        pending = self._pending_undo_restore
-        if pending is None:
+        """切换完成后消费当前会话对应的回填；其他会话的待回填保持不变。"""
+        if not self._pending_undo_restore:
             return
-        session_id, text = pending
-        if not self.runtime.has_session or self.runtime.current.id != session_id:
+        current_id = self.runtime.current.id if self.runtime.has_session else None
+        if current_id is None:
             return
-        self._pending_undo_restore = None
-        self._apply_undo_view(session_id, text)
+        text = self._pending_undo_restore.get(current_id)
+        if text is None:
+            return
+        if self._apply_undo_view(current_id, text):
+            self._pending_undo_restore.pop(current_id, None)
 
     def _finish_cancelled(
         self,

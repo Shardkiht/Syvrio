@@ -2667,6 +2667,208 @@ async def test_undo_without_bound_message_does_not_touch_earlier_turn(tmp_path):
         assert not any(r.get("type") == "undo" for r in loaded.records)
 
 
+async def test_undo_restores_multiple_background_sessions_independently(tmp_path):
+    # 两个后台会话各自撤销：待回填按会话保存，依次切回时互不覆盖。
+    app = build_app(tmp_path, [])
+    app.runtime.start()
+    session_a = app.runtime.ensure_session()
+    app.sessions.append(
+        session_a,
+        {"type": "message", "id": "a1", "role": "user", "content": "alpha"},
+    )
+    session_b = app.runtime.sessions.create()
+    app.sessions.append(
+        session_b,
+        {"type": "message", "id": "b1", "role": "user", "content": "beta"},
+    )
+    session_c = app.runtime.sessions.create()
+    app.runtime.session = app.runtime.sessions.load(session_c.id)
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        for session, message_id in ((session_a, "a1"), (session_b, "b1")):
+            app._begin_ask(session_c.id)
+            app._undo_requested = True
+            app._undo_target_session_id = session.id
+            app._undo_target_message_id = message_id
+            app._finish_cancelled(session.id, message_id)
+            await pilot.pause()
+
+        assert app._pending_undo_restore == {
+            session_a.id: "alpha",
+            session_b.id: "beta",
+        }
+        assert app.sessions.load(session_a.id).user_texts() == []
+        assert app.sessions.load(session_b.id).user_texts() == []
+
+        app._switch_session(session_a.id)
+        for _ in range(200):
+            await pilot.pause()
+            if not app._navigation_busy:
+                break
+        assert app.runtime.current.id == session_a.id
+        assert app.query_one("#input", Input).value == "alpha"
+        assert session_a.id not in app._pending_undo_restore
+
+        # 用户清空输入后再切回 B，消费 B 自己的待回填。
+        app.query_one("#input", Input).value = ""
+        app._switch_session(session_b.id)
+        for _ in range(200):
+            await pilot.pause()
+            if not app._navigation_busy:
+                break
+        assert app.runtime.current.id == session_b.id
+        assert app.query_one("#input", Input).value == "beta"
+        assert app._pending_undo_restore == {}
+
+
+async def test_undo_restore_keeps_edited_input_and_retries_later(tmp_path, monkeypatch):
+    # 输入框已有用户新内容时不得静默覆盖；待回填保留，清空后再次应用。
+    app = build_app(tmp_path, [])
+    app.runtime.start()
+    session = app.runtime.ensure_session()
+    notifications: list[str] = []
+    monkeypatch.setattr(app, "notify", lambda message, **kwargs: notifications.append(message))
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        widget = app.query_one("#input", Input)
+        widget.value = "my draft"
+        app._pending_undo_restore[session.id] = "original text"
+        app._flush_undo_refresh()
+
+        assert widget.value == "my draft"
+        assert app._pending_undo_restore[session.id] == "original text"
+        assert any("not restored" in item for item in notifications)
+
+        widget.value = ""
+        app._flush_undo_refresh()
+        assert widget.value == "original text"
+        assert session.id not in app._pending_undo_restore
+
+
+async def test_undo_without_target_resumes_queued_messages(tmp_path, monkeypatch):
+    app = build_app(tmp_path, [])
+    gated = GatedChatModel([AssistantTurn(content="queued reply")])
+    gated.gates.append(threading.Event())
+    app.runtime.model = gated
+    session = app.runtime.ensure_session()
+    app.sessions.append(
+        session,
+        {"type": "message", "id": "old", "role": "user", "content": "earlier"},
+    )
+    notifications: list[str] = []
+    monkeypatch.setattr(app, "notify", lambda message, **kwargs: notifications.append(message))
+    from quiet_memo.app.chat_flow import _QueuedLine
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._queue.append(_QueuedLine(session.id, "queued message"))
+        app._begin_ask(session.id)
+        app._undo_requested = True
+        app._undo_target_session_id = session.id
+        app._undo_target_message_id = None
+        app._finish_cancelled(session.id, None)
+
+        await _wait_ask_started(app, pilot)
+        assert app._queue_paused_after_undo is False
+        assert app._queue == []
+        gated.gates[0].set()
+        await _wait_idle(app, pilot)
+
+        loaded = app.sessions.load(session.id)
+        assert loaded.user_texts() == ["earlier", "queued message"]
+        assert not any(record.get("type") == "undo" for record in loaded.records)
+        assert any("No generated turn to undo" in item for item in notifications)
+        assert any("resumed" in item for item in notifications)
+
+
+async def test_undo_session_load_failure_resumes_queued_messages(tmp_path, monkeypatch):
+    app = build_app(tmp_path, [])
+    gated = GatedChatModel([AssistantTurn(content="queued reply")])
+    gated.gates.append(threading.Event())
+    app.runtime.model = gated
+    session = app.runtime.ensure_session()
+    app.sessions.append(
+        session,
+        {"type": "message", "id": "old", "role": "user", "content": "earlier"},
+    )
+    notifications: list[str] = []
+    monkeypatch.setattr(app, "notify", lambda message, **kwargs: notifications.append(message))
+    from quiet_memo.app.chat_flow import _QueuedLine
+
+    original_load = app.runtime.sessions.load
+    load_calls = {"count": 0}
+
+    def fail_first_load(session_id):
+        load_calls["count"] += 1
+        if load_calls["count"] == 1:
+            raise OSError("vault unavailable")
+        return original_load(session_id)
+
+    monkeypatch.setattr(app.runtime.sessions, "load", fail_first_load)
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._queue.append(_QueuedLine(session.id, "queued message"))
+        app._begin_ask(session.id)
+        app._undo_requested = True
+        app._undo_target_session_id = session.id
+        app._undo_target_message_id = "old"
+        app._finish_cancelled(session.id, "old")
+
+        await _wait_ask_started(app, pilot)
+        assert app._queue_paused_after_undo is False
+        gated.gates[0].set()
+        await _wait_idle(app, pilot)
+
+        loaded = app.sessions.load(session.id)
+        assert loaded.user_texts() == ["earlier", "queued message"]
+        assert not any(record.get("type") == "undo" for record in loaded.records)
+        assert any("Undo failed: vault unavailable" in item for item in notifications)
+        assert any("resumed" in item for item in notifications)
+
+
+async def test_undo_write_failure_resumes_queued_messages(tmp_path, monkeypatch):
+    app = build_app(tmp_path, [])
+    gated = GatedChatModel([AssistantTurn(content="queued reply")])
+    gated.gates.append(threading.Event())
+    app.runtime.model = gated
+    session = app.runtime.ensure_session()
+    app.sessions.append(
+        session,
+        {"type": "message", "id": "old", "role": "user", "content": "earlier"},
+    )
+    notifications: list[str] = []
+    monkeypatch.setattr(app, "notify", lambda message, **kwargs: notifications.append(message))
+    from quiet_memo.app.chat_flow import _QueuedLine
+
+    def fail_undo(*args, **kwargs):
+        raise RuntimeError("undo append failed")
+
+    monkeypatch.setattr(app.runtime, "undo", fail_undo)
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._queue.append(_QueuedLine(session.id, "queued message"))
+        app._begin_ask(session.id)
+        app._undo_requested = True
+        app._undo_target_session_id = session.id
+        app._undo_target_message_id = "old"
+        app._finish_cancelled(session.id, "old")
+
+        await _wait_ask_started(app, pilot)
+        assert app._queue_paused_after_undo is False
+        gated.gates[0].set()
+        await _wait_idle(app, pilot)
+
+        loaded = app.sessions.load(session.id)
+        assert loaded.user_texts() == ["earlier", "queued message"]
+        assert not any(record.get("type") == "undo" for record in loaded.records)
+        assert any("Undo failed: undo append failed" in item for item in notifications)
+        assert any("resumed" in item for item in notifications)
+
+
 async def test_queued_command_skipped_when_target_unavailable(tmp_path):
     # 目标会话文件已删除：命令跳过并提示，不切换、不误伤当前会话。
     app = build_app(tmp_path, [])
