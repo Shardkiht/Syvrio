@@ -3039,7 +3039,9 @@ async def test_home_has_full_project_wordmark(tmp_path, size):
         lines = wordmark.plain.splitlines()
         assert len(lines) == 7
         assert all(cell_len(line) == 69 for line in lines)
-        assert all(span.style == "#b0b0b0" for span in wordmark.spans)
+        assert sum(line.count("·") for line in lines[4:]) == 5
+        assert lines[6].count("┆") == 6
+        assert any(span.style == "#6CB6FF" for span in wordmark.spans)
         assert not app.query_one("#sidebar").display
 
 

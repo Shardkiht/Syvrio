@@ -298,18 +298,18 @@ class TranscriptView(VerticalScroll):
 
 
 class HomePanel(Vertical):
-    """七行细线字标共享同一基线；窄窗口回退完整名称，不裁切字形。"""
+    """七行细线字标共享基线；点阵只替换原笔画末端，不扩展字标尺寸。"""
 
     @staticmethod
     def wordmark() -> Text:
         glyphs = {
             "Q": ("╭─────╮", "│     │", "│     │", "│     │", "│  ╲  │", "│   ╲ │", "╰────╲╯"),
             "u": ("       ", "       ", "       ", "╷     ╷", "│     │", "│     │", "╰─────╯"),
-            "i": ("   ", "   ", " · ", " │ ", " │ ", " │ ", " ╵ "),
-            "e": ("       ", "       ", "       ", "╭─────╮", "│     │", "├─────╯", "╰──────"),
-            "t": ("     ", " ╷   ", " │   ", " ├───", " │   ", " │   ", " ╰───"),
-            "M": ("╷       ╷", "│╲     ╱│", "│ ╲   ╱ │", "│  ╲ ╱  │", "│   ╵   │", "│       │", "╵       ╵"),
-            "m": ("         ", "         ", "         ", "╭───┬───╮", "│   │   │", "│   │   │", "╵   ╵   ╵"),
+            "i": ("   ", "   ", " · ", " │ ", " │ ", " │ ", " ┆ "),
+            "e": ("       ", "       ", "       ", "╭─────╮", "│     │", "├─────╯", "╰───· ·"),
+            "t": ("     ", " ╷   ", " │   ", " ├───", " │   ", " │   ", " ╰──·"),
+            "M": ("╷       ╷", "│╲     ╱│", "│ ╲   ╱ │", "│  ╲ ╱  │", "│   ╵   │", "│       │", "┆       ┆"),
+            "m": ("         ", "         ", "         ", "╭───┬───╮", "│   │   │", "│   │   │", "┆   ┆   ┆"),
             "o": ("       ", "       ", "       ", "╭─────╮", "│     │", "│     │", "╰─────╯"),
         }
         result = Text(no_wrap=True)
@@ -322,7 +322,8 @@ class HomePanel(Vertical):
             for index, letter in enumerate("QuietMemo"):
                 if index:
                     result.append(" ")
-                result.append(glyphs[letter][row], style="#b0b0b0")
+                style = "#6CB6FF" if letter == "i" and row == 2 else "#b0b0b0"
+                result.append(glyphs[letter][row], style=style)
             result.append(" " * (69 - left - len(line)))
         return result
 
