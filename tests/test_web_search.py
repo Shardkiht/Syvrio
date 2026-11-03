@@ -708,6 +708,47 @@ def test_budget_exhausted_core_hits_are_not_cached(tmp_path):
     assert provider.calls == 2
 
 
+def test_global_timeout_truncated_results_are_not_cached(tmp_path, monkeypatch):
+    """总超时截断的候选不能当成完整结果缓存；下次必须重新请求。"""
+    from quiet_memo.infra.search import router as router_module
+
+    clock = [0.0]
+
+    class SlowProvider:
+        name = "slow"
+        capabilities = {"search", "engines"}
+
+        def __init__(self):
+            self.calls = 0
+
+        def search(self, query):
+            self.calls += 1
+            clock[0] += 20.0
+            return [SearchResult("Unrelated", "https://example.com/w", "")]
+
+    provider = SlowProvider()
+    monkeypatch.setattr(router_module.time, "perf_counter", lambda: clock[0])
+    router = SearchRouter(
+        {"slow": provider},
+        order=["slow"],
+        cache=SearchCache(tmp_path / "cache.json", ttl=60),
+        engines=["bing"],
+        fallback_engines=("baidu",),
+        max_engines=2,
+        timeout_budget=10.0,
+    )
+
+    first = router.search(SearchQuery("tibo"))
+    assert first.results
+    assert "超时预算已用尽" in first.hint
+    assert provider.calls == 1
+
+    second = router.search(SearchQuery("tibo"))
+    assert second.cached is False
+    assert provider.calls == 2
+    assert "超时预算已用尽" in second.hint
+
+
 def test_cache_expires(tmp_path):
     now = [0.0]
     provider = FakeProvider([SearchResult("ok", "https://example.com", "")])
@@ -797,6 +838,39 @@ def test_corrupted_cache_entry_is_treated_as_miss(tmp_path):
     assert cache.get("bad-result") is None
     cache.set("good", [], "fake")
     assert cache.get("good") == ([], "fake")
+
+
+def test_old_cache_without_verification_metadata_is_invalidated(tmp_path):
+    import json
+
+    path = tmp_path / "cache.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "entries": {
+                    "old": {
+                        "expires": 9999999999,
+                        "provider": "fake",
+                        "results": [
+                            {
+                                "title": "old",
+                                "url": "https://example.com/old",
+                                "snippet": "",
+                                "published": None,
+                                "provider": "fake",
+                                "engine": "",
+                            }
+                        ],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    cache = SearchCache(path, ttl=60)
+    assert cache.get("old") is None
+    assert cache.get_record("old") is None
 
 
 def test_ensure_daemon_spawns_and_waits_for_health():

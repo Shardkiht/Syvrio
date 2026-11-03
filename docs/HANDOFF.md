@@ -1,5 +1,16 @@
 # 开发交接
 
+## /undo 即时撤销与搜索缓存可靠性修复（2026-11-03）
+
+- 分支 `evolution`（跟踪 `origin/feature-memory-evolution`），基线 `4129ca6`；本轮改动仅在工作区，未 commit、未 push，远端的 `main` 未改动。
+- `/undo` 根因：`_submit_during_ask` 只放行 `SAFE_COMMANDS`，生成期间的 `/undo` 会进入全局 FIFO；`runtime.undo` 只能针对 `self.current` 的最后一条用户消息，既无法在等待期取消请求，也可能在切换会话后误撤销其他会话。修复为即时控制命令：`_request_undo` 在进入 FIFO 前先设置现有 `GenerationCancelled` 事件，记录目标会话与 Worker 实际追加的用户消息 ID（`runtime.ask` 新增 `on_user_message` 回调），Worker 退出后才执行撤销。重复 `/undo` 在撤销进行中直接忽略；旧版本排进队列的 `/undo` 一次性清除；普通排队消息保留但暂停，直到用户下一次主动发送非命令消息后才恢复接续。
+- 撤销时机与边界：`_finish_undo` 始终从磁盘重新加载目标会话再追加 `undo` JSONL 事件，避免切回时载入的内存对象落后于后台写入；只撤销绑定的那条用户消息及其后的部分/最终回复和工具记录，不启动新请求、不自动发送队列。目标就是当前视图时重载并回填原文到输入框；目标在后台时只记录待回填，切回后再重载回填，不修改当前会话的视图和输入，其他会话的后续对话也不会清掉这个待回填项。若没有绑定到具体用户消息（例如请求在落盘前失败），不会回退撤销更早的对话。`/undo` 与自然完成的竞态下，只要撤销已请求，最终回复不会保留。
+- 搜索缓存：`CACHE_VERSION` 升到 2，缓存条目新增 `strategy`、`attempted`、`contributors`、`verification`、`failed` 诊断与上限 20 条的元数据。`CachedSearch`/`get_record` 在命中时恢复这些字段；compare 的 `verification` 为 `complete`/`incomplete`/`unknown`，缺失字段的 compare 条目一律视为 `unknown`，绝不默认完成；v1 旧缓存整体安全失效。缓存键继续区分 provider 顺序、策略和尝试序列，auto/compare/strict 不串用。
+- 截断：`_final_outcome` 统一 `truncated = budget_exhausted or timed_out`，覆盖 `max_requests`、全局 `timeout_budget`（含单次请求耗尽剩余预算、收尾时复核）等路径；截断结果保留候选并写明确提示，但一律不写缓存。compare 因预算/超时未能完成第二家时同样不缓存；仅因普通 provider 失败或空结果而只有一家贡献时，按 `incomplete` 语义缓存并在命中时恢复原诊断。普通 provider 失败但其他来源正常完成仍可缓存。截断收尾的验证状态从候选池的实际贡献来源计算，已有多家贡献时不会误报为“仅 0 家”。
+- 测试：搜索套件 `uv run pytest -m search -q` 为 370 passed；`tests/test_agent.py tests/test_session.py` 102 passed；完整 `tests/test_chat_app.py`（`PYTHONUTF8=1`）为 140 passed。新增用例覆盖：生成期 `/undo` 不进入 FIFO、重复点击只撤销一次、切到其他会话只撤销原会话、其他会话继续对话后仍能回填、无绑定消息不得撤销上一轮、撤销后队列暂停并可恢复、自然完成与取消竞争；compare 缓存恢复 complete/incomplete/unknown、未完成时的失败诊断、同一 URL 不算独立来源、策略缓存隔离、预算截断不缓存且验证状态如实。默认 GBK 控制台下涉及 UTF-8 子进程输出的 Git 界面用例需设置 `PYTHONUTF8=1`，属于本机终端编码环境问题。
+- 测试同步：设置输入框回填值会异步触发 `Input.Changed`；测试在结束前等待该消息处理完，避免界面卸载后查询命令面板造成偶发 `NoMatches`，产品逻辑未改。
+- 未验证：未调用真实 LLM 或收费搜索 API，未读取真实 Vault/Keyring；全部使用临时会话、模拟 Worker 与离线 Provider。真实 cancellation 延迟、跨进程缓存写入竞争与终端人工验收仍未覆盖。撤销仍只保证单进程内时序；进程崩溃或强制退出不会执行撤销。
+
 ## SearXNG、多 Provider 调度与搜索质量修复（2026-11-03）
 
 - 分支 `evolution`（跟踪 `origin/feature-memory-evolution`），基线 `4ac7839`；本轮改动未 commit、未 push。

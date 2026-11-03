@@ -152,6 +152,15 @@ class CandidatePool:
             for entry in self._entries.values()
         )
 
+    def providers(self) -> list[str]:
+        """实际贡献过结果的 Provider，按首次贡献顺序排列。"""
+        names: list[str] = []
+        for entry in self._entries.values():
+            for provider, _, _ in entry.ranks:
+                if provider not in names:
+                    names.append(provider)
+        return names
+
     def add(self, results: list[SearchResult]) -> None:
         for rank, result in enumerate(results, 1):
             url = normalize_url(result.url)
@@ -352,21 +361,25 @@ class SearchRouter:
                 strategy=strategy,
             )
         if self.cache is not None:
-            cached = self.cache.get(cache_key)
+            cached = self.cache.get_record(cache_key)
             if cached is not None:
-                results, provider = cached
+                results = cached.results
                 hint = "未找到相关结果。"
                 if results:
                     hint = weak_share_hint(results, analysis)
                     if not any(has_core_hit(result, analysis) for result in results):
                         hint = "候补引擎未找到与查询核心词直接相关的结果，以下为各引擎返回的候选。"
+                if cached.strategy == "compare":
+                    hint = f"{hint} {self._compare_note(cached.verification, cached.contributors, cached.failed)}".strip()
                 return SearchOutcome(
                     results=results,
-                    provider=provider,
+                    provider=cached.provider,
                     cached=True,
                     hint=hint,
-                    failed=selection_failures,
-                    strategy=strategy,
+                    failed=[*selection_failures, *cached.failed],
+                    attempted=cached.attempted,
+                    strategy=cached.strategy or strategy,
+                    verification=cached.verification,
                 )
 
         failures: list[SearchFailure] = list(selection_failures)
@@ -415,19 +428,46 @@ class SearchRouter:
                         name_hint=successful[-1],
                         attempted=attempted,
                         strategy=strategy,
+                        contributors=successful,
                     )
                     return self._with_compare_hint(final, successful, failures)
             elif outcome is not None:
                 return outcome
+        # 最后一个 Provider 自己的超时也可能刚好耗尽全局预算：收尾时再核验一次。
+        timed_out = (
+            self.timeout_budget - (time.perf_counter() - started) <= 0
+        )
         final = self._final_outcome(
             failures, pool, analysis, limit, cache_key,
             name_hint=names[-1] if names else "",
             attempted=attempted,
             strategy=strategy,
+            contributors=successful,
+            timed_out=timed_out,
         )
         if strategy == "compare":
             return self._with_compare_hint(final, successful, failures)
         return final
+
+    def _compare_note(
+        self,
+        verification: str,
+        contributors: Sequence[str],
+        failures: Sequence[SearchFailure],
+    ) -> str:
+        """compare 必须如实说明是否真正完成多源检索，不把单源结果说成交叉验证。"""
+        if verification == "complete":
+            count = len(dict.fromkeys(contributors)) or 2
+            return (
+                f"交叉验证：已合并 {count} 家 Provider 的结果；"
+                "同一页面被多家返回不构成独立证据。"
+            )
+        if verification == "unknown":
+            return "交叉验证状态未知（旧缓存缺少验证信息）。"
+        count = len(dict.fromkeys(contributors))
+        kinds = sorted({item.kind for item in failures})
+        suffix = f"（失败类型：{', '.join(kinds)}）" if kinds else ""
+        return f"交叉验证未完成：仅 {count} 家 Provider 返回结果{suffix}。"
 
     def _with_compare_hint(
         self,
@@ -435,18 +475,8 @@ class SearchRouter:
         successful: list[str],
         failures: list[SearchFailure],
     ) -> SearchOutcome:
-        """compare 必须如实说明是否真正完成多源检索，不把单源结果说成交叉验证。"""
-        if len(successful) >= 2:
-            note = (
-                f"交叉验证：已合并 {len(successful)} 家 Provider 的结果；"
-                "同一页面被多家返回不构成独立证据。"
-            )
-        else:
-            kinds = sorted({item.kind for item in failures})
-            suffix = f"（失败类型：{', '.join(kinds)}）" if kinds else ""
-            note = (
-                f"交叉验证未完成：仅 {len(successful)} 家 Provider 返回结果{suffix}。"
-            )
+        outcome.verification = "complete" if len(successful) >= 2 else "incomplete"
+        note = self._compare_note(outcome.verification, successful, failures)
         outcome.hint = f"{outcome.hint} {note}".strip()
         return outcome
 
@@ -495,7 +525,8 @@ class SearchRouter:
                     )
                     return self._final_outcome(
                         failures, pool, analysis, limit, cache_key, name_hint=name,
-                        attempted=attempted, strategy=strategy,
+                        attempted=attempted, strategy=strategy, timed_out=True,
+                        contributors=pool.providers(),
                     )
                 if budget["requests"] >= self.max_requests:
                     # 本地请求预算耗尽不是厂商配额问题，用独立分类区分。
@@ -510,6 +541,7 @@ class SearchRouter:
                         failures, pool, analysis, limit, cache_key,
                         name_hint=name, budget_exhausted=True,
                         attempted=attempted, strategy=strategy,
+                        contributors=pool.providers(),
                     )
                 if self.usage_limiter is not None:
                     # 达到厂商上限即跳过该厂商，交给后续 provider 回退。
@@ -570,7 +602,12 @@ class SearchRouter:
                     # 缓存与返回必须是同一份最终结果：先排序截断再入缓存，
                     # 否则缓存命中后顺序与首查不一致。
                     merged = pool.ranked(analysis)[:limit]
-                    self._cache_put(cache_key, merged, name, analysis)
+                    self._cache_put(
+                        cache_key, merged, name, analysis,
+                        strategy=strategy,
+                        attempted=list(attempted or [name]),
+                        contributors=[name],
+                    )
                     return SearchOutcome(
                         results=merged,
                         provider=name,
@@ -592,22 +629,36 @@ class SearchRouter:
         cache_key: str,
         name_hint: str = "",
         budget_exhausted: bool = False,
+        timed_out: bool = False,
         attempted: list[str] | None = None,
         strategy: str = "auto",
+        contributors: list[str] | None = None,
     ) -> SearchOutcome:
         merged = pool.ranked(analysis)[:limit]
-        # 预算耗尽时如实告知是截断收尾，不能伪装成正常完成。
-        budget_hint = (
-            "已达到单次搜索的请求次数上限，以下为当前最佳候选。" if budget_exhausted else ""
-        )
+        truncated = budget_exhausted or timed_out
+        contributors = list(dict.fromkeys(contributors or []))
+        verification = ""
+        if strategy == "compare":
+            verification = "complete" if len(contributors) >= 2 else "incomplete"
+        # 预算/超时截断时如实告知，且绝不当成完整成功结果写入缓存。
+        truncation_hint = ""
+        if budget_exhausted:
+            truncation_hint = "已达到单次搜索的请求次数上限，以下为当前最佳候选。"
+        elif timed_out:
+            truncation_hint = "搜索总超时预算已用尽，以下为当前最佳候选。"
         if merged and any(has_core_hit(result, analysis) for result in merged):
-            # 池里至少有核心词命中：按成功语义缓存（时效查询仍短 TTL）。
-            # 预算耗尽的截断结果不缓存：缓存会丢掉截断提示，后续搜索
-            # 会一直拿到不完整结果，重新请求才能在预算内补全。
-            if not budget_exhausted:
-                self._cache_put(cache_key, merged, name_hint, analysis)
+            # 池里至少有核心词命中：正常完成才按成功语义缓存（时效查询短 TTL）。
+            if not truncated:
+                self._cache_put(
+                    cache_key, merged, name_hint, analysis,
+                    strategy=strategy,
+                    attempted=attempted,
+                    contributors=contributors,
+                    verification=verification,
+                    failures=failures,
+                )
             weak = weak_share_hint(merged, analysis)
-            hints = [item for item in (budget_hint, weak) if item]
+            hints = [item for item in (truncation_hint, weak) if item]
             return SearchOutcome(
                 results=merged,
                 provider=name_hint,
@@ -615,25 +666,41 @@ class SearchRouter:
                 hint=" ".join(hints),
                 attempted=list(attempted or []),
                 strategy=strategy,
+                verification=verification,
             )
         if merged:
             # 候补都没命中核心词：返回候选但如实提示低相关，不伪装成精准命中；
-            # 低相关候选只短 TTL 缓存，给之后的回退留机会。
-            if not budget_exhausted:
-                self._cache_put(cache_key, merged, name_hint, analysis, short=True)
+            # 正常完成时低相关候选只短 TTL 缓存，给之后的回退留机会。
+            if not truncated:
+                self._cache_put(
+                    cache_key, merged, name_hint, analysis, short=True,
+                    strategy=strategy,
+                    attempted=attempted,
+                    contributors=contributors,
+                    verification=verification,
+                    failures=failures,
+                )
             base = "候补引擎未找到与查询核心词直接相关的结果，以下为各引擎返回的候选。"
+            hint = f"{base} {truncation_hint}".strip() if truncation_hint else base
             return SearchOutcome(
                 results=merged,
                 provider=name_hint,
                 failed=failures,
-                hint=f"{base}{budget_hint}" if budget_hint else base,
+                hint=hint,
                 attempted=list(attempted or []),
                 strategy=strategy,
+                verification=verification,
             )
-        if self.cache is not None and not failures:
+        if self.cache is not None and not failures and not truncated:
             # 真正的零命中（没有任何上游失败）才短 TTL 缓存；失败导致的空
             # 永不入缓存，否则验证码/限流期间会一直拿到空。
-            self.cache.set(cache_key, [], name_hint, ttl=EMPTY_RESULT_TTL)
+            self.cache.set(
+                cache_key, [], name_hint, ttl=EMPTY_RESULT_TTL,
+                strategy=strategy,
+                attempted=list(attempted or []),
+                contributors=contributors,
+                verification=verification,
+            )
         if failures and all(
             failure.kind
             in (
@@ -675,14 +742,29 @@ class SearchRouter:
         name: str,
         analysis: QueryAnalysis,
         short: bool = False,
+        *,
+        strategy: str = "auto",
+        attempted: list[str] | None = None,
+        contributors: list[str] | None = None,
+        verification: str = "",
+        failures: list[SearchFailure] | None = None,
     ) -> None:
         if self.cache is None or not results:
             return
+        metadata = {
+            "strategy": strategy,
+            "attempted": list(attempted or []),
+            "contributors": list(contributors or []),
+            "verification": verification,
+            "failed": list(failures or []),
+        }
         # 时效性查询（今天/最新/latest...）成功结果也只短缓存。
         if short or analysis.freshness_requested:
-            self.cache.set(cache_key, results, name, ttl=FRESHNESS_TTL)
+            self.cache.set(
+                cache_key, results, name, ttl=FRESHNESS_TTL, **metadata
+            )
         else:
-            self.cache.set(cache_key, results, name)
+            self.cache.set(cache_key, results, name, **metadata)
 
     def _exhausted(self, failures: list[SearchFailure]) -> SearchOutcome:
         if failures and all(

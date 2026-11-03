@@ -5,11 +5,16 @@ from dataclasses import dataclass
 from functools import partial
 from threading import Event
 
-from textual.widgets import Static
+from textual.widgets import Input, Static
 
 from ..llm import ChatModelError, GenerationCancelled
 from ..infra.diagnostics import record_event
 from .chat_widgets import ASSISTANT_NAME, ChatReply
+
+
+def _is_undo_line(line: str) -> bool:
+    text = line.strip()
+    return text.startswith("/") and text.split(" ", 1)[0].lower() == "/undo"
 
 
 @dataclass
@@ -46,10 +51,19 @@ class ChatFlowMixin:
         if self._ask_active and self._ask_in_flight is None:
             self._ask_in_flight = session_id
 
+    def _bind_ask_user_message(self, message_id: str) -> None:
+        if self._ask_active:
+            self._ask_user_message_id = message_id
+
     def _submit_during_ask(self, line: str) -> None:
-        # 等待期提交：导航/只读命令立即执行；其余按提交顺序进全局 FIFO，
+        # 等待期提交：/undo 是即时控制命令，必须先于 SAFE/FIFO 判定。
+        command = line.split(" ", 1)[0].lower() if line.startswith("/") else ""
+        if command == "/undo":
+            self._request_undo()
+            return
+        # 其余导航/只读命令立即执行；普通消息按提交顺序进全局 FIFO，
         # 完成后逐条执行——意图排队接续，绝不静默丢弃，也不并发第二个请求。
-        if line.startswith("/") and line.lower().split(" ", 1)[0] in self.SAFE_COMMANDS:
+        if line.startswith("/") and command in self.SAFE_COMMANDS:
             self._command(line)
             return
         if not self.runtime.has_session:
@@ -77,7 +91,135 @@ class ChatFlowMixin:
         self._render_model_status()
         self.query_one("#input").focus()
 
-    def _finish_cancelled(self, session_id: str | None = None) -> None:
+    def _request_undo(self) -> None:
+        """生成期间的 /undo：立即取消，不进入 FIFO；撤销在 Worker 退出后执行。"""
+        if not self._ask_active:
+            self._undo_message()
+            return
+        if self._undo_requested:
+            self.notify("Undo already in progress.")
+            return
+        self._undo_requested = True
+        self._undo_target_session_id = self._ask_in_flight
+        self._undo_target_message_id = self._ask_user_message_id
+        # 旧版本可能把 /undo 排进 FIFO；这里一次性清掉，避免撤销后再次执行。
+        self._purge_queued_undo()
+        if self._cancel_generation is not None:
+            self._cancel_generation.set()
+        self._progress_phase = "Stopping"
+        self._render_model_status()
+        self.query_one("#input").focus()
+        self.notify("Stopping generation and undoing this turn…")
+
+    def _purge_queued_undo(self) -> None:
+        kept = [item for item in self._queue if not _is_undo_line(item.line)]
+        removed = len(self._queue) - len(kept)
+        self._queue = kept
+        self._refresh_queue()
+        if self._pending_command and _is_undo_line(self._pending_command.line):
+            self._pending_command = None
+            removed += 1
+        if removed:
+            self.notify(f"Discarded {removed} queued /undo.")
+
+    def _finish_undo(
+        self,
+        session_id: str | None,
+        user_message_id: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Worker 已退出后执行撤销；不启动新请求，也不自动发送旧队列。"""
+        self._progress_phase = "Undoing"
+        self._render_model_status()
+        target_sid = (
+            self._undo_target_session_id
+            or session_id
+            or self._ask_in_flight
+        )
+        target_mid = user_message_id or self._undo_target_message_id
+        restored: str | None = None
+        # 没有绑定到具体用户消息时绝不回退撤销上一轮：那可能是请求落盘前的
+        # 失败，撤销更早的对话会破坏用户上下文。
+        if target_sid and target_mid:
+            try:
+                # 始终从磁盘加载目标会话：后台 Worker 的写入可能晚于切回时
+                # 载入的内存对象，直接用当前对象会看不到刚追加的用户消息。
+                target_session = self.runtime.sessions.load(target_sid)
+                restored = self.runtime.undo(
+                    target_session, message_id=target_mid
+                )
+            except Exception as exc:
+                record_event("undo.failed", exc)
+                self.notify(f"Undo failed: {exc}")
+        if error:
+            record_event("chat.failed", error)
+            self.notify(f"Request failed before undo: {error}")
+        if restored is None:
+            self.notify("No generated turn to undo.")
+
+        current_id = self.runtime.current.id if self.runtime.has_session else None
+        if restored is not None and target_sid and current_id == target_sid:
+            if self._navigation_busy:
+                # 切换会话仍在进行：等切换完成后重载并回填，避免读到旧视图。
+                self._pending_undo_restore = (target_sid, restored)
+            else:
+                self._apply_undo_view(target_sid, restored)
+        elif restored is not None and target_sid:
+            # 后台会话：不修改当前视图与输入框；切回目标会话时再回填。
+            self._pending_undo_restore = (target_sid, restored)
+            self.notify("Generation stopped and message undone in background session")
+        self._heal_current_session(target_sid)
+        self.refresh_sessions()
+        self.refresh_pending()
+        self._end_ask()
+        self._queue_paused_after_undo = bool(self._queue)
+        self._undo_requested = False
+        self._undo_target_session_id = None
+        self._undo_target_message_id = None
+        self.update_status()
+        if self._queue_paused_after_undo:
+            self.notify(
+                f"{len(self._queue)} queued message(s) paused after undo; "
+                "they resume after your next reply."
+            )
+
+    def _apply_undo_view(self, session_id: str, text: str | None) -> None:
+        """目标会话就是当前视图：从磁盘重载，清除已撤销回合并回填原文。"""
+        if not self.runtime.has_session or self.runtime.current.id != session_id:
+            return
+        try:
+            self.runtime.session = self.runtime.sessions.load(session_id)
+        except Exception as exc:
+            record_event("session.reload_failed", exc)
+        self._clear_chat()
+        self.build_transcript()
+        self.refresh_sessions()
+        self.update_status()
+        if text is not None:
+            widget = self.query_one("#input", Input)
+            widget.value = text
+            widget.cursor_position = len(text)
+            widget.focus()
+
+    def _flush_undo_refresh(self) -> None:
+        """切换完成后补一次撤销视图刷新/回填；目标不是当前会话则继续等待。"""
+        pending = self._pending_undo_restore
+        if pending is None:
+            return
+        session_id, text = pending
+        if not self.runtime.has_session or self.runtime.current.id != session_id:
+            return
+        self._pending_undo_restore = None
+        self._apply_undo_view(session_id, text)
+
+    def _finish_cancelled(
+        self,
+        session_id: str | None = None,
+        user_message_id: str | None = None,
+    ) -> None:
+        if self._undo_requested:
+            self._finish_undo(session_id, user_message_id)
+            return
         sid = session_id or self._ask_in_flight
         if self._ask_in_current_view():
             content = self._stream_buffer + "\n\n*(generation stopped by user)*"
@@ -152,6 +294,20 @@ class ChatFlowMixin:
 
     def _ask_work(self, line: str, stamp: str, session_id: str | None) -> None:
         started = time.monotonic()
+        # 回调先捕获 Worker 实际绑定的会话与用户消息 ID；UI 字段可能被切换/竞态影响。
+        bound: dict[str, str | None] = {
+            "session_id": session_id,
+            "user_message_id": None,
+        }
+
+        def bind_session(s) -> None:
+            bound["session_id"] = s.id
+            self.call_from_thread(self._bind_ask_session, s.id)
+
+        def bind_user_message(message_id: str) -> None:
+            bound["user_message_id"] = message_id
+            self.call_from_thread(self._bind_ask_user_message, message_id)
+
         try:
             session = None
             if session_id and not (
@@ -162,29 +318,43 @@ class ChatFlowMixin:
             reply = self.runtime.ask(
                 line,
                 session=session,
-                on_session=lambda s: self.call_from_thread(self._bind_ask_session, s.id),
+                on_session=bind_session,
+                on_user_message=bind_user_message,
                 on_event=lambda event: self.call_from_thread(self.add_event, event),
                 on_delta=lambda delta: self.call_from_thread(self._stream_append, stamp, delta),
                 on_progress=lambda phase: self.call_from_thread(self._progress_update, phase),
                 cancel=self._cancel_generation,
             )
         except GenerationCancelled:
-            self._ui(self._finish_cancelled, session_id)
+            self._ui(
+                self._finish_cancelled,
+                bound["session_id"],
+                bound["user_message_id"],
+            )
             return
         except ChatModelError as exc:
             record_event("chat.failed", exc)
-            self._ui(self._finish_error, str(exc), session_id)
+            self._ui(
+                self._finish_error, str(exc),
+                bound["session_id"], bound["user_message_id"],
+            )
             return
         except Exception as exc:  # 界面不因单轮失败退出
             record_event("chat.failed", exc)
-            self._ui(self._finish_error, f"Request failed: {exc}", session_id)
+            self._ui(
+                self._finish_error, f"Request failed: {exc}",
+                bound["session_id"], bound["user_message_id"],
+            )
             return
         elapsed = time.monotonic() - started
         meta = [f"{reply.steps} steps", f"{reply.estimated_tokens} tok"]
         if reply.usage.cost_usd:
             meta.append(f"${reply.usage.cost_usd:.4f}")
         meta.append(f"{elapsed:.1f}s")
-        self._ui(self._finish_reply, reply.content, stamp, " · ".join(meta), session_id)
+        self._ui(
+            self._finish_reply, reply.content, stamp, " · ".join(meta),
+            bound["session_id"], bound["user_message_id"],
+        )
 
     # ---------- 流式渲染：帧合并更新，完成/中断后收尾 ----------
 
@@ -251,7 +421,18 @@ class ChatFlowMixin:
             record_event("session.reload_failed", exc)
             pass  # 会话文件异常时保留内存对象，后续操作各自报错。
 
-    def _finish_reply(self, content: str, stamp: str, meta: str, session_id: str | None) -> None:
+    def _finish_reply(
+        self,
+        content: str,
+        stamp: str,
+        meta: str,
+        session_id: str | None,
+        user_message_id: str | None = None,
+    ) -> None:
+        if self._undo_requested:
+            # 用户已要求撤销：自然完成与取消竞争时只撤销一次，不保留最终回复。
+            self._finish_undo(session_id, user_message_id)
+            return
         sid = session_id or self._ask_in_flight
         in_view = sid is None or (
             self.runtime.has_session and self.runtime.current.id == sid
@@ -277,7 +458,15 @@ class ChatFlowMixin:
         self._end_ask()
         self._drain_pending_intent()
 
-    def _finish_error(self, message: str, session_id: str | None = None) -> None:
+    def _finish_error(
+        self,
+        message: str,
+        session_id: str | None = None,
+        user_message_id: str | None = None,
+    ) -> None:
+        if self._undo_requested:
+            self._finish_undo(session_id, user_message_id, error=message)
+            return
         sid = session_id or self._ask_in_flight
         in_view = sid is None or (
             self.runtime.has_session and self.runtime.current.id == sid

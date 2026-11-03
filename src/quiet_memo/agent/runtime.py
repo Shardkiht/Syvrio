@@ -147,6 +147,7 @@ class AgentRuntime:
         *,
         session: Session | None = None,
         on_session: Callable[[Session], None] | None = None,
+        on_user_message: Callable[[str], None] | None = None,
         on_event: Callable[[str], None] | None = None,
         on_delta: Callable[[str], None] | None = None,
         on_progress: Callable[[str], None] | None = None,
@@ -166,7 +167,10 @@ class AgentRuntime:
             on_session(session)
         self._active_ask = session
         try:
-            return self._run_ask(session, text, on_event, on_delta, on_progress, cancel)
+            return self._run_ask(
+                session, text, on_event, on_delta, on_progress, cancel,
+                on_user_message,
+            )
         except GenerationCancelled as exc:
             partial = getattr(exc, "partial_content", "")
             self._append_assistant(session, AssistantTurn(
@@ -192,6 +196,7 @@ class AgentRuntime:
         on_delta: Callable[[str], None] | None,
         on_progress: Callable[[str], None] | None,
         cancel: Event | None,
+        on_user_message: Callable[[str], None] | None = None,
     ) -> AgentReply:
         def progress(phase: str) -> None:
             if cancel is not None and cancel.is_set():
@@ -206,6 +211,9 @@ class AgentRuntime:
             session,
             {"type": "message", "id": message_id, "role": "user", "content": text},
         )
+        if on_user_message is not None:
+            # 立即上报本条用户消息 ID；生成期间 /undo 用它精确撤销当前回合。
+            on_user_message(message_id)
 
         progress("Preparing context")
         recall_events: list[str] = []
@@ -460,26 +468,51 @@ class AgentRuntime:
     def rename(self, title: str) -> None:
         self.sessions.rename(self.current, title)
 
-    def undo(self) -> str | None:
-        target = next(
-            (
-                record
-                for record in reversed(self.current.active_records())
-                if record.get("type") == "message" and record.get("role") == "user"
-            ),
-            None,
-        )
+    def undo(
+        self,
+        session: Session | None = None,
+        message_id: str | None = None,
+    ) -> str | None:
+        """撤销指定会话的一轮用户消息；默认当前会话最后一条用户消息。
+
+        传入 message_id 时只撤销该条，避免生成期间切换会话后误伤其他回合。
+        """
+        target_session = session or self.current
+        records = target_session.active_records()
+        if message_id:
+            target = next(
+                (
+                    record
+                    for record in records
+                    if record.get("id") == message_id
+                    and record.get("type") == "message"
+                    and record.get("role") == "user"
+                ),
+                None,
+            )
+        else:
+            target = next(
+                (
+                    record
+                    for record in reversed(records)
+                    if record.get("type") == "message"
+                    and record.get("role") == "user"
+                ),
+                None,
+            )
         if target is None:
             return None
         self.sessions.append(
-            self.current,
+            target_session,
             {
                 "type": "undo",
                 "id": new_message_id(),
                 "message_id": target["id"],
             },
         )
-        self.last_plan = None
+        if self.session is not None and target_session.id == self.session.id:
+            self.last_plan = None
+            self.last_plan_session = None
         return str(target.get("content") or "")
 
     def _system_prompt(self) -> str:

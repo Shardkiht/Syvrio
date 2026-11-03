@@ -346,6 +346,8 @@ class SearchOutcome:
     # 实际尝试过的 Provider 顺序与策略，便于 TUI/调试区分回退与交叉验证。
     attempted: list[str] = field(default_factory=list)
     strategy: str = "auto"
+    # compare 的验证状态：complete / incomplete / unknown；其他策略为空。
+    verification: str = ""
 
     def to_payload(self) -> dict:
         payload: dict = {
@@ -363,6 +365,7 @@ class SearchOutcome:
             "provider": self.provider,
             "attempted": list(self.attempted),
             "strategy": self.strategy,
+            "verification": self.verification,
             "failed": [failure.to_dict() for failure in self.failed],
         }
         if self.hint:

@@ -88,6 +88,14 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
         self._pending_command: _QueuedLine | None = None
         self._queue: list[_QueuedLine] = []
         self._cancel_generation = None
+        # 生成期间 /undo 的专用状态：目标绑定生成中的会话与用户消息，不随视图漂移。
+        self._ask_user_message_id: str | None = None
+        self._undo_requested = False
+        self._undo_target_session_id: str | None = None
+        self._undo_target_message_id: str | None = None
+        self._pending_undo_restore: tuple[str, str | None] | None = None
+        # 撤销后暂停旧队列，避免自动发送下一条覆盖回填文本；直到用户下一次提交。
+        self._queue_paused_after_undo = False
         self._stream_widget: ChatReply | None = None
         self._stream_buffer = ""
         self._stream_stamp = ""
@@ -238,7 +246,7 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
         self.query_one("#input", Input).value = ""
         line = f"/{command}"
         if self._ask_active:
-            # 面板路径与输入路径同规则：非导航命令在等待期进全局队列。
+            # 面板路径与输入路径同规则；/undo 走即时控制路径，不进入 FIFO。
             self._submit_during_ask(line)
             return
         self._command(line)
@@ -353,6 +361,9 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
             self._pending_switch = None
             self._switch_session(session_id)
             return
+        if self._queue_paused_after_undo:
+            # 撤销后保留队列但不自动发送，直到用户下一次主动提交。
+            return
         if self._pending_command:
             # 导航期间可能再次切换视图，执行前重新核验完整队列项的目标。
             item = self._pending_command
@@ -428,6 +439,7 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
         self._end_navigation()
         if message:
             self.notify(message)
+        self._flush_undo_refresh()
         self.query_one("#input", Input).focus()
         self._drain_pending_intent()
 
@@ -681,6 +693,10 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
         self._reflection_activity()
         self._ask_active = True
         self._ask_in_flight = session_id
+        self._ask_user_message_id = None
+        self._undo_requested = False
+        self._undo_target_session_id = None
+        self._undo_target_message_id = None
         self._progress_started = time.monotonic()
         self._progress_phase = "Working"
         self.query_one("#input", BarInput).set_hint("Message to queue · Esc to stop")
@@ -693,6 +709,7 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
         self._ask_active = False
         self._cancel_generation = None
         self._ask_in_flight = None
+        self._ask_user_message_id = None
         self._stream_widget = None
         self._stream_buffer = ""
         self._stream_stamp = ""
@@ -747,6 +764,9 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
         if self._ask_active:
             self._submit_during_ask(line)
             return
+        # 用户主动开始下一轮消息后，撤销期间暂停的旧队列才恢复接续。
+        if not line.startswith("/"):
+            self._queue_paused_after_undo = False
         if line.startswith("/"):
             palette = self.query_one("#cmd-palette", CommandPalette)
             if palette.display and palette.current and " " not in line:

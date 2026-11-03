@@ -2453,14 +2453,15 @@ async def test_submit_during_ask_queues_fifo_across_sessions(tmp_path):
         assert any(r.get("type") == "assistant" and "reply-3" in str(r.get("content")) for r in records_b)
 
 
-async def test_queued_command_runs_on_original_session(tmp_path):
-    # A 生成中排队 /undo，随后切到 B：命令必须回到 A 执行，不能撤销 B。
+async def test_undo_during_generation_bypasses_queue_and_targets_original_session(tmp_path):
+    # A 生成中 /undo 立即取消，不进入 FIFO；切到 B 后也只撤销 A，不改 B 的输入。
     app = build_app(tmp_path, [])
     gated = GatedChatModel([
         AssistantTurn(content="reply-1"),
         AssistantTurn(content="reply-2"),
+        AssistantTurn(content="reply-b"),
     ])
-    gated.gates = [threading.Event(), threading.Event()]
+    gated.gates = [threading.Event(), threading.Event(), threading.Event()]
     app.runtime.model = gated
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
@@ -2477,7 +2478,8 @@ async def test_queued_command_runs_on_original_session(tmp_path):
         app.query_one("#input", Input).value = "/undo"
         await pilot.press("enter")
         await pilot.pause()
-        assert [item.session_id for item in app._queue] == [session_a]
+        assert app._queue == []
+        assert app._undo_requested is True
 
         session_b = app.sessions.create().id
         app._switch_session(session_b)
@@ -2489,15 +2491,180 @@ async def test_queued_command_runs_on_original_session(tmp_path):
 
         gated.gates[1].set()
         await _wait_idle(app, pilot)
-        # 排队命令把视图切回 A，再在 A 上执行 undo。
+        assert app.runtime.current.id == session_b
+        assert app.query_one("#input", Input).value == ""
+        assert app.sessions.load(session_a).user_texts() == ["m1"]
+        assert app.sessions.load(session_b).user_texts() == []
+
+        # 在 B 里继续对话不应丢弃 A 的待回填文本。
+        widget = app.query_one("#input", Input)
+        widget.value = "b-msg"
+        await pilot.press("enter")
+        await _wait_ask_started(app, pilot)
+        gated.gates[2].set()
+        await _wait_idle(app, pilot)
+        assert app.runtime.current.id == session_b
+        assert app.sessions.load(session_b).user_texts() == ["b-msg"]
+
+        # 切回 A 后补回填原文；B 的历史与输入始终未被修改。
+        app._switch_session(session_a)
         for _ in range(200):
             await pilot.pause()
-            if app.runtime.has_session and app.runtime.current.id == session_a and not app.busy:
+            if not app._navigation_busy:
                 break
         assert app.runtime.current.id == session_a
         assert app.query_one("#input", Input).value == "m2"
-        assert app.sessions.load(session_a).user_texts() == ["m1"]
-        assert app.sessions.load(session_b).user_texts() == []
+        # 等回填触发的 Input.Changed 在界面仍挂载时处理完，避免卸载后查询控件。
+        await pilot.pause()
+
+
+async def test_undo_during_ask_is_immediate_and_idempotent(tmp_path):
+    app = build_app(tmp_path, [])
+    gated = GatedChatModel(
+        [AssistantTurn(content="reply-0"), AssistantTurn(content="reply-1")],
+        stream_first=True,
+    )
+    gated.gates = [threading.Event(), threading.Event()]
+    app.runtime.model = gated
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        widget = app.query_one("#input", Input)
+        widget.value = "m0"
+        await pilot.press("enter")
+        await _wait_ask_started(app, pilot)
+        gated.gates[0].set()
+        await _wait_idle(app, pilot)
+
+        widget.value = "m1"
+        await pilot.press("enter")
+        await _wait_ask_started(app, pilot)
+        session_id = app.runtime.current.id
+        assert app._stream_buffer  # 已在流式生成
+
+        for _ in range(3):
+            widget.value = "/undo"
+            await pilot.press("enter")
+            await pilot.pause()
+
+        # 立即取消，不进入 FIFO；重复 /undo 不会叠加撤销。
+        assert app._queue == []
+        assert app._cancel_generation.is_set()
+        assert app._progress_phase == "Stopping"
+        assert len(gated.calls) == 2
+        assert app._ask_in_flight == session_id
+
+        gated.gates[1].set()
+        await _wait_idle(app, pilot)
+        await pilot.pause()
+
+        assert widget.value == "m1"
+        session = app.sessions.load(session_id)
+        assert session.user_texts() == ["m0"]
+        assert len([r for r in session.records if r.get("type") == "undo"]) == 1
+        active = "\n".join(
+            str(r.get("content", "")) for r in session.active_records()
+        )
+        assert "m1" not in active and "reply-1" not in active
+
+
+async def test_undo_keeps_queued_message_paused_without_losing_it(tmp_path):
+    app = build_app(tmp_path, [])
+    gated = GatedChatModel([
+        AssistantTurn(content="reply-m1"),
+        AssistantTurn(content="reply-edited"),
+        AssistantTurn(content="reply-queued"),
+    ])
+    gated.gates = [threading.Event(), threading.Event(), threading.Event()]
+    app.runtime.model = gated
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        widget = app.query_one("#input", Input)
+        widget.value = "m1"
+        await pilot.press("enter")
+        await _wait_ask_started(app, pilot)
+
+        widget.value = "queued message"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert [item.line for item in app._queue] == ["queued message"]
+
+        widget.value = "/undo"
+        await pilot.press("enter")
+        await pilot.pause()
+        gated.gates[0].set()
+        await _wait_idle(app, pilot)
+
+        # 撤销完成但不自动发送队列，回填文本不会被覆盖。
+        assert widget.value == "m1"
+        assert [item.line for item in app._queue] == ["queued message"]
+        assert app._queue_paused_after_undo is True
+        assert len(gated.calls) == 1
+
+        # 用户主动开始下一轮后，旧队列在回复结束后按原顺序接续。
+        widget.value = "m1 edited"
+        await pilot.press("enter")
+        await _wait_ask_started(app, pilot)
+        assert app._queue_paused_after_undo is False
+        gated.gates[1].set()
+        for _ in range(400):
+            await pilot.pause()
+            if len(gated.calls) >= 3:
+                break
+        gated.gates[2].set()
+        await _wait_idle(app, pilot)
+        assert gated.calls == ["m1", "m1 edited", "queued message"]
+        assert app._queue == []
+
+
+async def test_natural_completion_after_undo_request_does_not_keep_reply(tmp_path):
+    # 模型与取消竞争：即便正常回复先到达，只要 /undo 已请求，也只撤销当前回合。
+    app = build_app(tmp_path, [])
+    app.runtime.start()
+    session = app.runtime.ensure_session()
+    app.sessions.append(
+        session,
+        {"type": "message", "id": "u1", "role": "user", "content": "m1"},
+    )
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._begin_ask(session.id)
+        app._ask_user_message_id = "u1"
+        app._undo_requested = True
+        app._undo_target_session_id = session.id
+        app._undo_target_message_id = "u1"
+        app._finish_reply("final reply", "12:00", "", session.id, "u1")
+        await pilot.pause()
+
+        assert app.query_one("#input", Input).value == "m1"
+        loaded = app.sessions.load(session.id)
+        assert loaded.user_texts() == []
+        assert len([r for r in loaded.records if r.get("type") == "undo"]) == 1
+        assert "final reply" not in "\n".join(
+            str(r.get("content", "")) for r in loaded.active_records()
+        )
+
+
+async def test_undo_without_bound_message_does_not_touch_earlier_turn(tmp_path):
+    # 请求在用户消息落盘前失败：没有具体消息 ID 时不得回退撤销上一轮。
+    app = build_app(tmp_path, [])
+    app.runtime.start()
+    session = app.runtime.ensure_session()
+    app.sessions.append(
+        session,
+        {"type": "message", "id": "u0", "role": "user", "content": "earlier"},
+    )
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._begin_ask(session.id)
+        app._undo_requested = True
+        app._undo_target_session_id = session.id
+        app._undo_target_message_id = None
+        app._finish_cancelled(session.id, None)
+        await pilot.pause()
+
+        loaded = app.sessions.load(session.id)
+        assert loaded.user_texts() == ["earlier"]
+        assert not any(r.get("type") == "undo" for r in loaded.records)
 
 
 async def test_queued_command_skipped_when_target_unavailable(tmp_path):
@@ -2513,7 +2680,7 @@ async def test_queued_command_skipped_when_target_unavailable(tmp_path):
         await _wait_ask_started(app, pilot)
         session_a = app.runtime.current.id
 
-        app.query_one("#input", Input).value = "/undo"
+        app.query_one("#input", Input).value = "/rename queued"
         await pilot.press("enter")
         await pilot.pause()
         session_b = app.sessions.create().id

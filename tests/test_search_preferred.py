@@ -8,7 +8,12 @@ pytestmark = pytest.mark.search
 from quiet_memo.agent.session import SessionStore
 from quiet_memo.agent.tools import build_tools
 from quiet_memo.infra.config import ChatConfig, Config, LLMConfig, SearchConfig, UsageLimit
-from quiet_memo.infra.search.base import SearchQuery, SearchResult
+from quiet_memo.infra.search.base import (
+    ProviderError,
+    ProviderErrorKind,
+    SearchQuery,
+    SearchResult,
+)
 from quiet_memo.infra.search.cache import SearchCache
 from quiet_memo.infra.search.router import SearchRouter
 from quiet_memo.infra.search.usage import UsageLimiter
@@ -337,6 +342,196 @@ def test_provider_selection_normalization_handles_json_strings_and_limits():
         normalize_search_providers([f"p{i}" for i in range(9)])
     with pytest.raises(ValueError, match="list of strings"):
         normalize_search_providers({"provider": "searxng"})
+
+
+def test_compare_budget_truncation_is_not_cached(tmp_path):
+    first = _Provider("searxng", [_strong("searxng", "https://example.com/s")])
+    second = _Provider("anysearch", [_strong("anysearch", "https://example.com/a")])
+    router = SearchRouter(
+        {"searxng": first, "anysearch": second},
+        order=["searxng", "anysearch"],
+        cache=SearchCache(tmp_path / "cache.json", 60),
+        max_requests=1,
+    )
+    first_outcome = router.search(
+        SearchQuery("tibo", providers=("searxng", "anysearch"), strategy="compare")
+    )
+    assert "交叉验证未完成" in first_outcome.hint
+    assert first_outcome.verification == "incomplete"
+    assert "请求次数上限" in first_outcome.hint or "超时" in first_outcome.hint
+
+    second_outcome = router.search(
+        SearchQuery("tibo", providers=("searxng", "anysearch"), strategy="compare")
+    )
+    assert second_outcome.cached is False
+    assert len(first.calls) == 2 and not second.calls
+
+
+def test_compare_truncation_keeps_actual_contributor_verification(tmp_path):
+    # 两家都已贡献结果但质量门控未达标，第三家被请求预算截断：
+    # 截断结果不缓存，但验证状态必须如实反映已有两家来源。
+    first = _Provider(
+        "searxng",
+        [SearchResult("Unrelated page", "https://example.com/s", "tibo", None, "searxng")],
+    )
+    second = _Provider(
+        "anysearch",
+        [SearchResult("Unrelated page", "https://example.com/a", "tibo", None, "anysearch")],
+    )
+    third = _Provider(
+        "tavily",
+        [SearchResult("Unrelated page", "https://example.com/t", "tibo", None, "tavily")],
+    )
+    router = SearchRouter(
+        {"searxng": first, "anysearch": second, "tavily": third},
+        order=["searxng", "anysearch", "tavily"],
+        cache=SearchCache(tmp_path / "cache.json", 60),
+        max_requests=2,
+    )
+    outcome = router.search(
+        SearchQuery("tibo codex", strategy="compare")
+    )
+
+    assert outcome.verification == "complete"
+    assert outcome.cached is False
+    assert "交叉验证：已合并 2 家" in outcome.hint
+    assert "请求次数上限" in outcome.hint
+    assert len(first.calls) == 1 and len(second.calls) == 1 and not third.calls
+
+    router.search(SearchQuery("tibo codex", strategy="compare"))
+    assert len(first.calls) == 2
+
+
+def test_cache_isolates_auto_and_compare_strategies(tmp_path):
+    first = _Provider("searxng", [_strong("searxng", "https://example.com/s")])
+    second = _Provider("anysearch", [_strong("anysearch", "https://example.com/a")])
+    router = SearchRouter(
+        {"searxng": first, "anysearch": second},
+        order=["searxng", "anysearch"],
+        cache=SearchCache(tmp_path / "cache.json", 60),
+    )
+
+    auto = router.search(SearchQuery("tibo"))
+    compare = router.search(SearchQuery("tibo", strategy="compare"))
+    cached_auto = router.search(SearchQuery("tibo"))
+
+    assert auto.cached is False and auto.strategy == "auto"
+    assert compare.cached is False and compare.strategy == "compare"
+    assert compare.verification == "complete"
+    assert cached_auto.cached is True
+    assert cached_auto.strategy == "auto"
+    assert cached_auto.attempted == ["searxng"]
+    assert len(first.calls) == 2 and len(second.calls) == 1
+
+
+def test_compare_cache_restores_complete_verification(tmp_path):
+    first = _Provider("searxng", [_strong("searxng", "https://example.com/s")])
+    second = _Provider("anysearch", [_strong("anysearch", "https://example.com/a")])
+    router = SearchRouter(
+        {"searxng": first, "anysearch": second},
+        order=["searxng", "anysearch"],
+        cache=SearchCache(tmp_path / "cache.json", 60),
+    )
+    first_outcome = router.search(SearchQuery("tibo", strategy="compare"))
+    cached = router.search(SearchQuery("tibo", strategy="compare"))
+
+    assert cached.cached is True
+    assert cached.verification == "complete"
+    assert cached.attempted == first_outcome.attempted == ["searxng", "anysearch"]
+    assert "交叉验证：已合并 2 家" in cached.hint
+    assert len(first.calls) == 1 and len(second.calls) == 1
+
+
+def test_compare_cache_restores_incomplete_verification(tmp_path):
+    only = _Provider("searxng", [_strong("searxng", "https://example.com/s")])
+    empty = _Provider("anysearch", [])
+    router = SearchRouter(
+        {"searxng": only, "anysearch": empty},
+        order=["searxng", "anysearch"],
+        cache=SearchCache(tmp_path / "cache.json", 60),
+    )
+    first = router.search(SearchQuery("tibo", strategy="compare"))
+    cached = router.search(SearchQuery("tibo", strategy="compare"))
+
+    assert first.verification == "incomplete"
+    assert cached.cached is True
+    assert cached.verification == "incomplete"
+    assert "交叉验证未完成：仅 1 家" in cached.hint
+    assert cached.results and len(only.calls) == 1 and len(empty.calls) == 1
+
+
+def test_compare_cache_restores_incomplete_diagnostics(tmp_path):
+    first = _Provider("searxng", [_strong("searxng", "https://example.com/s")])
+    failing = _Provider(
+        "anysearch",
+        error=ProviderError("anysearch", ProviderErrorKind.NETWORK, "upstream reset"),
+    )
+    router = SearchRouter(
+        {"searxng": first, "anysearch": failing},
+        order=["searxng", "anysearch"],
+        cache=SearchCache(tmp_path / "cache.json", 60),
+    )
+    router.search(SearchQuery("tibo", strategy="compare"))
+    cached = router.search(SearchQuery("tibo", strategy="compare"))
+
+    assert cached.cached is True
+    assert cached.verification == "incomplete"
+    assert [(item.provider, item.kind) for item in cached.failed] == [
+        ("anysearch", "network")
+    ]
+    assert "失败类型：network" in cached.hint
+    assert len(first.calls) == 1 and len(failing.calls) == 1
+
+
+def test_compare_cache_keeps_same_url_not_independent(tmp_path):
+    first = _Provider(
+        "searxng", [_strong("searxng", "https://www.example.com/a?utm_source=x")]
+    )
+    second = _Provider("anysearch", [_strong("anysearch", "https://example.com/a")])
+    router = SearchRouter(
+        {"searxng": first, "anysearch": second},
+        order=["searxng", "anysearch"],
+        cache=SearchCache(tmp_path / "cache.json", 60),
+    )
+    first_outcome = router.search(SearchQuery("tibo", strategy="compare"))
+    cached = router.search(SearchQuery("tibo", strategy="compare"))
+
+    assert first_outcome.verification == "complete"
+    assert len(first_outcome.results) == 1
+    assert cached.cached is True and len(cached.results) == 1
+    assert "同一页面" in cached.hint and "不构成独立证据" in cached.hint
+    assert len(first.calls) == 1 and len(second.calls) == 1
+
+
+def test_compare_cache_missing_verification_is_unknown(tmp_path):
+    import json
+    from dataclasses import asdict
+
+    from quiet_memo.infra.search.cache import CACHE_VERSION
+
+    path = tmp_path / "cache.json"
+    result = _strong("searxng", "https://example.com/s")
+    path.write_text(
+        json.dumps(
+            {
+                "version": CACHE_VERSION,
+                "entries": {
+                    "legacy": {
+                        "expires": 9999999999,
+                        "provider": "searxng",
+                        "strategy": "compare",
+                        "results": [asdict(result)],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    cache = SearchCache(path, 60)
+    record = cache.get_record("legacy")
+    assert record is not None
+    assert record.verification == "unknown"
+    assert cache.get("legacy") == ([result], "searxng")
 
 
 def test_tool_exposes_multi_provider_schema_and_rejects_strict_without_list(tmp_path):
