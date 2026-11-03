@@ -44,6 +44,33 @@ _EXTERNAL_PROVIDERS = {
     "volcengine": ("volcengine.py:VolcengineSearchProvider", "VOLCENGINE_SEARCH_API_KEY"),
 }
 
+# 匿名可用、配置 Key 后自动升级认证的外部搜索服务。
+_OPTIONAL_KEY_PROVIDERS = {
+    "anysearch": "ANYSEARCH_API_KEY",
+    "parallel_mcp": "PARALLEL_API_KEY",
+}
+
+
+def _build_optional_provider(
+    name: str, api_key: str, config: SearchConfig
+) -> SearchProvider:
+    if name == "anysearch":
+        from .anysearch import AnySearchProvider
+
+        return AnySearchProvider(
+            api_key,
+            timeout=config.timeout,
+            zone=config.anysearch_zone,
+            language=config.anysearch_language,
+        )
+    if name == "parallel_mcp":
+        from .parallel_mcp import ParallelMcpProvider
+
+        return ParallelMcpProvider(
+            api_key, timeout=max(15.0, config.timeout)
+        )
+    raise ValueError(f"未知的可选搜索 provider: {name}")
+
 
 def _build_external_provider(name: str, api_key: str, timeout: float) -> SearchProvider:
     # 延迟导入：未配置 Key 时不必加载这些模块。
@@ -178,6 +205,11 @@ def build_registry(config: SearchConfig) -> dict[str, SearchProvider]:
                 # 未配置 Key 的厂商直接跳过：不参与尝试，也不报错。
                 continue
             registry[name] = _build_external_provider(name, api_key, config.timeout)
+        elif name in _OPTIONAL_KEY_PROVIDERS:
+            # 无 Key 也注册：适配器按空 Key 走匿名模式，配置 Key 后自动认证。
+            registry[name] = _build_optional_provider(
+                name, read_api_key(_OPTIONAL_KEY_PROVIDERS[name]), config
+            )
     return registry
 
 

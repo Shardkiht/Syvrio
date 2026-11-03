@@ -130,6 +130,9 @@ class SearchConfig:
     timeout_budget: float = 25.0
     # 一次搜索跨所有 provider 共享的请求次数上限；超出即返回当前最佳候选。
     max_requests: int = 9
+    # AnySearch 的检索区域与语言；匿名和 Key 模式共用。
+    anysearch_zone: str = "cn"
+    anysearch_language: str = "zh-CN"
     # 每厂商调用上限（Search/Fetch 共池）；键为 provider 名。
     usage_limits: dict[str, UsageLimit] = field(default_factory=lambda: default_usage_limits())
 
@@ -165,6 +168,8 @@ class UsageLimit:
 DEFAULT_USAGE_LIMITS = {
     "baidu_search": (50, 0), "tavily": (0, 800), "exa": (0, 1000),
     "you": (0, 1500), "volcengine": (0, 450), "open_websearch": (0, 0),
+    # 匿名服务也可用；本地默认仅作请求量保护，不代表服务商额度。
+    "anysearch": (20, 0), "parallel_mcp": (20, 0),
 }
 
 
@@ -426,6 +431,8 @@ def load_config(path: Path | str | None = None) -> Config:
         max_engines=max(1, int(search_raw.get("max_engines", 3))),
         timeout_budget=float(search_raw.get("timeout_budget", 25.0)),
         max_requests=int(search_raw.get("max_requests", 9)),
+        anysearch_zone=str(search_raw.get("anysearch_zone", "cn")),
+        anysearch_language=str(search_raw.get("anysearch_language", "zh-CN")),
         usage_limits=usage_limits,
     )
     fetch_raw = data.get("fetch", {})
@@ -531,11 +538,18 @@ engines = {toml_literal(["bing"])}
 fetch_timeout = 45.0
 # 一次搜索跨所有 provider 共享的请求次数上限；超出即返回当前最佳候选。
 max_requests = 9
+# AnySearch 的检索区域与语言；匿名和 Key 模式共用。
+anysearch_zone = "cn"
+anysearch_language = "zh-CN"
 # 每厂商调用上限（Search/Fetch 共用同一计数池）；按需取消注释并修改。
 # 本地计数不等于服务商实际账单上限。
 # [search.usage_limits.tavily]
 # daily = 0  # 0 means no local request-count cap
 # monthly = 800
+# [search.usage_limits.anysearch]
+# daily = 20
+# [search.usage_limits.parallel_mcp]
+# daily = 20
 
 [fetch]
 # 网页抓取的 provider 顺序；与搜索的 providers 相互独立。

@@ -542,6 +542,7 @@ def _install_fake_keyring(monkeypatch, store: dict):
     fake = types.ModuleType("keyring")
     fake.get_password = lambda service, name: store.get(name)
     fake.set_password = lambda service, name, value: store.__setitem__(name, value)
+    fake.delete_password = lambda service, name: store.pop(name, None)
     monkeypatch.setitem(sys.modules, "keyring", fake)
 
 
@@ -598,6 +599,45 @@ def test_search_setup_saves_key_and_enables_search_and_fetch(tmp_path, monkeypat
     assert "sk-tavily-placeholder" not in config_path.read_text(encoding="utf-8")
     assert data["search"]["providers"] == ["open_websearch", "tavily"]
     assert data["fetch"]["providers"] == ["open_websearch", "tavily"]
+
+
+def test_search_setup_enables_optional_provider_anonymously(tmp_path, monkeypatch):
+    from quiet_memo.infra import providers as providers_module
+
+    config_path = tmp_path / "quiet-memo.toml"
+    config_path.write_text("[search]\n", encoding="utf-8")
+    _install_fake_keyring(monkeypatch, {})
+    monkeypatch.delenv("ANYSEARCH_API_KEY", raising=False)
+    _script_answers(
+        monkeypatch,
+        ["search", "providers", "anysearch", "", "search", "back", "done"],
+    )
+
+    result = providers_module.run_setup(config_path, None)
+
+    assert result["search_providers"] == ["open_websearch", "anysearch"]
+    assert any("匿名模式" in message for message in result["messages"])
+    data = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    assert data["search"]["providers"] == ["open_websearch", "anysearch"]
+    assert data["search"]["usage_limits"]["anysearch"] == {"daily": 20, "monthly": 0}
+
+
+def test_search_setup_clears_optional_key_back_to_anonymous(tmp_path, monkeypatch):
+    from quiet_memo.infra import providers as providers_module
+
+    config_path = tmp_path / "quiet-memo.toml"
+    config_path.write_text("[search]\n", encoding="utf-8")
+    store = {"ANYSEARCH_API_KEY": "sk-placeholder"}
+    _install_fake_keyring(monkeypatch, store)
+    monkeypatch.delenv("ANYSEARCH_API_KEY", raising=False)
+    _script_answers(
+        monkeypatch,
+        ["search", "providers", "anysearch", "", "clear_key", "back", "done"],
+    )
+
+    providers_module.run_setup(config_path, None)
+
+    assert store == {}
 
 
 def test_search_setup_refuses_enable_without_key(tmp_path, monkeypatch):

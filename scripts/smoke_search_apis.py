@@ -34,6 +34,7 @@ from quiet_memo.infra.search.fetch_router import (  # noqa: E402
 )
 from quiet_memo.infra.search.router import (  # noqa: E402
     _EXTERNAL_PROVIDERS,
+    _OPTIONAL_KEY_PROVIDERS,
     build_registry,
 )
 
@@ -49,7 +50,16 @@ UNVERIFIED_FIELDS = {
     "you": "Contents 响应字段形状（markdown/title）与 Search 日期字段",
     "volcengine": "Fetch 的 Result.Title/Content 字段名与 Custom NeedContent 行为",
     "open_websearch": "无",
+    "anysearch": "匿名 zone/language 行为与免费调用限制",
+    "parallel_mcp": "web_search 完整 Schema、匿名限制；web_fetch 尚未接入",
 }
+
+
+def _search_key_env(name: str) -> str | None:
+    entry = _EXTERNAL_PROVIDERS.get(name)
+    if entry is not None:
+        return entry[1]
+    return _OPTIONAL_KEY_PROVIDERS.get(name)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -80,13 +90,22 @@ def _dry_report(config) -> list[dict]:
         ("fetch", config.fetch.providers, _EXTERNAL_FETCH_PROVIDERS),
     ):
         for name in listed:
-            env_name = externals.get(name, (None, None))[1]
+            if operation == "search":
+                env_name = _search_key_env(name)
+            else:
+                env_name = externals.get(name, (None, None))[1]
+            key_present = None if env_name is None else bool(read_api_key(env_name))
+            # 匿名 Provider 无 Key 也注册；官方厂商必须有 Key。
+            would_register = (
+                True if env_name is None or name in _OPTIONAL_KEY_PROVIDERS
+                else key_present
+            )
             row = {
                 "provider": name,
                 "operation": operation,
                 "in_config": True,
-                "key_present": None if env_name is None else bool(read_api_key(env_name)),
-                "would_register": True if env_name is None else bool(read_api_key(env_name)),
+                "key_present": key_present,
+                "would_register": would_register,
                 "unverified_fields": UNVERIFIED_FIELDS.get(name, "无"),
             }
             rows.append(row)

@@ -1,5 +1,16 @@
 # 开发交接
 
+## AnySearch 与 Parallel MCP 搜索扩展（2026-11-03）
+
+- 分支 `evolution`（跟踪 `origin/feature-memory-evolution`）。新增 `infra/search/anysearch.py`（REST，`POST /v1/search`，可选 Bearer）与 `infra/search/parallel_mcp.py`（固定 `https://search.parallel.ai/mcp`，FastMCP Streamable HTTP，工具 `web_search`，可选 Bearer）。两者都支持匿名使用，无 Key 时不发送认证头；提供 Key 时只加 `Authorization: Bearer`。
+- 注册：`router._OPTIONAL_KEY_PROVIDERS` 记录环境变量名（`ANYSEARCH_API_KEY` / `PARALLEL_API_KEY`），`build_registry` 无论有无 Key 都注册，区别于无 Key 即跳过的严格外部厂商。AnySearch 的 `zone` / `language` 来自 `[search]` 的 `anysearch_zone` / `anysearch_language`（默认 `cn` / `zh-CN`）。
+- 集成：复用 `JsonApiClient`、`SearchRouter` 的 provider/引擎回退、质量门控与缓存、`UsageLimiter`（默认 daily=20、monthly=0，仅本地请求计数）、`qm setup`（可匿名启用、录入可选 Key、清除 Key 恢复匿名）、`scripts/smoke_search_apis.py` dry-run 与 `config.example.toml`。
+- 错误映射：AnySearch 业务 `code != 0` 归为 BAD_RESPONSE；Parallel 的 401/403 归 AUTH、402/429 归 QUOTA、超时归 TIMEOUT、其余异常归 NETWORK，detail 做长度截断。MCP 每次搜索独立建立并关闭会话；调用线程已有事件循环时改在线程池执行 `asyncio.run`。
+- 测试：新增 `tests/test_anysearch_parallel.py` 19 项（MockTransport、假异步 client、真实内存 FastMCP server），覆盖匿名/Key、鉴权与配额错误、超时、结构化与文本结果解析、去重/截断/日期过滤、router 回退与本地额度、配置默认值；`tests/test_setup.py` 补匿名启用与清除 Key 两项。相关搜索/配置/安装套件 348 passed（2 个既有 Pydantic 警告）。
+- 未验证：本轮未发起任何真实 AnySearch/Parallel 请求，也未核对线上 `tools/list` schema；MCP 传输层交由 FastMCP，离线测试只走内存 server，未验证真实 SSE/HTTP 帧。Parallel 的 `web_fetch` 未实现。
+- 国内网络：两服务均在境外，连通性与延迟需自行确认；失败按既有规则回退到本地 open-websearch，任何上游失败都不写缓存。
+- 本次未 commit、未 push，改动保留在工作区。
+
 ## Git 维护功能增强（2026-11-02）
 
 - 分支 `feature-memory-evolution`。完成 TUI `/git` 管理界面：真实仓库状态、Remote/Upstream、未提交文件、未推送提交、最近 Commit/Push、自动同步配置、最近结果与错误；`Ctrl+S` 仅在界面内打开确认，`Enter` 执行，`Esc` 取消，后台 Worker 分阶段反馈。关闭界面不取消执行，重复触发被拒绝。底部模型/上下文/Pending 状态栏未加入 Git 信息。

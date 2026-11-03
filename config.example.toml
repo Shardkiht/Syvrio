@@ -66,7 +66,10 @@ model = "BAAI/bge-small-zh-v1.5"
 [search]
 # 联网搜索开关；关闭时不注册 search 工具，行为与旧版本一致。
 enabled = true
-# 按顺序尝试的 provider；当前只支持 open_websearch。
+# 按顺序尝试的 provider，失败或质量不足时自动回退。
+# 可选：open_websearch / anysearch / parallel_mcp / baidu_search / tavily / exa / you / volcengine。
+# anysearch 与 parallel_mcp 不填 Key 也以匿名模式启用；配置 ANYSEARCH_API_KEY /
+# PARALLEL_API_KEY 后自动改用 Bearer 认证。
 providers = ["open_websearch"]
 # 本地 open-websearch daemon 地址。
 base_url = "http://127.0.0.1:3000"
@@ -92,13 +95,20 @@ timeout_budget = 25.0
 # 一次搜索跨所有 provider 共享的请求次数上限；超出即停止请求，
 # 返回当前已获得的最佳候选并附截断提示。
 max_requests = 9
+# AnySearch 的检索区域与语言；匿名和 Key 模式共用。
+anysearch_zone = "cn"
+anysearch_language = "zh-CN"
 # 抓取正文的单独超时（秒）；搜索用上面的 timeout。
 fetch_timeout = 45.0
 # 每厂商调用上限（Search/Fetch 共用同一计数池）；按需取消注释并修改。
-# 本地计数不等于服务商实际账单上限。
+# 本地计数不等于服务商实际账单上限；有 Key 的厂商可能另行计费。
 # [search.usage_limits.tavily]
 # daily = 0  # 0 means no local request-count cap
 # monthly = 800
+# [search.usage_limits.anysearch]
+# daily = 20
+# [search.usage_limits.parallel_mcp]
+# daily = 20
 
 [fetch]
 # 网页抓取的 provider 顺序，与搜索的 providers 相互独立。

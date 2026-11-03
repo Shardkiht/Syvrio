@@ -357,6 +357,8 @@ fallback_engines = {toml_literal(config.search.fallback_engines)}
 max_engines = {config.search.max_engines}
 timeout_budget = {config.search.timeout_budget}
 max_requests = {config.search.max_requests}
+anysearch_zone = {toml_literal(config.search.anysearch_zone)}
+anysearch_language = {toml_literal(config.search.anysearch_language)}
 {usage_limits_toml(config.search.usage_limits)}
 [fetch]
 providers = {toml_literal(config.fetch.providers)}
@@ -410,6 +412,8 @@ def run_setup(config_path: Path | None = None, vault: Path | None = None) -> dic
 
 SEARCH_PROVIDER_LABELS = {
     "open_websearch": "open-websearch（免费，无需 Key）",
+    "anysearch": "AnySearch（匿名可用，可选 Key）",
+    "parallel_mcp": "Parallel Search MCP（匿名可用，可选 Key）",
     "baidu_search": "百度千帆 AI 搜索",
     "tavily": "Tavily",
     "exa": "Exa",
@@ -419,12 +423,17 @@ SEARCH_PROVIDER_LABELS = {
 
 # 各官方厂商的 Key 环境变量名；open-websearch 无需 Key。
 SEARCH_KEY_ENVS = {
+    "anysearch": "ANYSEARCH_API_KEY",
+    "parallel_mcp": "PARALLEL_API_KEY",
     "baidu_search": "BAIDU_SEARCH_API_KEY",
     "tavily": "TAVILY_API_KEY",
     "exa": "EXA_API_KEY",
     "you": "YDC_API_KEY",
     "volcengine": "VOLCENGINE_SEARCH_API_KEY",
 }
+
+# 没有 Key 也能启用；有 Key 时自动切换到认证模式。
+ANONYMOUS_SEARCH_PROVIDERS = {"anysearch", "parallel_mcp"}
 
 
 def _ensure_usage_limit(config: Config, name: str, messages: list[str]) -> None:
@@ -536,7 +545,12 @@ def _configure_search_provider(config: Config, messages: list[str]) -> None:
     if env_name is None:
         console.print("[dim]open-websearch 免费且无需 Key，本地 daemon 即可用。[/dim]")
     else:
-        state = "已配置" if read_api_key(env_name) else "未配置"
+        current_key = read_api_key(env_name)
+        if name in ANONYMOUS_SEARCH_PROVIDERS:
+            state = "已配置" if current_key else "未配置（匿名模式）"
+            console.print("[dim]不填写 Key 也可以启用并使用匿名搜索。[/dim]")
+        else:
+            state = "已配置" if current_key else "未配置"
         api_key = ask(
             questionary.password(
                 f"{SEARCH_PROVIDER_LABELS[name]} API Key（当前{state}；留空保持不变）"
@@ -563,14 +577,31 @@ def _configure_search_provider(config: Config, messages: list[str]) -> None:
                 *([questionary.Choice(
                     f"{'禁用' if fetch_on else '启用'} Fetch", value="fetch"
                 )] if name in {"open_websearch", "exa", "tavily", "you", "volcengine"} else []),
+                *([questionary.Choice("清除 API Key（恢复匿名）", value="clear_key")]
+                  if env_name and name in ANONYMOUS_SEARCH_PROVIDERS
+                  and read_api_key(env_name) else []),
                 questionary.Choice("返回上级", value="back"),
             ],
         )
         if action is None or action == "back":
             return
+        if action == "clear_key":
+            if delete_api_key(env_name):
+                messages.append(
+                    f"{name} 的系统凭据已清除；若环境变量 {env_name} 仍非空，"
+                    "环境变量会继续优先使用。"
+                )
+            else:
+                messages.append(f"{name} 的系统凭据清除失败，请检查系统凭据存储。")
+            continue
         if action in ("search", "fetch"):
             enable = not (search_on if action == "search" else fetch_on)
-            if enable and env_name and not read_api_key(env_name):
+            if (
+                enable
+                and env_name
+                and name not in ANONYMOUS_SEARCH_PROVIDERS
+                and not read_api_key(env_name)
+            ):
                 messages.append(
                     f"{name} 未检测到有效 Key（环境变量或系统凭据），无法启用。"
                 )
@@ -579,6 +610,9 @@ def _configure_search_provider(config: Config, messages: list[str]) -> None:
                 config.search.providers if action == "search" else config.fetch.providers
             )
             _toggle_provider(names, name, enable)
+            if enable and env_name and name in ANONYMOUS_SEARCH_PROVIDERS \
+                    and not read_api_key(env_name):
+                messages.append(f"{name} 未配置 Key，将以匿名模式运行。")
             if enable and env_name:
                 _ensure_usage_limit(config, name, messages)
 
