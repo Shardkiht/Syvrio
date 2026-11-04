@@ -54,6 +54,7 @@ class ReflectionResult:
     proposed: int = 0
     skipped: int = 0
     remaining: int = 0
+    completed: int = 0
     cancelled: bool = False
     error: str | None = None
     summary_status: str = "not_requested"
@@ -744,6 +745,7 @@ class ReflectionEngine:
                             self._record(key, "cancelled")
                             break
                         self._record(key, "completed", mode=mode, sources=source_signatures)
+                    result.completed += 1
                     result.remaining -= 1
                 except Exception as exc:
                     record_event("reflection.failed", exc)

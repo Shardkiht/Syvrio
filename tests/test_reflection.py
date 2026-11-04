@@ -521,6 +521,7 @@ def _prime_schedule(service, now):
         "fact_digest": changes.digest,
         "pending_changes": 0,
         "pending_important": False,
+        "pending_inferences": False,
         "consecutive_failures": 0,
     })
     state["dream"].update({
@@ -622,7 +623,8 @@ def test_auto_profile_skips_week_without_changes(service):
     from datetime import datetime, timedelta
 
     service.note("合成普通事实", topic="uncategorized")
-    service.reflection.run("profile", 1, refresh_summary=True,
+    # 预算 2：摘要用 1 次，剩余 1 次完成唯一的推断批次，确保没有遗留待办。
+    service.reflection.run("profile", 2, refresh_summary=True, model=lambda *_: [],
                            summary_model=lambda payload: "合成画像。")
     now = datetime.now().astimezone()
     _prime_schedule(service, now)
@@ -1085,3 +1087,228 @@ def test_context_uses_only_related_valid_confirmed_inferences(service, monkeypat
     assert service.reflection.context({other.id}) == ""
     service.forget(source.id)
     assert service.reflection.context({source.id}) == ""
+
+
+def _completed_signatures(service):
+    events = service.reflection._events()[0]
+    return [
+        signature
+        for event in events if event["status"] == "completed"
+        for signature in event.get("sources", [])
+    ]
+
+
+def _prime_profile_pending(service, now, count=30):
+    """30 条事实、自动预算 1：唯一请求用于生成摘要，推断批次全部保留。"""
+    for index in range(count):
+        service.store.append("uncategorized", f"合成画像批次事实 {index}")
+    _prime_schedule(service, now)
+    return service.reflection.run(
+        "profile", 1, auto=True, refresh_summary=True,
+        summary_model=lambda payload: "合成画像。")
+
+
+def test_profile_summary_refresh_keeps_pending_inference_batches(service):
+    from datetime import datetime, timedelta
+
+    now = datetime.now().astimezone()
+    result = _prime_profile_pending(service, now)
+    assert result.summary_status == "updated"
+    assert result.requests == 1 and result.remaining == 3
+
+    state = service.reflection.schedule_state()
+    assert state["profile"]["pending_inferences"] is True
+    assert state["profile"]["pending_changes"] == 0
+    # 剩余批次不得绕过周期：冷却期内既不能触发检查，也不能生成计划。
+    assert not service.reflection.auto_check_due(now + timedelta(hours=1))
+    assert service.reflection.auto_plan(now + timedelta(hours=1)) is None
+    assert service.reflection.auto_check_due(now + timedelta(hours=169))
+    assert service.reflection.auto_plan(now + timedelta(hours=169)) == "profile"
+
+
+def test_profile_pending_inferences_resume_after_cycle(service):
+    from datetime import datetime, timedelta
+
+    now = datetime.now().astimezone()
+    _prime_profile_pending(service, now)
+    assert service.reflection.auto_plan(now + timedelta(hours=169)) == "profile"
+    calls = []
+
+    def model(mode, entries):
+        calls.append([entry.id for entry in entries])
+        return []
+
+    result = service.reflection.run(
+        "profile", 1, auto=True, refresh_summary=True, model=model,
+        summary_model=lambda payload: pytest.fail("摘要有效时不得重复生成"))
+    assert result.summary_status == "fresh"
+    assert result.requests == 1 and len(calls) == 1
+    assert result.remaining == 2
+    state = service.reflection.schedule_state()
+    assert state["profile"]["pending_inferences"] is True
+    resumed = datetime.now().astimezone()
+    assert not service.reflection.auto_check_due(resumed + timedelta(hours=1))
+
+
+def test_profile_pending_inferences_drain_without_resending_completed(service):
+    from datetime import datetime
+
+    now = datetime.now().astimezone()
+    _prime_profile_pending(service, now)
+    completed: list[str] = []
+    requests = 0
+    last = None
+    for _ in range(8):
+        if not service.reflection.schedule_state()["profile"]["pending_inferences"]:
+            break
+        last = service.reflection.run(
+            "profile", 1, auto=True, refresh_summary=True,
+            model=lambda *_: [],
+            summary_model=lambda payload: pytest.fail("摘要有效时不得重复生成"))
+        assert last.requests == 1
+        requests += last.requests
+        signatures = _completed_signatures(service)
+        assert len(signatures) > len(completed)
+        completed = signatures
+
+    assert last is not None and last.remaining == 0
+    assert service.reflection.schedule_state()["profile"]["pending_inferences"] is False
+    # 30 条事实各完成一次，空 proposals 也标记完成；总请求数远小于逐条重试。
+    assert len(completed) == len(set(completed)) == 30
+    assert requests < 30
+
+
+def test_profile_pending_inferences_survive_restart(service):
+    from datetime import datetime, timedelta
+    from syvrio.memory.service import MemoryService
+
+    now = datetime.now().astimezone()
+    _prime_profile_pending(service, now)
+    restarted = MemoryService(service.config)
+    state = restarted.reflection.schedule_state()
+    assert state["profile"]["pending_inferences"] is True
+    later = now + timedelta(hours=169)
+    assert restarted.reflection.auto_check_due(later)
+    assert restarted.reflection.auto_plan(later) == "profile"
+
+
+def test_manual_profile_run_updates_auto_state(service):
+    from datetime import datetime, timedelta
+
+    now = datetime.now().astimezone()
+    _prime_profile_pending(service, now)
+    result = service.reflection.run(
+        "profile", 5, refresh_summary=True,
+        model=lambda *_: [],
+        summary_model=lambda payload: pytest.fail("摘要有效时不得重复生成"))
+    assert result.summary_status == "fresh"
+    assert result.requests == 3 and result.remaining == 0
+
+    state = service.reflection.schedule_state()
+    assert state["profile"]["pending_inferences"] is False
+    assert state["profile"]["pending_changes"] == 0
+    assert state["profile"]["next_retry_at"] is None
+    assert not service.reflection.auto_check_due(datetime.now().astimezone() + timedelta(hours=1))
+
+
+def test_manual_prepared_batch_updates_auto_state(service):
+    source = service.note("合成画像批次事实", topic="uncategorized")
+    signature = service.reflection._signature(source)
+    key = "manual-prepared-batch"
+    service.reflection._record(key, "prepared", [], "profile", [signature], [signature])
+    state = service.reflection.schedule_state()
+    state["profile"]["pending_inferences"] = True
+    service.reflection._save_schedule_state(state)
+
+    result = service.reflection.run("profile", 0, refresh_summary=True)
+    assert result.requests == 0 and result.remaining == 0
+    assert result.completed == 1
+    state = service.reflection.schedule_state()
+    assert state["profile"]["pending_inferences"] is False
+    assert state["profile"]["last_success_at"] is not None
+
+
+def test_profile_summary_failure_preserves_inference_pending(service):
+    from datetime import datetime
+
+    now = datetime.now().astimezone()
+    _prime_profile_pending(service, now)
+    state = service.reflection.schedule_state()
+    state["profile"]["pending_inferences"] = False
+    service.reflection._save_schedule_state(state)
+    service.store.append("uncategorized", "摘要失败前的合成新增事实")
+
+    def fail(payload):
+        raise TimeoutError("synthetic")
+
+    result = service.reflection.run(
+        "profile", 1, auto=True, refresh_summary=True, summary_model=fail,
+        model=lambda *_: pytest.fail("摘要失败后预算已耗尽"))
+    assert result.summary_status == "failed"
+    state = service.reflection.schedule_state()
+    assert state["profile"]["pending_inferences"] is True
+    assert state["profile"]["pending_changes"] >= 1
+
+
+def test_profile_inference_failure_preserves_pending(service):
+    from datetime import datetime, timedelta
+
+    now = datetime.now().astimezone()
+    _prime_profile_pending(service, now)
+
+    def fail(*args, **kwargs):
+        raise TimeoutError("synthetic")
+
+    result = service.reflection.run(
+        "profile", 1, auto=True, refresh_summary=True, model=fail,
+        summary_model=lambda payload: pytest.fail("摘要有效时不得重复生成"))
+    assert result.error
+    state = service.reflection.schedule_state()
+    assert state["profile"]["pending_inferences"] is True
+    assert state["profile"]["consecutive_failures"] == 1
+    failed_at = datetime.now().astimezone()
+    assert not service.reflection.auto_check_due(failed_at + timedelta(minutes=30))
+    assert service.reflection.auto_check_due(failed_at + timedelta(hours=3))
+    assert service.reflection.auto_plan(failed_at + timedelta(hours=3)) == "profile"
+
+
+def test_profile_inference_cancel_preserves_pending(service):
+    from datetime import datetime
+
+    now = datetime.now().astimezone()
+    _prime_profile_pending(service, now)
+    token = threading.Event()
+
+    def model(mode, entries):
+        token.set()
+        return []
+
+    result = service.reflection.run(
+        "profile", 1, auto=True, refresh_summary=True, model=model,
+        cancel_event=token,
+        summary_model=lambda payload: pytest.fail("摘要有效时不得重复生成"))
+    assert result.cancelled
+    state = service.reflection.schedule_state()
+    assert state["profile"]["pending_inferences"] is True
+
+
+def test_profile_inference_stale_source_preserves_pending(service):
+    from datetime import datetime
+
+    now = datetime.now().astimezone()
+    _prime_profile_pending(service, now)
+    path = service.store.topic_path("uncategorized")
+
+    def mutate(mode, entries):
+        path.write_text(
+            path.read_text(encoding="utf-8").replace("合成画像批次事实", "运行中更正画像事实"),
+            encoding="utf-8")
+        return []
+
+    result = service.reflection.run(
+        "profile", 1, auto=True, refresh_summary=True, model=mutate,
+        summary_model=lambda payload: pytest.fail("摘要有效时不得重复生成"))
+    assert result.error and "来源" in result.error
+    state = service.reflection.schedule_state()
+    assert state["profile"]["pending_inferences"] is True
+    assert state["profile"]["consecutive_failures"] == 1

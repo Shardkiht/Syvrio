@@ -11,6 +11,14 @@
 - 真实数据：旧 Vault 元数据已迁移到 `.syvrio`；12 个记忆文件、1114 条条目与 ID、5 个会话保持一致，pending/audit/inferences/reflection 行数逐项核对；迁移前备份保留。Keyring 后端不可用，凭据仍由私有环境文件提供并已迁入 `syvrio` 配置目录。
 - 历史章节中的旧名称/路径仅作当时证据，不代表当前有效路径。
 
+## Profile 推断批次待办生命周期（2026-11-04）
+
+- 分支 `feature-memory-evolution`，审查基线 `1303ce9`；提交已 rebase 到 Syvrio 重命名后的 `53df23f` 之上。
+- 根因：`record_run()` 在 Profile 成功时无条件清零 `fact_digest`、`pending_changes` 与 `pending_important`；当自动预算被摘要刷新占用、`result.remaining > 0` 时，剩余推断批次没有任何持久化待办，之后没有事实变化就不会再自动运行。
+- 修复：新增持久化字段 `profile.pending_inferences`，摘要更新与推断完成分开判断。摘要成功但仍有未处理批次时保留待办，全部批次完成才清除；`completed`/`prepared` 增量记录继续避免重复提交已处理事实。
+- 调度：`check_due()` 与 `plan()` 都只在常规 168 小时周期或失败重试到期时因剩余批次唤醒，24 小时冷却与单次 1 请求限制不变；重启后待办仍在。失败、取消、来源变化不清空待办；空 proposals 批次正常标记完成。
+- `ReflectionResult.completed` 记录本次完成批次数，使没有新请求但发布了已校验 prepared 缓存的手动运行也能同步自动调度状态。
+- 回归：`tests/test_reflection.py` 覆盖摘要占用预算、周期恢复、多次执行归零、重启、冷却与退避、手动/预校验批次、空结果以及失败/取消/来源变化。测试使用临时 Vault、Mock 模型与模拟时间，未读取真实 Vault/Keyring、未调用真实 LLM。
 
 ## 画像摘要、命令面板滚动与低频回顾调度（2026-11-04）
 

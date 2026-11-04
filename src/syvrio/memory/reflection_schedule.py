@@ -58,6 +58,7 @@ class ReflectionSchedule:
                 "fact_digest": "",
                 "pending_changes": 0,
                 "pending_important": False,
+                "pending_inferences": False,
                 "consecutive_failures": 0,
                 "last_error_kind": None,
             },
@@ -101,7 +102,7 @@ class ReflectionSchedule:
                     default[section][key] = 0
             if default[section].get("remaining_batches", 0) < 0:
                 default[section]["remaining_batches"] = 0
-            for key in ("pending", "pending_important"):
+            for key in ("pending", "pending_important", "pending_inferences"):
                 if key in default[section] and type(default[section][key]) is not bool:
                     default[section][key] = False
         return default
@@ -245,6 +246,7 @@ class ReflectionSchedule:
         dream_blocked = self.retry_blocked(dream, now)
         pending_changes = int(profile.get("pending_changes") or 0)
         pending_important = bool(profile.get("pending_important"))
+        pending_inferences = bool(profile.get("pending_inferences"))
         dream_pending = bool(dream.get("pending"))
         summary_needs = self.summary_needs_refresh()
         dream_ready = (
@@ -261,6 +263,7 @@ class ReflectionSchedule:
             )
             or (pending_changes > 0 and (profile_due or profile_retry))
             or (summary_needs and (profile_due or profile_retry))
+            or (pending_inferences and (profile_due or profile_retry))
         )
         return dream_ready or profile_ready
 
@@ -308,7 +311,10 @@ class ReflectionSchedule:
         # 失败遗留的待办不能因本轮没有新变更而被清掉；计划阶段只累加，不重置。
         pending_changes = max(int(profile.get("pending_changes") or 0), changes.count)
         pending_important = bool(profile.get("pending_important")) or changes.important
-        profile_pending = pending_changes > 0 or pending_important or summary_stale
+        pending_inferences = bool(profile.get("pending_inferences"))
+        profile_pending = (
+            pending_changes > 0 or pending_important or summary_stale or pending_inferences
+        )
         valuable_now = (
             pending_important
             or pending_changes >= max(1, config.profile_min_changes)
@@ -330,6 +336,7 @@ class ReflectionSchedule:
         state["last_checked_at"] = self.stamp(now)
         profile["pending_changes"] = pending_changes
         profile["pending_important"] = pending_important
+        profile["pending_inferences"] = pending_inferences
         dream["pending"] = dream_pending
         if not dream_pending:
             dream["remaining_batches"] = 0
@@ -361,7 +368,8 @@ class ReflectionSchedule:
 
     def record_run(self, mode: str, result: ReflectionResult,
                    entries: list[Entry] | None, auto: bool) -> None:
-        if result.requests == 0 and not auto:
+        # 无新请求但发布了已校验缓存时也算进展，需要同步自动调度状态。
+        if result.requests == 0 and result.completed == 0 and not auto:
             return
         now = datetime.now().astimezone()
         state = self.load()
@@ -372,6 +380,8 @@ class ReflectionSchedule:
             if mode == "dream" and result.remaining > 0:
                 section["pending"] = True
                 section["remaining_batches"] = result.remaining
+            elif mode == "profile" and result.remaining > 0:
+                section["pending_inferences"] = True
         elif result.error:
             failures = int(section.get("consecutive_failures") or 0) + 1
             section["consecutive_failures"] = failures
@@ -379,6 +389,8 @@ class ReflectionSchedule:
             # 失败不等于已处理：保留待办标记，手动失败后自动调度仍可接续。
             if mode == "profile":
                 section["pending_changes"] = max(1, int(section.get("pending_changes") or 0))
+                if result.remaining > 0:
+                    section["pending_inferences"] = True
             else:
                 section["pending"] = True
                 section["remaining_batches"] = max(1, result.remaining)
@@ -400,6 +412,8 @@ class ReflectionSchedule:
                     section["fact_digest"] = changes.digest
                     section["pending_changes"] = 0
                     section["pending_important"] = False
+                    # 摘要完成不等于推断全部完成；剩余批次留待下一周期继续。
+                    section["pending_inferences"] = result.remaining > 0
                 elif result.remaining > 0:
                     # 只完成部分批次，保留旧基线以便下一次到期继续处理。
                     section["pending"] = True
