@@ -7,8 +7,8 @@ pytestmark = pytest.mark.memory
 from datetime import datetime
 from pathlib import Path
 
-from quiet_memo.memory.store import MemoryStore, slugify
-from quiet_memo.memory.models import MemoryContext
+from syvrio.memory.store import MemoryStore, slugify
+from syvrio.memory.models import MemoryContext
 
 
 def test_context_tag_roundtrip_and_status_change_preserve_id(tmp_path):
@@ -167,7 +167,7 @@ def test_set_status_rewrites_tag(tmp_path):
 
 
 def test_write_failure_leaves_original_file_intact(tmp_path, monkeypatch):
-    from quiet_memo.memory import store as store_module
+    from syvrio.memory import store as store_module
 
     store = MemoryStore(tmp_path)
     store.append("housing", "原始条目")
@@ -214,7 +214,7 @@ def test_legacy_comment_line_still_parses(tmp_path):
 
 
 def test_append_retries_duplicate_entry_id(tmp_path, monkeypatch):
-    from quiet_memo.memory import store as store_module
+    from syvrio.memory import store as store_module
 
     store = MemoryStore(tmp_path)
     stamp = datetime(2026, 10, 24, 12, 53, 48)
