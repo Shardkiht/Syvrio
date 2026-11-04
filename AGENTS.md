@@ -131,7 +131,7 @@ README 面向用户，必须始终与 `src/syvrio` 的当前架构一致。以�
 - 不提交生成物、本地配置或用户数据。
 - **2026-11-01 起的默认开发分支：`feature-memory-evolution`。** 所有后续功能开发、试验、常规修复及相关文档更新均从此分支（或从此分支创建的短期任务分支）开展；Agent 开始执行前必须确认当前分支，不能因为仓库默认分支是 `main` 而直接开发。
 - **`main` 用作冻结的简历展示、稳定发布与长期维护基线。** 禁止自动将 `feature-memory-evolution`、`base/chat-stability` 或其他工作分支同步、合并、cherry-pick 到 `main`。只有用户**明确针对 main 授权**的严重缺陷、安全问题或发布维护，才能走隔离修复、回归测试与受保护分支的 PR 审核流程。
-- 长期远程分支只保留 `main` 和 `feature-memory-evolution`。历史 `base/chat-stability`、`feature/context-review-recall` 在本次冻结验收和祖先检查通过后删除，不再用于开发；旧的“先 base、再自动同步 main/evolution”流程完全失效。其他工作区存在未提交改动时不得覆盖、清理或捆绑提交。
+- 长期远程分支只保留 `main` 和 `feature-memory-evolution`。历史远程分支 `base/chat-stability`、`feature/context-review-recall` 已删除，不再用于开发；删除前的祖先检查记录尚未独立核对；旧的“先 base、再自动同步 main/evolution”流程完全失效。其他工作区存在未提交改动时不得覆盖、清理或捆绑提交。
 - 从 `main` 收尾分支修复的稳定性变更只按 `main` → `feature-memory-evolution` 方向同步，禁止反向合并演进功能。
 - 只有明确要求时才执行 `git push`。
 

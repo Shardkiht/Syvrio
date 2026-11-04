@@ -10,14 +10,14 @@
 
 ## 当前开发分支与冻结约定（2026-11-01）
 
-- 长期远程仅保留 `main` 与 `feature-memory-evolution`。两个历史分支通过最终验收和祖先检查后删除。历史章节中的 base 开发、自动同步 main、提交前默认全量测试等安排均已失效。常规开发前若位于 main，应切换到 evolution 或从 evolution 派生任务分支；main 保留 GitHub 默认分支身份。
+- 长期远程分支仅保留 `main` 与 `feature-memory-evolution`；历史 `base/chat-stability`、`feature/context-review-recall` 远程分支已删除，删除前的祖先检查记录尚未独立核对。历史章节中的 base 开发、自动同步 main、提交前默认全量测试均已失效。常规开发从 evolution 或其短期任务分支开展；`main` 保留 GitHub 默认分支身份，临时修复分支遵守审核后清理的流程。
 - **后续默认开发分支：`feature-memory-evolution`**。所有新功能、常规问题修复、实验和相应文档工作从此分支（或从它派生的任务分支）开展。执行前确认当前 branch，不在默认的 `main` 上直接开发。
-- **`main`：本轮最终稳定修复验收后冻结，仅用于简历展示、稳定发布与长期维护**。禁止自动将演进分支、历史 `base/chat-stability` 分支向 `main` 同步或合并；只有本人明确点名授权的必要稳定性/安全修复才可走独立修复与受保护分支 PR 流程。
-- 冻结前源码 Review 基线 `main@b016ccbf`，评审结果和待验收项见 [review-2026-11-01-freeze.md](review-2026-11-01-freeze.md)。此后的文档提交不改变该源码评审基线。历史部分对 `base/chat-stability` 的同步安排均以本节新约定为准。
-- 当前不意味着已经打好最终 portfolio Tag、完成真实 Windows TUI 验收或把最新源码发布到 PyPI。所有这些状态以实际验证/发布结果为准。
+- **`main`：PR #15 完成最终稳定修复后冻结；PR #16 是经授权的版本发布维护。此后仅用于简历展示、稳定发布与长期维护**。禁止自动将演进分支、历史 `base/chat-stability` 分支向 `main` 同步或合并；只有本人明确点名授权的必要稳定性/安全修复才可走独立修复与受保护分支 PR 流程。
+- `main@b016ccbf` 是**历史冻结前源码评审基线**（详见 [review-2026-11-01-freeze.md](review-2026-11-01-freeze.md)），不是当前 HEAD。PR #15 的合并提交 `316a030` 对应 `portfolio-2026-11-01`，PR #16 的合并提交 `22217c2` 对应 `v0.3.3`。旧 base 自动同步流程已废止。
+- **已核实**：PR #15、PR #16 已合并；`portfolio-2026-11-01` 与 `v0.3.3` Tag 均存在，`v0.3.3` GitHub Release 已发布，两个 PR 的 Windows/Ubuntu CI 均通过。**未独立核实**：PyPI 0.3.3 官方发布记录与原生 Windows TUI/IME/剪贴板人工验收，不能将它们与 CI 或 GitHub Release 混为一谈。
 
 
-更新日期：2026-11-01。稳定发布版本 `0.3.3`，发行标记使用 `v0.3.3`；基础功能参照 `444fe0f`，文件导入与模型选择界面参照 `bef5199`。包版本、锁文件与 MCP 客户端标识保持一致；远端发布结果以 GitHub Release、Actions 与 PyPI 为准。
+当前状态核对：2026-11-02。`main@22217c2` 为 `0.3.3` 发布源码（GitHub Release：`v0.3.3`）；`portfolio-2026-11-01@316a030` 是独立的冻结展示快照。基础功能历史参照 `444fe0f`，文件导入与模型选择界面历史参照 `bef5199`。版本、锁文件与 MCP 客户端标识在 main 已对齐；PyPI 仍以官方发布记录为准。
 
 ## 搜索质量优化（2026-10-31，base/chat-stability）
 
@@ -58,7 +58,7 @@
 
 ## 忙碌态解耦与会话一致性（2026-10-31，分支 base/chat-stability）
 
-- 分支约定：基础层修复与改进使用 `base/` 前缀；验证通过后经用户同意才分别合入 main 与 feature-memory-evolution（后者定位为记忆内容前沿版本）。
+- **历史流程（现已废止，禁止照此执行）**：当时基础层工作用 `base/` 前缀、再分别合入 main 与 evolution。现行常规开发仅在 evolution 或其短期派生分支进行；不得自动向冻结的 main 合并。
 - 等待 LLM 期间输入保持可用、会话切换立即执行；等待期提交（消息与 /命令）进入全局 FIFO 队列，按提交顺序执行且任意时刻至多一个请求（并发第二个请求会被 exclusive worker 协作取消且 runtime.ask 无重入保护，故只能排队）；导航/只读命令（/new、/sessions、/exit 等）等待期直接执行。旧的全局 busy 布尔拆为 navigation_busy 与 ask_active 两态，输入框只在导航期间禁用。
 - 数据一致性：`runtime.ask` 支持显式 session 并新增 on_session 回调；`_auto_recall`/`_flush_memories` 显式绑定请求会话，不再读 self.current；`last_plan` 带 session 标识，状态栏不串会话；后台任务执行时从磁盘新鲜加载会话对象，完成后若目标是当前会话则 reload 治愈内存快照；切走/新建时对生成中的会话延迟打 closed/distill_deferred 标记（保证排在最后的 assistant 记录之后）；生成期间跳过后台补沉淀，留给启动补记；删除守卫拒绝删除生成中或被队列引用的会话——物理删除后后台追加会原路重建僵尸文件（已用临时库脚本实证）。
 - 切回生成中的会话：磁盘重建负责已完成轮次，界面只重放未落盘的活跃段（已完成段必然已随 assistant 记录落盘，天然去重）。
