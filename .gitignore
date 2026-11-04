@@ -11,7 +11,7 @@ logs/
 dist/
 build/
 *.egg-info/
-quiet-memo.toml
+syvrio.toml
 demo_vault/
 .env
 .env.*

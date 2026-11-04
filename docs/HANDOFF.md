@@ -1,19 +1,23 @@
 # 开发交接
 
-## Syvrio 品牌迁移（2026-11-04）
+## Syvrio 品牌迁移完成（2026-11-04）
 
-- 正式项目名称与发行包名 `Syvrio` / `syvrio`；源码包迁移至 `src/syvrio/`，CLI `syvrio` 为主，`qm`、`quietmemo` 保留兼容。
-- 旧配置文件 `quiet-memo.toml`、`.quiet-memo/` Vault 数据目录、`QUIET_MEMO_CONFIG`、`QUIET_MEMO_VAULT` 及 Keyring 服务名 `quiet-memo` 保持原有行为；新增 `SYVRIO_CONFIG`、`SYVRIO_VAULT` 可覆盖旧环境变量。不触碰用户记忆 ID 或历史记录。
-- 新 PyPI `syvrio` 尚未发布；旧 `quiet-memo` 历史 Release 和冻结 tag 原样保留。发布 workflow 改为手动触发，Trusted Publishing 需先手工绑定新包。
-- 本条仅为迁移方案与实现说明；具体测试通过情况以更名 PR 的 CI 及合并记录为准，不能把历史测试数字视为本次验证结果。
+- 唯一 Python 包与 CLI 为 `syvrio`；`src/quiet_memo` 兼容包、`qm`/`quietmemo` 别名及旧导入适配器已删除。
+- 配置统一为 `syvrio.toml`；用户配置目录 `~/.config/syvrio/`（Windows `%APPDATA%\syvrio\`）；默认 Vault `~/.syvrio/vault/`；Vault 元数据目录 `.syvrio/`；环境变量仅 `SYVRIO_CONFIG`、`SYVRIO_VAULT`；Keyring 服务名 `syvrio`。
+- MCP Server、TUI 助手名、缓存/日志/临时目录前缀统一为 `syvrio`；转义标签前缀改为 `~syvrio-escaped~`，迁移工具负责旧标签转换。
+- 新增 `scripts/migrate_to_syvrio.py`：默认 dry-run，`--apply` 先备份再迁移，校验记忆 ID/条目、会话、JSONL 与元数据哈希；冲突停止，重复执行幂等，锁文件不搬运，可重建缓存不迁移。
+- PyPI `syvrio` `0.3.3` 已发布；本次只修复品牌与发布配置，不触发新的 PyPI 发布或版本升级。
+- 验证：全量 `pytest -q` 为 1185 passed、6 skipped；`uv build` 的 wheel/sdist 仅包含 `syvrio`；旧名扫描仅剩迁移工具、迁移文档与历史评审证据。
+- 真实数据：旧 Vault 元数据已迁移到 `.syvrio`；12 个记忆文件、1114 条条目与 ID、5 个会话保持一致，pending/audit/inferences/reflection 行数逐项核对；迁移前备份保留。Keyring 后端不可用，凭据仍由私有环境文件提供并已迁入 `syvrio` 配置目录。
+- 历史章节中的旧名称/路径仅作当时证据，不代表当前有效路径。
 
 
 ## 画像摘要、命令面板滚动与低频回顾调度（2026-11-04）
 
 - 分支 `evolution`（跟踪 `origin/feature-memory-evolution`），基线 `8c91143`；本轮改动仅在工作区，未 commit、未 push。
-- `/profile` 卡顿根因：旧实现每次查看都在写锁内遍历全部有效事实与推断，把每条事实和来源 ID 拼成单个聊天卡片。合成 5000 条事实时数据构建约 456ms、文本约 493KB；Textual 挂载该单卡超过 120 秒仍未完成。现在 `/profile` 只读 `.quiet-memo/profile-summary.json` 派生摘要并在限高弹窗中滚动显示，5000 条合成事实下读取约 0.4–3ms，约 2800 字摘要弹窗稳定约 10ms；不调用模型、不遍历完整画像。
+- `/profile` 卡顿根因：旧实现每次查看都在写锁内遍历全部有效事实与推断，把每条事实和来源 ID 拼成单个聊天卡片。合成 5000 条事实时数据构建约 456ms、文本约 493KB；Textual 挂载该单卡超过 120 秒仍未完成。现在 `/profile` 只读 `.syvrio/profile-summary.json` 派生摘要并在限高弹窗中滚动显示，5000 条合成事实下读取约 0.4–3ms，约 2800 字摘要弹窗稳定约 10ms；不调用模型、不遍历完整画像。
 - 画像摘要：新增 `ProfileSummaryResponse` 与 `ReflectionEngine.profile_summary()`；`/profile refresh [n]` 在摘要缺失/过期时用最多 1 次请求生成摘要，剩余 n-1 次继续推断批次；`n=0` 不发请求，事实未变化时跳过摘要。摘要输入按去重后的有效事实量决定参考长度（<30 条 100–300 字到 >1000 条 1000–3000 字），按主题轮转覆盖并在 token 上限内截断，包含日期时只使用已有 `valid_from`，不猜测事实时间；只纳入已确认画像推断，未确认假设不进入摘要。摘要正文不写回事实/推断，不把旧摘要作为新证据，来源变化时立即标记过期，生成失败或取消时保留旧摘要并标记状态。
-- 缓存与隔离：`.quiet-memo/profile-summary.json` 保存摘要正文、生成时间、模型、统计和来源 ID/签名；`.quiet-memo/profile-fingerprints.json` 保存上次成功画像的来源指纹基线；`.quiet-memo/reflection-state.json` 保存跨重启调度状态。三者均为派生数据，vault 内 gitignore，可删除重建。摘要签名同时覆盖记忆文件元信息与推断日志；事实变化立即过期，但不会立即触发 LLM。
+- 缓存与隔离：`.syvrio/profile-summary.json` 保存摘要正文、生成时间、模型、统计和来源 ID/签名；`.syvrio/profile-fingerprints.json` 保存上次成功画像的来源指纹基线；`.syvrio/reflection-state.json` 保存跨重启调度状态。三者均为派生数据，vault 内 gitignore，可删除重建。摘要签名同时覆盖记忆文件元信息与推断日志；事实变化立即过期，但不会立即触发 LLM。
 - 自动调度：移除“每 300 秒轮换 Dreaming/Profile、每次启动重置 20 次预算”。Dreaming 默认每 24 小时最多自动一批、每批最多 1 次请求；Profile 默认每 7 天最多自动更新一次，普通新增只记录待处理变更，变更达到 `profile_min_changes`（默认 20）或目标/偏好/职业方向等重要变化时，可在 24 小时冷却后提前触发。TUI 每 5 秒只做状态与文件元信息检查，事实扫描和变更判断在 Worker；无变化不扫描完整记忆、不请求模型。失败按 1/2/4…小时退避，上限 24 小时；手动 `/profile refresh` 与 `/dream` 可绕过自动周期但仍遵守命令预算。状态损坏或缺失安全回退，不产生请求风暴。
 - 命令面板：`CommandPalette` 改为外层限高、内层 `VerticalScroll`；↑↓ 移动时自动滚动高亮项，支持鼠标滚轮与单击执行，保留两列对齐和字面方括号/尖括号参数。80×24 与 120×40 下都不遮挡输入框；新增最后一条命令可见、向前回滚、前缀过滤、点击执行、滚轮与初始高亮测试。
 - 测试：`tests/test_reflection.py` 新增摘要预算/缓存/失效/损坏/取消/失败/动态长度/调度/退避等用例，`tests/test_chat_app.py` 新增画像弹窗、后台刷新与命令面板滚动/点击/尺寸用例。相关测试使用临时 Vault、Mock 模型与模拟时间；未读取真实 Vault/Keyring、未调用真实 LLM 或付费 API。
@@ -75,8 +79,8 @@
 
 - 分支 `feature-memory-evolution`。完成 TUI `/git` 管理界面：真实仓库状态、Remote/Upstream、未提交文件、未推送提交、最近 Commit/Push、自动同步配置、最近结果与错误；`Ctrl+S` 仅在界面内打开确认，`Enter` 执行，`Esc` 取消，后台 Worker 分阶段反馈。关闭界面不取消执行，重复触发被拒绝。底部模型/上下文/Pending 状态栏未加入 Git 信息。
 - Commit/Push 解耦：有变更才提交，无变更时仍可独立补推；Push 失败保留本地 Commit，下次只补推；禁止 Force/Pull/Merge/Rebase/Reset；远程分叉停止自动推送；未配置 Remote/Upstream 显示设置提示。手动与每日同步均使用固定提交信息，不调用 LLM；`qm commit` 与 `auto_push` 旧语义保留。
-- 每日默认本地 03:00 的 TUI 进程内调度，支持修改时间、关闭、启动补执行、按日期去重；网络/超时失败按 `retry_interval_minutes` 补推，认证/分叉/未配置不频繁重试。状态持久化到 vault 内 `.quiet-memo/git-sync-state.json`（gitignore），最近成功 Push 时间不从 Commit 推断。
-- 并发：新增 `.quiet-memo/vault.lock`（记忆、会话 JSONL、审计/推断/回顾日志与 Git 快照）和 `.quiet-memo/git.lock`（Stage/Commit/Push），均为进程内重入、跨进程互斥，进程崩溃由 OS 释放；固定顺序 Git → Vault。Push 网络等待只持 Git 锁，不阻塞聊天和记忆写入。SessionStore 与回顾任务日志已接入同一 Vault 锁。
+- 每日默认本地 03:00 的 TUI 进程内调度，支持修改时间、关闭、启动补执行、按日期去重；网络/超时失败按 `retry_interval_minutes` 补推，认证/分叉/未配置不频繁重试。状态持久化到 vault 内 `.syvrio/git-sync-state.json`（gitignore），最近成功 Push 时间不从 Commit 推断。
+- 并发：新增 `.syvrio/vault.lock`（记忆、会话 JSONL、审计/推断/回顾日志与 Git 快照）和 `.syvrio/git.lock`（Stage/Commit/Push），均为进程内重入、跨进程互斥，进程崩溃由 OS 释放；固定顺序 Git → Vault。Push 网络等待只持 Git 锁，不阻塞聊天和记忆写入。SessionStore 与回顾任务日志已接入同一 Vault 锁。
 - 新增 `infra/locking.py`、`infra/gitsync.py`、`app/git_screen.py`、`app/chat_git.py`；增强 `infra/gitops.py`（超时、非交互、状态/上游/未推送查询、错误分类、敏感路径检查），扩展 `infra/config.py` `[git]` 配置。中英文 README、`config.example.toml` 与结构树同步。
 - 验证：新增 31 项 Git 同步/调度/并发测试与 6 项 TUI 交互测试，使用临时 vault、本地 bare remote 和模拟时钟，不触碰真实记忆库或外部远程。全量 `pytest -q`（启用项目 env.sh 的 fastembed 缓存并设置 `HF_HUB_OFFLINE=1`）为 994 passed、2 skipped，耗时 101.07 秒；此前未设置缓存路径时 fastembed 会尝试联网下载，属于环境问题。
 - 已知边界：文件锁依赖本地文件系统 advisory lock，NFS/SMB 多主机共享同一 vault 不保证跨主机互斥；TUI 未运行时不会主动定时，只由下次启动补偿；外部 Git 操作可能改变引用，界面状态以本地读取为准；终端 XON/XOFF 可能拦截 `Ctrl+S`，界面提供点击同步行作为替代。
@@ -151,7 +155,7 @@
 - FetchRouter（卡 09）：抓取调度从 `SearchRouter.fetch` 抽到 `infra/search/fetch_router.py`，SearchRouter 保留兼容入口内部委托；新增 `[fetch]` 配置（`providers`，默认 `["open_websearch"]`，与 search.providers 独立，旧配置缺省即原行为）；agent 的 `fetch_web` 工具名/参数/返回结构不变，显式注入 search_router 的旧 DI 路径保留。
 - 四家 Fetch（卡 10）：`TavilyFetchProvider`（/extract，Bearer，单 URL Basic）、`ExaFetchProvider`（/contents，x-api-key，body 恰为 {urls, text:true}）、`YouFetchProvider`（/v1/contents，X-API-Key，{urls, formats:["markdown"]}，响应形状二手资料待冒烟）、`VolcengineFetchProvider`（/search_api/fetch，字段名按 Search 同族约定待冒烟）。正文经 `truncate_fetch_content`（base.py）截断；空正文/失败抛 ProviderError 由 FetchRouter 回退。注册表 `fetch_router._EXTERNAL_FETCH_PROVIDERS`，Key 环境变量与对应 Search 相同。
 - Key 读取（卡 11）：`config.read_api_key`（env 优先、Keyring 回退）统一供 search/fetch registry 与 setup 使用；`qm setup` 顶层分「模型与 LLM」/「搜索与网页抓取」两个向导（providers.py 的 run_setup/_run_llm_setup/run_search_setup），官方厂商不自动启用、无 Key 拒绝启用，TOML 不落 Key。测试用假 ask + 假 questionary + 假 keyring 脚本化交互。
-- 额度限制（卡 12）：`infra/search/usage.py` 的 `UsageLimiter`（`search.usage_limits.<provider>`：period daily/monthly + max_calls，max_calls<=0 视为不限制）；Search/Fetch 同厂商共用一个计数池，计数在实际发起请求前记账（失败保守计数），状态在 vault `.quiet-memo/usage.json` 原子落盘，读前按 mtime 重载以兼容两个路由实例；达上限的失败分类是 `quota`（detail 注明本地上限，与厂商配额语义一致但 detail 可区分）。setup 启用官方厂商时询问每日上限（默认 20）。本地计数不是服务商账单上限。
+- 额度限制（卡 12）：`infra/search/usage.py` 的 `UsageLimiter`（`search.usage_limits.<provider>`：period daily/monthly + max_calls，max_calls<=0 视为不限制）；Search/Fetch 同厂商共用一个计数池，计数在实际发起请求前记账（失败保守计数），状态在 vault `.syvrio/usage.json` 原子落盘，读前按 mtime 重载以兼容两个路由实例；达上限的失败分类是 `quota`（detail 注明本地上限，与厂商配额语义一致但 detail 可区分）。setup 启用官方厂商时询问每日上限（默认 20）。本地计数不是服务商账单上限。
 - 集成与冒烟（卡 13）：`tests/test_multi_provider.py` 覆盖五 Search + 四 Fetch 注册矩阵、Search/Fetch 顺序独立、无 Key 不注册不发请求、search/fetch_web 工具协议、冒烟脚本 dry/live（假件注入）；`scripts/smoke_search_apis.py` 默认 dry 零请求，`--live` 才对单一厂商发 ≤max-requests（默认 1）次真实请求，报告脱敏。真实网络冒烟仍未执行，待验证：百度鉴权头、You.com Contents 响应形状、火山 Fetch 字段名与 Custom NeedContent、各家 count 上限。
 
 ## 忙碌态解耦与会话一致性（2026-10-31，分支 base/chat-stability）
@@ -215,7 +219,7 @@
 - 普通抽取与导入使用同一上下文契约。缺少可靠时间锚点时只保留相对时间原话；语气推断不写入情绪事实。
 - 上下文写在 Markdown 行尾 `context` JSON 标签中，沿用标签转义，旧格式无需迁移。候选排队、普通确认和 resolved 记录保留上下文；改写后确认及手动更正清除旧上下文。
 - 正文和新增上下文共同经过凭据拦截。条目 ID、来源、软删除与替代关系保持现有语义。
-- `MemoryService.propose_inference()` 只把假设追加到 `.quiet-memo/inferences.jsonl`，新记录为 `hypothesis`，包含类型、来源 ID 和带时区的生成/更新时间。
+- `MemoryService.propose_inference()` 只把假设追加到 `.syvrio/inferences.jsonl`，新记录为 `hypothesis`，包含类型、来源 ID 和带时区的生成/更新时间。
 - 来源去重且必须是有效事实；同类型、同规范化文本、同证据集合重复登记返回原记录。推断不能支持另一推断，不进入 Markdown 事实库或普通召回。
 - `evals/memory_eval.py` 提供固定合成输出的解析、冲突和上下文回归，并通过 `tests/test_memory_eval.py` 接入 pytest/CI；推断边界由独立领域测试覆盖。
 - 离线验证发现并修复 token 截断在极小预算下超限的问题；字符估算分支按最终预算截断，tokenizer 分支避免截断产生无效 Unicode。

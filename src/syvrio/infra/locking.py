@@ -147,7 +147,7 @@ def _shared(path: Path) -> VaultLock:
 
 
 def _lock_path(vault: Path, name: str) -> Path:
-    return Path(vault).expanduser() / ".quiet-memo" / name
+    return Path(vault).expanduser() / ".syvrio" / name
 
 
 def vault_write_lock(vault: Path) -> VaultLock:

@@ -1,4 +1,4 @@
-name: test
+name: test-syvrio
 
 on:
   push:
@@ -26,13 +26,12 @@ jobs:
       - run: uv build
       - run: uv run syvrio --help
       - run: uv run syvrio --version
-      - run: uv run qm --help
-      - run: uv run quietmemo --version
-      - run: uv run python -c "import syvrio; import quiet_memo; from syvrio.app.cli import app"
+      - run: uv run python -m syvrio --version
+      - run: uv run python -c "import syvrio; from syvrio.app.cli import app"
       - name: Test packaged wheel
         run: |
           uv venv /tmp/syvrio-wheel
           uv pip install --python /tmp/syvrio-wheel/bin/python dist/*.whl
           /tmp/syvrio-wheel/bin/syvrio --help
-          /tmp/syvrio-wheel/bin/qm --version
-          /tmp/syvrio-wheel/bin/quietmemo --help
+          /tmp/syvrio-wheel/bin/syvrio --version
+          /tmp/syvrio-wheel/bin/python -m syvrio --version

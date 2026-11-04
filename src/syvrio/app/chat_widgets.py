@@ -144,7 +144,7 @@ class ChatReply(Static):
         return selection.extract(str(content)), "\n"
 
 
-ASSISTANT_NAME = "qmo"
+ASSISTANT_NAME = "Syvrio"
 
 
 class HistoryMore(Static):

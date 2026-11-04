@@ -105,8 +105,8 @@ class ReflectionEngine:
 
     def __init__(self, service: MemoryService) -> None:
         self.service = service
-        self.path = service.config.vault / ".quiet-memo" / "reflection-jobs.jsonl"
-        self.summary_path = service.config.vault / ".quiet-memo" / "profile-summary.json"
+        self.path = service.config.vault / ".syvrio" / "reflection-jobs.jsonl"
+        self.summary_path = service.config.vault / ".syvrio" / "profile-summary.json"
         self._running = threading.Lock()
         self._cancel = threading.Event()
         self._vault_lock = vault_write_lock(service.config.vault)

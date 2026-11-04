@@ -1,6 +1,6 @@
 """Vault Git 同步：Commit/Push 解耦、每日调度判断与本地执行状态。
 
-状态写入 `.quiet-memo/git-sync-state.json`，只记录本机实际执行结果；
+状态写入 `.syvrio/git-sync-state.json`，只记录本机实际执行结果；
 Git 不保存 Push 时间，因此“最近成功 Push”只来自这里的成功记录。
 """
 from __future__ import annotations
@@ -25,20 +25,20 @@ STAGE_REFRESH = "Refreshing status"
 STAGES = (STAGE_CHECK, STAGE_COMMIT, STAGE_PUSH, STAGE_REFRESH)
 
 RUNTIME_IGNORE = (
-    ".quiet-memo/vectors.npz",
-    ".quiet-memo/search-cache.json",
-    ".quiet-memo/profile-summary.json",
-    ".quiet-memo/profile-fingerprints.json",
-    ".quiet-memo/reflection-state.json",
-    ".quiet-memo/git-sync-state.json",
-    ".quiet-memo/*.lock",
+    ".syvrio/vectors.npz",
+    ".syvrio/search-cache.json",
+    ".syvrio/profile-summary.json",
+    ".syvrio/profile-fingerprints.json",
+    ".syvrio/reflection-state.json",
+    ".syvrio/git-sync-state.json",
+    ".syvrio/*.lock",
 )
 
 RETRYABLE = frozenset({"network", "timeout", "busy", "vault_busy"})
 
 
 def ensure_runtime_gitignore(vault: Path) -> None:
-    """补齐 QM 运行时文件的忽略规则；派生缓存与同步状态不应进入历史。"""
+    """补齐 Syvrio 运行时文件的忽略规则；派生缓存与同步状态不应进入历史。"""
     gitignore = Path(vault) / ".gitignore"
     try:
         existing = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
@@ -108,7 +108,7 @@ class GitSyncService:
 
     @property
     def state_path(self) -> Path:
-        return Path(self.config.vault) / ".quiet-memo" / "git-sync-state.json"
+        return Path(self.config.vault) / ".syvrio" / "git-sync-state.json"
 
     def _read_state(self) -> dict:
         try:

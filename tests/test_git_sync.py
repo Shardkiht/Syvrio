@@ -275,9 +275,9 @@ def test_state_file_and_locks_are_gitignored(tmp_path):
     service.git_sync.sync("manual")
 
     status = _git("status", "--porcelain", cwd=service.config.vault).stdout
-    assert ".quiet-memo/git-sync-state.json" not in status
-    assert ".quiet-memo/vault.lock" not in status
-    assert ".quiet-memo/git.lock" not in status
+    assert ".syvrio/git-sync-state.json" not in status
+    assert ".syvrio/vault.lock" not in status
+    assert ".syvrio/git.lock" not in status
 
 
 def test_git_error_redacts_url_credentials():
@@ -671,7 +671,7 @@ def test_session_jsonl_integrity_during_concurrent_sync(tmp_path):
 
 
 def test_git_config_load_validate_and_example(tmp_path):
-    path = tmp_path / "quiet-memo.toml"
+    path = tmp_path / "syvrio.toml"
     path.write_text(
         "[git]\nauto_sync = false\nsync_time = \"04:30\"\nretry_interval_minutes = 45\n",
         encoding="utf-8",

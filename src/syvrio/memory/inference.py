@@ -16,7 +16,7 @@ class InferenceStore:
     """仅追加的推断状态快照；更正的两个状态在同一事件内提交。"""
 
     def __init__(self, vault: Path) -> None:
-        self.path = Path(vault) / ".quiet-memo" / "inferences.jsonl"
+        self.path = Path(vault) / ".syvrio" / "inferences.jsonl"
 
     def all(self) -> list[Inference]:
         if not self.path.exists():

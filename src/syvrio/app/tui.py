@@ -12,7 +12,7 @@ def run_chat(service: MemoryService, resume: str | None = None) -> None:
     if service.config.llm.requires_api_key() and not service.config.llm.api_key():
         fail(
             f"未配置 LLM API Key，请设置环境变量 {service.config.llm.api_key_env}，"
-            "或先在终端运行 qm setup。"
+            "或先在终端运行 syvrio setup。"
         )
     if not (service.config.vault / ".git").exists():
         service.init_vault()

@@ -19,7 +19,7 @@ SENSITIVE_PATTERNS = (
     "id_rsa*",
     "id_ed25519*",
     "credentials*",
-    "quiet-memo.toml",
+    "syvrio.toml",
     "config.toml",
 )
 

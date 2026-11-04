@@ -7,7 +7,7 @@ from pathlib import Path
 
 class AuditLog:
     def __init__(self, vault: Path):
-        self.path = Path(vault) / ".quiet-memo" / "audit.jsonl"
+        self.path = Path(vault) / ".syvrio" / "audit.jsonl"
 
     def write(self, action: str, **fields) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

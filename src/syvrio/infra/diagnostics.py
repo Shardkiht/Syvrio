@@ -49,7 +49,7 @@ def start_diagnostics() -> Path | None:
     with _lock:
         if _listener is not None:
             return _path
-        path = default_config_path().parent / "logs" / "quiet-memo.log"
+        path = default_config_path().parent / "logs" / "syvrio.log"
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             handler = _QuietFileHandler(path, maxBytes=2 * 1024 * 1024,
@@ -114,7 +114,7 @@ def record_event(event: str, error: BaseException | None = None, **state: bool |
         }
         if error is not None:
             payload["traceback"] = _safe_traceback(error)
-        record = logging.LogRecord("quiet_memo.diagnostics", logging.INFO, "", 0,
+        record = logging.LogRecord("syvrio.diagnostics", logging.INFO, "", 0,
                                    json.dumps(payload, ensure_ascii=False), (), None)
         try:
             _queue.put_nowait(record)

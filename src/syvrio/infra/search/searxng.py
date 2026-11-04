@@ -1,7 +1,7 @@
 """SearXNG 自托管搜索适配器：整个实例视为一个 Provider，无 API Key。
 
 只访问配置里的实例地址，不解析用户查询中的 URL，也不跟随重定向；
-SearXNG 内部的百度/Bing 等引擎由实例自行聚合，QM 不再逐家适配。
+SearXNG 内部的百度/Bing 等引擎由实例自行聚合，Syvrio 不再逐家适配。
 """
 from __future__ import annotations
 

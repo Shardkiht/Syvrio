@@ -156,7 +156,7 @@ def build_fetch_router(
         from .usage import USAGE_FILENAME, UsageLimiter
 
         limiter = UsageLimiter(
-            search_config.usage_limits, vault / ".quiet-memo" / USAGE_FILENAME
+            search_config.usage_limits, vault / ".syvrio" / USAGE_FILENAME
         )
     return FetchRouter(
         build_fetch_registry(fetch_config, search_config),

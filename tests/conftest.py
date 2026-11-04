@@ -42,7 +42,7 @@ def _pipe_loop_factory() -> asyncio.AbstractEventLoop:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    if sys.platform == "win32" and os.environ.get("QUIET_MEMO_TEST_PIPE_LOOP") == "1":
+    if sys.platform == "win32" and os.environ.get("SYVRIO_TEST_PIPE_LOOP") == "1":
         class PipeLoopPolicy(asyncio.WindowsProactorEventLoopPolicy):
             def new_event_loop(self) -> asyncio.AbstractEventLoop:
                 return _pipe_loop_factory()
@@ -95,8 +95,8 @@ def isolate_user_config(monkeypatch, tmp_path):
     起因：源码回退（突变验证）等场景下，写配置可能落到 default_config_path()，
     曾把 pytest 临时 vault 写进用户真实 config.toml。环境变量是最后一道闸。
     """
-    monkeypatch.setenv("QUIET_MEMO_CONFIG", str(tmp_path / "config.toml"))
-    monkeypatch.setenv("QUIET_MEMO_VAULT", str(tmp_path / "default-vault"))
+    monkeypatch.setenv("SYVRIO_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.setenv("SYVRIO_VAULT", str(tmp_path / "default-vault"))
 
 
 @pytest.fixture(autouse=True)

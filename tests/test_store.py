@@ -25,7 +25,7 @@ def test_context_tag_roundtrip_and_status_change_preserve_id(tmp_path):
     assert loaded.id == entry.id and loaded.context == context
     assert loaded.text == "参加合成展览"
     raw = store.topic_path("events").read_text(encoding="utf-8")
-    assert "~qm-escaped~" in raw
+    assert "~syvrio-escaped~" in raw
     assert len([line for line in raw.splitlines() if line.startswith("- ")]) == 1
 
 
@@ -113,7 +113,7 @@ def test_slugify():
     assert slugify("学习计划") == "学习计划"
 
 
-@pytest.mark.parametrize("source", ["import:合成`笔记.md", "合成\n来源\r尾行", "~qm-escaped~literal%20"])
+@pytest.mark.parametrize("source", ["import:合成`笔记.md", "合成\n来源\r尾行", "~syvrio-escaped~literal%20"])
 def test_metadata_special_characters_roundtrip_with_stable_id(tmp_path, source):
     store = MemoryStore(tmp_path)
     entry = store.append("test", "合成正文 `status=deleted`", source=source, note=source)

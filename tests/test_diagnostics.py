@@ -25,7 +25,7 @@ def read_events(path: Path) -> list[dict]:
 def test_chained_error_retains_traceback_and_reason_without_credentials(tmp_path, monkeypatch):
     monkeypatch.setenv("EXAMPLE_API_KEY", "synthetic-credential-123")
     path = diagnostics.start_diagnostics()
-    assert path == tmp_path / "logs" / "quiet-memo.log"
+    assert path == tmp_path / "logs" / "syvrio.log"
     assert diagnostics.start_diagnostics() == path
     try:
         try:
@@ -54,7 +54,7 @@ def test_rotation_limits_files_and_keeps_valid_json(tmp_path, monkeypatch):
     for _ in range(40):
         diagnostics.record_event("reading.changed", follow=False, scroll_y=20)
     diagnostics.stop_diagnostics()
-    files = list(path.parent.glob("quiet-memo.log*"))
+    files = list(path.parent.glob("syvrio.log*"))
     assert len(files) == 4
     assert all(file.stat().st_size < 800 for file in files)
     assert all(read_events(file) for file in files)
@@ -111,7 +111,7 @@ def test_cli_entrypoint_logs_unhandled_error(monkeypatch):
     monkeypatch.setattr(cli, "app", fail)
     with pytest.raises(RuntimeError, match="synthetic command failure"):
         cli.main()
-    path = diagnostics.default_config_path().parent / "logs" / "quiet-memo.log"
+    path = diagnostics.default_config_path().parent / "logs" / "syvrio.log"
     events = read_events(path)
     assert [event["event"] for event in events] == ["app.start", "cli.failed", "app.stop"]
     assert "synthetic command failure" in events[1]["traceback"]

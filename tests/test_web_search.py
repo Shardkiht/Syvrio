@@ -385,7 +385,7 @@ def test_build_fetch_router_from_config_defaults_to_open_websearch(tmp_path):
     assert router.supports_fetch
 
     # 旧配置没有 [fetch] 时 load_config 走默认，行为不变。
-    config_path = tmp_path / "quiet-memo.toml"
+    config_path = tmp_path / "syvrio.toml"
     config_path.write_text("[search]\nmax_results = 3\n", encoding="utf-8")
     loaded = load_config(config_path)
     assert loaded.fetch.providers == ["open_websearch"]

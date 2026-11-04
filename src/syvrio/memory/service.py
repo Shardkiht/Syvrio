@@ -46,14 +46,14 @@ VAULT_README = """# Syvrio vault
 
 - `memories/`：按主题拆分的 Markdown 记忆，是唯一事实来源。
 - `sessions/`：会话 JSONL，保留原始对话与工具轨迹。
-- `.quiet-memo/pending.jsonl`：低置信、冲突或敏感候选，等待人工确认。
-- `.quiet-memo/resolved.jsonl`：已确认/已拒绝记录。
-- `.quiet-memo/audit.jsonl`：更正、删除等审计记录。
-- `.quiet-memo/inferences.jsonl`：独立假设与去重后的事实来源，不参与事实检索。
-- `.quiet-memo/profile-summary.json`：画像摘要派生缓存，可删除重建，不纳入 Git 历史。
-- `.quiet-memo/profile-fingerprints.json`：画像来源指纹基线，用于增量变更判断，不纳入 Git 历史。
-- `.quiet-memo/reflection-state.json`：自动回顾的跨重启调度状态，不纳入 Git 历史。
-- `.quiet-memo/git-sync-state.json`：本机 Git 同步状态，不纳入 Git 历史。
+- `.syvrio/pending.jsonl`：低置信、冲突或敏感候选，等待人工确认。
+- `.syvrio/resolved.jsonl`：已确认/已拒绝记录。
+- `.syvrio/audit.jsonl`：更正、删除等审计记录。
+- `.syvrio/inferences.jsonl`：独立假设与去重后的事实来源，不参与事实检索。
+- `.syvrio/profile-summary.json`：画像摘要派生缓存，可删除重建，不纳入 Git 历史。
+- `.syvrio/profile-fingerprints.json`：画像来源指纹基线，用于增量变更判断，不纳入 Git 历史。
+- `.syvrio/reflection-state.json`：自动回顾的跨重启调度状态，不纳入 Git 历史。
+- `.syvrio/git-sync-state.json`：本机 Git 同步状态，不纳入 Git 历史。
 - `SOUL.md`（可选）：自定义人设，替代系统提示词里的默认人设段。
 - 全部变更由 Git 跟踪，可回滚、可审计。
 """
@@ -62,13 +62,13 @@ VAULT_GITIGNORE = """__pycache__/
 *.pyc
 .DS_Store
 Thumbs.db
-.quiet-memo/vectors.npz
-.quiet-memo/search-cache.json
-.quiet-memo/profile-summary.json
-.quiet-memo/profile-fingerprints.json
-.quiet-memo/reflection-state.json
-.quiet-memo/git-sync-state.json
-.quiet-memo/*.lock
+.syvrio/vectors.npz
+.syvrio/search-cache.json
+.syvrio/profile-summary.json
+.syvrio/profile-fingerprints.json
+.syvrio/reflection-state.json
+.syvrio/git-sync-state.json
+.syvrio/*.lock
 """
 
 # 默认人设兼作 init 写入 SOUL.md 的模板；放 memory 层是因为 agent/prompts.py 可以引 memory，

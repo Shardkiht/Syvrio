@@ -1,15 +1,16 @@
-# Syvrio configuration example (legacy Vault paths remain compatible)
-# 默认读取顺序：$QUIET_MEMO_CONFIG → ./quiet-memo.toml → ~/.config/quiet-memo/config.toml
+# Syvrio configuration example
+# 默认读取顺序：$SYVRIO_CONFIG → ./syvrio.toml → 平台配置目录/syvrio/syvrio.toml
+# Unix 为 ~/.config/syvrio/syvrio.toml；Windows 为 %APPDATA%\syvrio\syvrio.toml。
 
-# 记忆库位置（Markdown + Git）。此处配置的 vault 优先；未配置时用 QUIET_MEMO_VAULT，
-# 再缺省 ~/.quiet-memo/vault；命令行 --vault 可临时覆盖。
-vault = "~/.quiet-memo/vault"
+# 记忆库位置（Markdown + Git）。此处配置的 vault 优先；未配置时用 SYVRIO_VAULT，
+# 再缺省 ~/.syvrio/vault；命令行 --vault 可临时覆盖。
+vault = "~/.syvrio/vault"
 
 # 低于该置信度的候选不直接写入，进入待确认队列。
 confidence_threshold = 0.8
 
 # 提交后是否自动 push（需要已配置 remote）。
-# 仅影响 `qm commit`；TUI 的手动/每日同步由下方 [git] 控制。
+# 仅影响 `syvrio commit`；TUI 的手动/每日同步由下方 [git] 控制。
 auto_push = false
 
 [git]

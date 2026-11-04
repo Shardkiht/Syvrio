@@ -131,7 +131,7 @@ def test_spark_does_not_offer_openai_reasoning_effort():
 
 
 def test_write_config_roundtrip(tmp_path):
-    path = tmp_path / "quiet-memo.toml"
+    path = tmp_path / "syvrio.toml"
     config = Config(
         vault=tmp_path / "vault",
         llm=LLMConfig(
@@ -176,11 +176,11 @@ def test_write_config_roundtrip(tmp_path):
     assert loaded.retrieval.embedding.model == "BAAI/bge-m3"
     assert loaded.retrieval.embedding.api_key_env == "DASHSCOPE_API_KEY"
     assert loaded.vault == config.vault
-    assert not (tmp_path / "quiet-memo.toml.tmp").exists()
+    assert not (tmp_path / "syvrio.toml.tmp").exists()
 
 
 def test_load_config_reports_invalid_toml(tmp_path):
-    path = tmp_path / "quiet-memo.toml"
+    path = tmp_path / "syvrio.toml"
     path.write_text("[chat\ncontext_window = 1000\n", encoding="utf-8")
 
     with pytest.raises(ConfigError, match="TOML 语法错误"):
@@ -200,14 +200,14 @@ def test_load_config_rejects_wrong_types_and_ranges(tmp_path):
         ("[search]\nmax_requests = \"nine\"\n", "必须是整数"),
     ]
     for content, message in cases:
-        path = tmp_path / "quiet-memo.toml"
+        path = tmp_path / "syvrio.toml"
         path.write_text(content, encoding="utf-8")
         with pytest.raises(ConfigError, match=message):
             load_config(path)
 
 
 def test_write_config_escapes_special_characters(tmp_path):
-    path = tmp_path / "quiet-memo.toml"
+    path = tmp_path / "syvrio.toml"
     vault = tmp_path / 'vault "quoted" \\ path\x7f'
     write_config(path, Config(vault=vault, llm=LLMConfig(model="model\x7f")))
 
@@ -230,10 +230,10 @@ def test_load_config_defaults_to_hybrid_local(tmp_path):
 
 
 def test_vault_precedence_config_then_env(tmp_path, monkeypatch):
-    path = tmp_path / "quiet-memo.toml"
+    path = tmp_path / "syvrio.toml"
     configured = tmp_path / "configured"
     path.write_text(f'vault = "{configured.as_posix()}"\n', encoding="utf-8")
-    monkeypatch.setenv("QUIET_MEMO_VAULT", str(tmp_path / "from-env"))
+    monkeypatch.setenv("SYVRIO_VAULT", str(tmp_path / "from-env"))
 
     # 与测试隔离口径一致：显式配置的 vault 优先，环境变量只补默认值。
     assert load_config(path).vault == configured
@@ -268,7 +268,7 @@ def test_local_provider_without_key_reaches_backend(monkeypatch):
 
 
 def test_search_config_roundtrip(tmp_path):
-    path = tmp_path / "quiet-memo.toml"
+    path = tmp_path / "syvrio.toml"
     config = Config(
         vault=tmp_path / "vault",
         search=SearchConfig(
@@ -311,10 +311,10 @@ def test_search_config_roundtrip(tmp_path):
 def test_resolve_config_path_env_wins_over_cwd(tmp_path, monkeypatch):
     from syvrio.infra.providers import resolve_config_path
 
-    (tmp_path / "quiet-memo.toml").write_text("vault = 'local'\n", encoding="utf-8")
+    (tmp_path / "syvrio.toml").write_text("vault = 'local'\n", encoding="utf-8")
     env_path = tmp_path / "isolated.toml"
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("QUIET_MEMO_CONFIG", str(env_path))
+    monkeypatch.setenv("SYVRIO_CONFIG", str(env_path))
 
     assert resolve_config_path(None) == env_path
 
@@ -547,7 +547,7 @@ def _install_fake_keyring(monkeypatch, store: dict):
 
 
 def test_run_setup_routes_to_search_wizard(tmp_path, monkeypatch):
-    config_path = tmp_path / "quiet-memo.toml"
+    config_path = tmp_path / "syvrio.toml"
     config_path.write_text(
         "[search]\nproviders = ['open_websearch']\n", encoding="utf-8"
     )
@@ -571,7 +571,7 @@ def test_search_setup_saves_key_and_enables_search_and_fetch(tmp_path, monkeypat
 
     from syvrio.infra import providers as providers_module
 
-    config_path = tmp_path / "quiet-memo.toml"
+    config_path = tmp_path / "syvrio.toml"
     config_path.write_text("[search]\n", encoding="utf-8")
     store: dict = {}
     _install_fake_keyring(monkeypatch, store)
@@ -604,7 +604,7 @@ def test_search_setup_saves_key_and_enables_search_and_fetch(tmp_path, monkeypat
 def test_search_setup_enables_optional_provider_anonymously(tmp_path, monkeypatch):
     from syvrio.infra import providers as providers_module
 
-    config_path = tmp_path / "quiet-memo.toml"
+    config_path = tmp_path / "syvrio.toml"
     config_path.write_text("[search]\n", encoding="utf-8")
     _install_fake_keyring(monkeypatch, {})
     monkeypatch.delenv("ANYSEARCH_API_KEY", raising=False)
@@ -627,7 +627,7 @@ def test_search_setup_configures_searxng_without_key(tmp_path, monkeypatch):
 
     from syvrio.infra import providers as providers_module
 
-    config_path = tmp_path / "quiet-memo.toml"
+    config_path = tmp_path / "syvrio.toml"
     config_path.write_text("[search]\n", encoding="utf-8")
     _install_fake_keyring(monkeypatch, {})
     _script_answers(
@@ -655,7 +655,7 @@ def test_search_setup_configures_searxng_without_key(tmp_path, monkeypatch):
 def test_search_setup_clears_optional_key_back_to_anonymous(tmp_path, monkeypatch):
     from syvrio.infra import providers as providers_module
 
-    config_path = tmp_path / "quiet-memo.toml"
+    config_path = tmp_path / "syvrio.toml"
     config_path.write_text("[search]\n", encoding="utf-8")
     store = {"ANYSEARCH_API_KEY": "sk-placeholder"}
     _install_fake_keyring(monkeypatch, store)
@@ -673,7 +673,7 @@ def test_search_setup_clears_optional_key_back_to_anonymous(tmp_path, monkeypatc
 def test_search_setup_refuses_enable_without_key(tmp_path, monkeypatch):
     from syvrio.infra import providers as providers_module
 
-    config_path = tmp_path / "quiet-memo.toml"
+    config_path = tmp_path / "syvrio.toml"
     config_path.write_text("[search]\n", encoding="utf-8")
     _install_fake_keyring(monkeypatch, {})
     monkeypatch.delenv("TAVILY_API_KEY", raising=False)
@@ -691,7 +691,7 @@ def test_search_setup_refuses_enable_without_key(tmp_path, monkeypatch):
 def test_search_setup_updates_existing_key(tmp_path, monkeypatch):
     from syvrio.infra import providers as providers_module
 
-    config_path = tmp_path / "quiet-memo.toml"
+    config_path = tmp_path / "syvrio.toml"
     config_path.write_text("[search]\n", encoding="utf-8")
     store = {"TAVILY_API_KEY": "old"}
     _install_fake_keyring(monkeypatch, store)
@@ -708,7 +708,7 @@ def test_search_setup_adjusts_provider_order(tmp_path, monkeypatch):
 
     from syvrio.infra import providers as providers_module
 
-    config_path = tmp_path / "quiet-memo.toml"
+    config_path = tmp_path / "syvrio.toml"
     config_path.write_text(
         "[search]\nproviders = ['open_websearch', 'tavily']\n", encoding="utf-8"
     )
@@ -733,7 +733,7 @@ def test_search_setup_adjusts_provider_order(tmp_path, monkeypatch):
 def test_search_setup_search_and_fetch_independent(tmp_path, monkeypatch):
     from syvrio.infra import providers as providers_module
 
-    config_path = tmp_path / "quiet-memo.toml"
+    config_path = tmp_path / "syvrio.toml"
     config_path.write_text("[search]\n", encoding="utf-8")
     _install_fake_keyring(monkeypatch, {"EXA_API_KEY": "k"})
     _script_answers(
@@ -760,7 +760,7 @@ def test_llm_setup_flow_unchanged(tmp_path, monkeypatch):
     """顶层菜单选 LLM 时走原有流程，返回结构不变。"""
     from syvrio.infra import providers as providers_module
 
-    config_path = tmp_path / "quiet-memo.toml"
+    config_path = tmp_path / "syvrio.toml"
     config_path.write_text("[search]\n", encoding="utf-8")
     _script_answers(
         monkeypatch,
@@ -792,7 +792,7 @@ def test_search_setup_can_edit_daily_and_monthly_limits(tmp_path, monkeypatch):
 
     from syvrio.infra import providers as providers_module
 
-    config_path = tmp_path / "quiet-memo.toml"
+    config_path = tmp_path / "syvrio.toml"
     config_path.write_text("[search]\n", encoding="utf-8")
     _install_fake_keyring(monkeypatch, {"TAVILY_API_KEY": "k"})
     _script_answers(
@@ -824,7 +824,7 @@ def test_search_setup_can_edit_daily_and_monthly_limits(tmp_path, monkeypatch):
 def test_search_setup_uses_exa_monthly_default(tmp_path, monkeypatch):
     from syvrio.infra import providers as providers_module
 
-    config_path = tmp_path / "quiet-memo.toml"
+    config_path = tmp_path / "syvrio.toml"
     config_path.write_text("[search]\n", encoding="utf-8")
     _install_fake_keyring(monkeypatch, {"EXA_API_KEY": "k"})
     _script_answers(
@@ -868,7 +868,7 @@ def test_usage_menu_zero_reset_and_resume(tmp_path, monkeypatch, capsys):
     from syvrio.infra.config import Config, UsageLimit, load_config
     from syvrio.infra.search.usage import UsageLimiter
     config = Config(vault=tmp_path / "vault")
-    limiter = UsageLimiter(config.search.usage_limits, config.vault / ".quiet-memo/usage.json")
+    limiter = UsageLimiter(config.search.usage_limits, config.vault / ".syvrio/usage.json")
     limiter.record("exa")
     limiter.pause("exa", "NO_MORE_CREDITS")
     path = tmp_path / "config.toml"
@@ -878,7 +878,7 @@ def test_usage_menu_zero_reset_and_resume(tmp_path, monkeypatch, capsys):
     loaded = load_config(path)
     assert loaded.search.usage_limits["exa"].monthly == 0
     assert (loaded.search.usage_limits["tavily"].daily, loaded.search.usage_limits["tavily"].monthly) == (0, 800)
-    state = UsageLimiter(loaded.search.usage_limits, config.vault / ".quiet-memo/usage.json").status("exa")
+    state = UsageLimiter(loaded.search.usage_limits, config.vault / ".syvrio/usage.json").status("exa")
     assert not state["paused"] and state["monthly"]["used"] == 1
     output = capsys.readouterr().out
     assert "NO_MORE_CREDITS" in output and "不限" in output

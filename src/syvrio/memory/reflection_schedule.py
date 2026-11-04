@@ -42,8 +42,8 @@ class ReflectionSchedule:
     def __init__(self, engine: ReflectionEngine) -> None:
         self.engine = engine
         self.service = engine.service
-        self.path = engine.service.config.vault / ".quiet-memo" / "reflection-state.json"
-        self.fingerprints_path = engine.service.config.vault / ".quiet-memo" / "profile-fingerprints.json"
+        self.path = engine.service.config.vault / ".syvrio" / "reflection-state.json"
+        self.fingerprints_path = engine.service.config.vault / ".syvrio" / "profile-fingerprints.json"
         self._vault_lock = engine._vault_lock
 
     def default_state(self) -> dict:

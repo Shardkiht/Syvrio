@@ -274,7 +274,7 @@ class LiteLLMChatModel:
         if self.config.requires_api_key() and not self.config.api_key():
             raise ChatModelError(
                 f"LLM API key is not configured. Set {self.config.api_key_env} "
-                "or run qm setup to save it to system credentials."
+                "or run syvrio setup to save it to system credentials."
             )
         litellm = _litellm()
         if on_delta is None:

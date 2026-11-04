@@ -226,7 +226,7 @@ class SearchResult:
     snippet: str
     published: str | None = None
     provider: str = ""
-    # 结果实际来自哪个上游搜索引擎（bing/baidu/...）；provider 字段始终是 QM 的
+    # 结果实际来自哪个上游搜索引擎（bing/baidu/...）；provider 字段始终是 Syvrio 的
     # SearchProvider 名，二者不能混用。
     engine: str = ""
 
