@@ -41,7 +41,7 @@ from .session_ui import visible_sessions
 
 
 class ChatApp(ChatFlowMixin, ChatCommandsMixin, App):
-    TITLE = "quiet-memo — Personal Memory"
+    TITLE = "Syvrio — Persistent Memory"
 
     CSS = APP_CSS
 
@@ -96,7 +96,7 @@ class ChatApp(ChatFlowMixin, ChatCommandsMixin, App):
         with Horizontal(id="root"):
             with Vertical(id="sidebar"):
                 with Horizontal(id="sidebar-head"):
-                    yield Static("quiet-memo", id="brand")
+                    yield Static("Syvrio", id="brand")
                     yield SidebarToggle("«", id="hide-sidebar")
                 yield NewSessionButton("+ New session", id="new-session")
                 yield ListView(id="sessions")
@@ -470,8 +470,8 @@ class ChatApp(ChatFlowMixin, ChatCommandsMixin, App):
     def add_welcome(self) -> None:
         total = self.service.config.chat.context_window
         chat = self._chat()
-        chat.mount(Static("quiet-memo", classes="welcome-brand"))
-        chat.mount(Static("A quiet personal memory vault", classes="welcome-line"))
+        chat.mount(Static("Syvrio", classes="welcome-brand"))
+        chat.mount(Static("Local-first personal AI agent with persistent memory", classes="welcome-line"))
         chat.mount(
             Static(
                 f"{self.runtime.model_label} · {self.service.retrieval_mode}"
