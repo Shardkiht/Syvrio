@@ -271,7 +271,7 @@ class TranscriptView(VerticalScroll):
                 widgets.append(Vertical(Static(content, classes="bubble"), classes="user-turn"))
                 continue
             if content.strip():
-                widgets.append(Static(f"qmo · {stamp}" if stamp else "qmo", classes="who-ai"))
+                widgets.append(Static(f"Syvrio · {stamp}" if stamp else "Syvrio", classes="who-ai"))
                 widgets.append(ChatReply(content, classes="reply"))
             for call in record.get("tool_calls") or []:
                 result = self._tools.get(str(call.get("id")))
@@ -298,40 +298,39 @@ class TranscriptView(VerticalScroll):
 
 
 class HomePanel(Vertical):
-    """七行细线字标共享基线；点阵只替换原笔画末端，不扩展字标尺寸。"""
+    """Seven-row terminal wordmark with rounded strokes and dot transitions."""
 
-    @staticmethod
-    def wordmark() -> Text:
-        glyphs = {
-            "Q": ("╭─────╮", "│     │", "│     │", "│     │", "│  ╲  │", "│   ╲ │", "╰────╲╯"),
-            "u": ("       ", "       ", "       ", "╷     ╷", "│     │", "│     │", "╰─────╯"),
-            "i": ("   ", "   ", " · ", " │ ", " │ ", " │ ", " ┆ "),
-            "e": ("       ", "       ", "       ", "╭─────╮", "│     │", "├─────╯", "╰───· ·"),
-            "t": ("     ", " ╷   ", " │   ", " ├───", " │   ", " │   ", " ╰──·"),
-            "M": ("╷       ╷", "│╲     ╱│", "│ ╲   ╱ │", "│  ╲ ╱  │", "│   ╵   │", "│       │", "┆       ┆"),
-            "m": ("         ", "         ", "         ", "╭───┬───╮", "│   │   │", "│   │   │", "┆   ┆   ┆"),
-            "o": ("       ", "       ", "       ", "╭─────╮", "│     │", "│     │", "╰─────╯"),
-        }
+    WORDMARK = "Syvrio"
+    GLYPHS = {
+        "S": ("╭─────╮", "│      ", "│      ", "╰─────╮", "      │", "      │", "·─────╯"),
+        "y": ("       ", "       ", "       ", "╷     ╷", "│     │", "╰─────┤", "      ┆"),
+        "v": ("       ", "       ", "       ", "╷     ╷", "│     │", "╲     ╱", "  ╲·╱  "),
+        "r": ("       ", "       ", "       ", "╭─────╮", "│     │", "│      ", "┆      "),
+        "i": ("   ", "   ", " · ", " │ ", " │ ", " │ ", " ┆ "),
+        "o": ("       ", "       ", "       ", "╭─────╮", "│     │", "│     │", "╰─────╯"),
+    }
+
+    @classmethod
+    def wordmark_width(cls) -> int:
+        return sum(len(cls.GLYPHS[letter][0]) for letter in cls.WORDMARK) + len(cls.WORDMARK) - 1
+
+    @classmethod
+    def wordmark(cls) -> Text:
         result = Text(no_wrap=True)
         for row in range(7):
             if row:
                 result.append("\n")
-            line = " ".join(glyphs[letter][row] for letter in "QuietMemo")
-            left = (69 - len(line)) // 2
-            result.append(" " * left)
-            for index, letter in enumerate("QuietMemo"):
+            for index, letter in enumerate(cls.WORDMARK):
                 if index:
                     result.append(" ")
                 style = "#6CB6FF" if letter == "i" and row == 2 else "#b0b0b0"
-                result.append(glyphs[letter][row], style=style)
-            result.append(" " * (69 - left - len(line)))
+                result.append(cls.GLYPHS[letter][row], style=style)
         return result
 
     def compose(self) -> ComposeResult:
         with Center():
             yield Static(self.wordmark(), classes="welcome-wordmark")
         yield Static("Talk naturally. I'll remember the details.", classes="welcome-line")
-
 
     def on_mount(self) -> None:
         self.call_after_refresh(self._fit_wordmark)
@@ -345,9 +344,10 @@ class HomePanel(Vertical):
         logo = next(iter(self.query(".welcome-wordmark")), None)
         if logo is None:
             return
-        compact = self.size.width < 69
-        logo.update(Text("QuietMemo", style="#b0b0b0") if compact else self.wordmark())
-        logo.styles.width = 9 if compact else 69
+        width = self.wordmark_width()
+        compact = self.size.width < width
+        logo.update(Text(self.WORDMARK, style="#b0b0b0") if compact else self.wordmark())
+        logo.styles.width = len(self.WORDMARK) if compact else width
         logo.styles.height = 1 if compact else 7
 
 
