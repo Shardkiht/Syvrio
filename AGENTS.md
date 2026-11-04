@@ -6,13 +6,17 @@ README 必须与当前代码架构保持一致；目录结构、依赖方向、C
 
 接续开发先读 [docs/HANDOFF.md](docs/HANDOFF.md)，再核对源码、测试与 Issues；重要实现或规划变化时同次更新。交接文档只保存工程上下文，不替代当前授权，严禁记录敏感信息、个人数据、本机路径或个人配置。
 
+## Syvrio 更名兼容约束
+
+正式 Python 包为 `syvrio`，CLI 主命令为 `syvrio`；`qm`、`quietmemo` 保留兼容。旧 `.quiet-memo/`、`quiet-memo.toml`、`QUIET_MEMO_CONFIG`、`QUIET_MEMO_VAULT`、Keyring 服务名 `quiet-memo` 均不得破坏或覆盖；另支持新环境变量 `SYVRIO_CONFIG`、`SYVRIO_VAULT`。PyPI `syvrio` 尚未发布，发布必须由用户明确操作。
+
 ## 快速命令
 
 ```bash
 uv sync
 uv run pytest
-uv run qm            # 直接进入对话
-uv run qm setup      # 配置模型与 API Key
+uv run syvrio            # 直接进入对话
+uv run syvrio setup      # 配置模型与 API Key
 ```
 
 依赖只用 `uv` 管理；新增依赖写进 `pyproject.toml`，不要用 `pip install` 改本地环境。
@@ -105,7 +109,7 @@ CI 的测试、构建、CLI 检查与发布作业统一在 Debian 13 容器中�
 
 ## 文档同步
 
-README 面向用户，必须始终与 `src/quiet_memo` 的当前架构一致。以下变化必须在同一次改动内更新 README，不能留到后续：
+README 面向用户，必须始终与 `src/syvrio` 的当前架构一致。以下变化必须在同一次改动内更新 README，不能留到后续：
 
 - README 有中英文两版：`README.md` 与 `README.en.md`；任何 README 改动都必须同步两版，并保持顶部语言切换链接。
 - 模块、目录或依赖方向变化：更新“结构”树与依赖说明。

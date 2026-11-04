@@ -1,4 +1,4 @@
-# quiet-memo 配置示例
+# Syvrio configuration example (legacy Vault paths remain compatible)
 # 默认读取顺序：$QUIET_MEMO_CONFIG → ./quiet-memo.toml → ~/.config/quiet-memo/config.toml
 
 # 记忆库位置（Markdown + Git）。此处配置的 vault 优先；未配置时用 QUIET_MEMO_VAULT，
