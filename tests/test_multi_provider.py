@@ -11,19 +11,19 @@ import pytest
 
 pytestmark = pytest.mark.search
 
-from quiet_memo.infra.config import Config, FetchConfig, LLMConfig, SearchConfig
-from quiet_memo.infra.search.base import (
+from syvrio.infra.config import Config, FetchConfig, LLMConfig, SearchConfig
+from syvrio.infra.search.base import (
     FetchResult,
     ProviderError,
     ProviderErrorKind,
     SearchQuery,
     SearchResult,
 )
-from quiet_memo.infra.search.fetch_router import (
+from syvrio.infra.search.fetch_router import (
     _EXTERNAL_FETCH_PROVIDERS,
     build_fetch_registry,
 )
-from quiet_memo.infra.search.router import _EXTERNAL_PROVIDERS, build_registry
+from syvrio.infra.search.router import _EXTERNAL_PROVIDERS, build_registry
 
 KEY = "test-key-placeholder"
 
@@ -79,10 +79,10 @@ def test_unkeyed_provider_never_registers_or_fires(monkeypatch):
 
 def test_agent_tool_names_and_parameters_compat(tmp_path):
     """search / fetch_web 工具名与参数结构保持兼容。"""
-    from quiet_memo.agent.session import SessionStore
-    from quiet_memo.agent.tools import build_tools
-    from quiet_memo.infra.config import ChatConfig, Config, LLMConfig
-    from quiet_memo.memory.service import MemoryService
+    from syvrio.agent.session import SessionStore
+    from syvrio.agent.tools import build_tools
+    from syvrio.infra.config import ChatConfig, Config, LLMConfig
+    from syvrio.memory.service import MemoryService
 
     class _FetchOnly:
         name = "fake"
