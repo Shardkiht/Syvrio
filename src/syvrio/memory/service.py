@@ -38,9 +38,9 @@ from .store import (
 )
 
 
-VAULT_README = """# quiet-memo vault
+VAULT_README = """# Syvrio vault
 
-这个目录由 [quiet-memo](https://github.com/Shardkiht/quiet-memo) 管理。
+这个目录由 [Syvrio](https://github.com/Shardkiht/Syvrio) 管理。
 
 - `memories/`：按主题拆分的 Markdown 记忆，是唯一事实来源。
 - `sessions/`：会话 JSONL，保留原始对话与工具轨迹。

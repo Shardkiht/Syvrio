@@ -52,7 +52,7 @@ def read_document(path: Path) -> str:
             try:
                 from markitdown import MarkItDown
             except ImportError as exc:
-                raise DocumentError("文档解析依赖未安装：开发环境运行 uv sync --extra documents；工具安装使用 uv tool install 'quiet-memo[documents]'。") from exc
+                raise DocumentError("文档解析依赖未安装：开发环境运行 uv sync --extra documents；工具安装使用 uv tool install 'syvrio[documents]'（新包发布后）。") from exc
             text = MarkItDown(enable_plugins=False).convert(str(path)).text_content
     except DocumentError:
         raise
