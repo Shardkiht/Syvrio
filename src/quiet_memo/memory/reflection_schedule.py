@@ -67,6 +67,7 @@ class ReflectionSchedule:
                 "next_retry_at": None,
                 "fact_digest": "",
                 "pending": False,
+                "remaining_batches": 0,
                 "consecutive_failures": 0,
                 "last_error_kind": None,
             },
@@ -95,9 +96,11 @@ class ReflectionSchedule:
                 if key in raw:
                     default[section][key] = raw[key]
         for section in ("profile", "dream"):
-            for key in ("pending_changes", "consecutive_failures"):
+            for key in ("pending_changes", "consecutive_failures", "remaining_batches"):
                 if key in default[section] and type(default[section][key]) is not int:
                     default[section][key] = 0
+            if default[section].get("remaining_batches", 0) < 0:
+                default[section]["remaining_batches"] = 0
             for key in ("pending", "pending_important"):
                 if key in default[section] and type(default[section][key]) is not bool:
                     default[section][key] = False
@@ -133,6 +136,20 @@ class ReflectionSchedule:
     def retry_due(self, section: dict, now: datetime) -> bool:
         retry = self.parse_time(section.get("next_retry_at"))
         return retry is not None and now >= retry
+
+    def retry_blocked(self, section: dict, now: datetime) -> bool:
+        retry = self.parse_time(section.get("next_retry_at"))
+        return retry is not None and now < retry
+
+    def summary_needs_refresh(self) -> bool:
+        """轻量判断摘要是否需要重建：只读缓存与文件元信息，不扫描事实正文。"""
+        summary = self.engine.profile_summary()
+        if summary is not None:
+            return summary.stale
+        try:
+            return bool(self.service.store.fingerprint())
+        except OSError:
+            return False
 
     @staticmethod
     def important_entry(entry: Entry) -> bool:
@@ -183,14 +200,25 @@ class ReflectionSchedule:
         }
         removed_ids = set(previous) - set(current)
         important_current = [entry.id for entry in entries if self.important_entry(entry)]
-        important_removed = [key for key in removed_ids if key in remembered_important]
-        important_ids = sorted(set(important_current) | set(important_removed))
+        # 只有本轮新增、更正或删除的事实才参与“重要变化”判断；
+        # 历史中已存在的重要事实不能把之后的普通变更升级为重要变更。
+        important_new = any(
+            self.important_entry(entry) for entry in entries if entry.id in new_ids
+        )
+        important_changed = any(
+            entry.id in remembered_important or self.important_entry(entry)
+            for entry in entries if entry.id in changed_ids
+        )
+        important_removed = any(key in remembered_important for key in removed_ids)
+        important_ids = sorted(set(important_current) | set(
+            key for key in removed_ids if key in remembered_important
+        ))
         digest = hashlib.sha256(
             "|".join(f"{key}:{current[key]}" for key in sorted(current)).encode("utf-8")
         ).hexdigest()
         return FactChanges(
             count=len(new_ids) + len(changed_ids) + len(removed_ids),
-            important=bool(important_current or important_removed),
+            important=bool(important_new or important_changed or important_removed),
             digest=digest,
             fingerprints=current,
             important_ids=important_ids,
@@ -213,11 +241,18 @@ class ReflectionSchedule:
         dream_due = dream_elapsed is None or dream_elapsed >= dream_interval
         profile_retry = self.retry_due(profile, now)
         dream_retry = self.retry_due(dream, now)
+        profile_blocked = self.retry_blocked(profile, now)
+        dream_blocked = self.retry_blocked(dream, now)
         pending_changes = int(profile.get("pending_changes") or 0)
         pending_important = bool(profile.get("pending_important"))
         dream_pending = bool(dream.get("pending"))
-        dream_ready = (changed or dream_pending) and (dream_due or dream_retry)
-        profile_ready = (
+        summary_needs = self.summary_needs_refresh()
+        dream_ready = (
+            not dream_blocked
+            and (changed or dream_pending)
+            and (dream_due or dream_retry)
+        )
+        profile_ready = not profile_blocked and (
             (changed and (profile_due or profile_cool or profile_retry))
             or (pending_important and (profile_cool or profile_retry))
             or (
@@ -225,6 +260,7 @@ class ReflectionSchedule:
                 and (profile_cool or profile_retry)
             )
             or (pending_changes > 0 and (profile_due or profile_retry))
+            or (summary_needs and (profile_due or profile_retry))
         )
         return dream_ready or profile_ready
 
@@ -237,6 +273,7 @@ class ReflectionSchedule:
         state = self.load()
         with self.service.write_lock:
             entries = self.service.current_facts()
+            inferences = self.service.list_inferences()
         entries = sorted(
             (item for item in entries if not contains_secret(item.model_dump_json())),
             key=lambda item: item.id,
@@ -251,23 +288,51 @@ class ReflectionSchedule:
         dream_due = dream_elapsed is None or dream_elapsed >= max(0.1, config.dream_auto_interval_hours)
         profile_retry = self.retry_due(profile, now)
         dream_retry = self.retry_due(dream, now)
+        profile_blocked = self.retry_blocked(profile, now)
+        dream_blocked = self.retry_blocked(dream, now)
+
         summary = self.engine.profile_summary()
-        summary_stale = (summary is not None and summary.stale) or (summary is None and bool(entries))
-        profile_pending = changes.count > 0 or summary_stale
-        valuable_now = changes.important or changes.count >= max(1, config.profile_min_changes)
+        cached = self.engine._load_summary()
+        if summary is None:
+            summary_stale = bool(entries)
+        else:
+            stored = cached.get("evidence_signature") if cached else None
+            current = self.engine._summary_evidence(entries, inferences)
+            if stored == current:
+                if summary.stale:
+                    self.engine._resign_summary()
+                summary_stale = False
+            else:
+                summary_stale = True
+
+        # 失败遗留的待办不能因本轮没有新变更而被清掉；计划阶段只累加，不重置。
+        pending_changes = max(int(profile.get("pending_changes") or 0), changes.count)
+        pending_important = bool(profile.get("pending_important")) or changes.important
+        profile_pending = pending_changes > 0 or pending_important or summary_stale
+        valuable_now = (
+            pending_important
+            or pending_changes >= max(1, config.profile_min_changes)
+        )
         profile_candidate = (
-            profile_pending
+            not profile_blocked
+            and profile_pending
             and (profile_due or profile_retry or (profile_cool and valuable_now))
         )
         baseline = dream.get("fact_digest")
-        dream_pending = bool(entries) if not baseline else baseline != changes.digest
-        dream_candidate = dream_pending and (dream_due or dream_retry)
+        dream_pending = bool(dream.get("pending")) or (
+            bool(entries) if not baseline else baseline != changes.digest
+        )
+        dream_candidate = (
+            not dream_blocked and dream_pending and (dream_due or dream_retry)
+        )
 
         state["last_seen_facts_signature"] = self.engine._facts_signature()
         state["last_checked_at"] = self.stamp(now)
-        profile["pending_changes"] = changes.count
-        profile["pending_important"] = changes.important
+        profile["pending_changes"] = pending_changes
+        profile["pending_important"] = pending_important
         dream["pending"] = dream_pending
+        if not dream_pending:
+            dream["remaining_batches"] = 0
         self.save(state)
 
         if profile_candidate and dream_candidate:
@@ -304,6 +369,9 @@ class ReflectionSchedule:
         if result.cancelled:
             if result.requests:
                 section["last_attempt_at"] = self.stamp(now)
+            if mode == "dream" and result.remaining > 0:
+                section["pending"] = True
+                section["remaining_batches"] = result.remaining
         elif result.error:
             failures = int(section.get("consecutive_failures") or 0) + 1
             section["consecutive_failures"] = failures
@@ -313,6 +381,7 @@ class ReflectionSchedule:
                 section["pending_changes"] = max(1, int(section.get("pending_changes") or 0))
             else:
                 section["pending"] = True
+                section["remaining_batches"] = max(1, result.remaining)
             if auto:
                 section["last_attempt_at"] = self.stamp(now)
                 hours = min(MAX_AUTO_RETRY_HOURS, 2 ** (failures - 1))
@@ -326,13 +395,19 @@ class ReflectionSchedule:
             if entries is not None:
                 previous, remembered_important = self.load_fingerprints()
                 changes = self.facts_changes(entries, previous, remembered_important)
-                section["fact_digest"] = changes.digest
                 if mode == "profile":
                     self.write_fingerprints(changes.fingerprints, changes.important_ids)
+                    section["fact_digest"] = changes.digest
                     section["pending_changes"] = 0
                     section["pending_important"] = False
+                elif result.remaining > 0:
+                    # 只完成部分批次，保留旧基线以便下一次到期继续处理。
+                    section["pending"] = True
+                    section["remaining_batches"] = result.remaining
                 else:
+                    section["fact_digest"] = changes.digest
                     section["pending"] = False
+                    section["remaining_batches"] = 0
         state["last_seen_facts_signature"] = self.engine._facts_signature()
         self.save(state)
 
@@ -349,10 +424,11 @@ class ReflectionSchedule:
             last = self.parse_time(section.get("last_attempt_at"))
             next_at = last + timedelta(hours=max(0.1, interval)) if last else now
             retry = self.parse_time(section.get("next_retry_at"))
-            if retry is not None and retry < next_at:
-                next_at = retry
+            blocked = retry is not None and retry > now
+            if retry is not None:
+                next_at = retry if blocked else now
             count = int(section.get("pending_changes") or 0)
-            if mode == "profile" and last and (
+            if mode == "profile" and not blocked and last and (
                 section.get("pending_important") or count >= max(1, config.profile_min_changes)
             ):
                 early = last + timedelta(hours=max(0.1, cooldown))
@@ -361,6 +437,7 @@ class ReflectionSchedule:
             result[mode] = {
                 "next_attempt_at": self.stamp(next_at),
                 "pending": count if mode == "profile" else bool(section.get("pending")),
+                "remaining_batches": int(section.get("remaining_batches") or 0),
                 "failures": int(section.get("consecutive_failures") or 0),
             }
         return result
