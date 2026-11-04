@@ -3085,7 +3085,7 @@ wheels = [
 ]
 
 [[package]]
-name = "quiet-memo"
+name = "syvrio"
 version = "0.3.3"
 source = { editable = "." }
 dependencies = [

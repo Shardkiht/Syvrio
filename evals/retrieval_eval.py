@@ -14,10 +14,10 @@ import argparse
 import tempfile
 from pathlib import Path
 
-from quiet_memo.infra.config import Config, LLMConfig, RetrievalConfig
-from quiet_memo.memory.service import MemoryService
-from quiet_memo.retrieval import KeywordRetriever
-from quiet_memo.retrieval.vector import LocalEmbedder, VectorRetriever
+from syvrio.infra.config import Config, LLMConfig, RetrievalConfig
+from syvrio.memory.service import MemoryService
+from syvrio.retrieval import KeywordRetriever
+from syvrio.retrieval.vector import LocalEmbedder, VectorRetriever
 
 # ---------------------------------------------------------------------------
 # 合成语料：目标是条目 + 各领域"的"字噪声干扰项
@@ -227,7 +227,7 @@ def main() -> None:
 
 
 def _hybrid(service: MemoryService, vector: VectorRetriever):
-    from quiet_memo.retrieval import HybridRetriever
+    from syvrio.retrieval import HybridRetriever
 
     return HybridRetriever(KeywordRetriever(service.store), vector)
 

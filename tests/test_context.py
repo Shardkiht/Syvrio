@@ -4,10 +4,10 @@ import pytest
 
 pytestmark = pytest.mark.agent
 
-from quiet_memo.agent.context import ContextManager
-from quiet_memo.agent.session import SessionStore, new_message_id
-from quiet_memo.infra.config import ChatConfig
-from quiet_memo.infra.tokens import estimate_messages_tokens
+from syvrio.agent.context import ContextManager
+from syvrio.agent.session import SessionStore, new_message_id
+from syvrio.infra.config import ChatConfig
+from syvrio.infra.tokens import estimate_messages_tokens
 
 
 class FakeSummarizer:

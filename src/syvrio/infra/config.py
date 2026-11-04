@@ -179,7 +179,7 @@ class Config:
 
 
 def default_config_path() -> Path:
-    env_path = os.environ.get("QUIET_MEMO_CONFIG")
+    env_path = os.environ.get("SYVRIO_CONFIG") or os.environ.get("QUIET_MEMO_CONFIG")
     if env_path:
         return Path(env_path).expanduser()
     local = Path.cwd() / CONFIG_FILENAME
@@ -189,7 +189,7 @@ def default_config_path() -> Path:
 
 
 def default_vault_path() -> Path:
-    env_vault = os.environ.get("QUIET_MEMO_VAULT")
+    env_vault = os.environ.get("SYVRIO_VAULT") or os.environ.get("QUIET_MEMO_VAULT")
     if env_vault:
         return Path(env_vault).expanduser()
     return Path.home() / ".quiet-memo" / "vault"
@@ -429,7 +429,7 @@ def usage_limits_toml(limits: dict[str, "UsageLimit"]) -> str:
 
 
 def write_example_config(path: Path, vault: Path) -> None:
-    content = f'''# quiet-memo 配置
+    content = f'''# Syvrio 配置
 vault = {toml_literal(vault.as_posix())}
 
 confidence_threshold = 0.8

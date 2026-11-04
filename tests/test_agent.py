@@ -4,13 +4,13 @@ import pytest
 
 pytestmark = pytest.mark.agent
 
-from quiet_memo.agent.runtime import AgentRuntime
-from quiet_memo.agent.session import SessionStore, new_message_id
-from quiet_memo.infra.config import ChatConfig, Config, LLMConfig
-from quiet_memo.llm import AssistantTurn, ChatModelError, ToolCall
-from quiet_memo.memory.extractor import StaticExtractor
-from quiet_memo.memory.models import Candidate, ExtractionResult
-from quiet_memo.memory.service import MemoryService
+from syvrio.agent.runtime import AgentRuntime
+from syvrio.agent.session import SessionStore, new_message_id
+from syvrio.infra.config import ChatConfig, Config, LLMConfig
+from syvrio.llm import AssistantTurn, ChatModelError, ToolCall
+from syvrio.memory.extractor import StaticExtractor
+from syvrio.memory.models import Candidate, ExtractionResult
+from syvrio.memory.service import MemoryService
 
 
 class FakeChatModel:
@@ -147,7 +147,7 @@ def test_failed_switch_preserves_exit_distillation(tmp_path):
 @pytest.mark.parametrize("fails", [False, True])
 def test_mutating_tool_timeout_reports_final_result(tmp_path, cancelled, fails):
     from concurrent.futures import TimeoutError
-    from quiet_memo.agent.tools import ToolOutcome, ToolRegistry, ToolSpec
+    from syvrio.agent.tools import ToolOutcome, ToolRegistry, ToolSpec
 
     runtime, service = build_runtime(tmp_path, FakeChatModel([]))
     calls = []
@@ -182,7 +182,7 @@ def test_mutating_tool_timeout_reports_final_result(tmp_path, cancelled, fails):
 
 
 def test_memory_tools_are_marked_mutating(tmp_path):
-    from quiet_memo.agent.tools import build_tools
+    from syvrio.agent.tools import build_tools
 
     runtime, service = build_runtime(tmp_path, FakeChatModel([]))
     tools = build_tools(service, runtime.ensure_session())
@@ -351,9 +351,9 @@ def test_auto_recall_uses_recent_context_for_followup(tmp_path, monkeypatch):
 def test_attribute_question_rewrites_with_synonyms(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
-    from quiet_memo.agent.recall import RecallQueryBuilder
-    from quiet_memo.memory.store import MemoryStore
-    from quiet_memo.retrieval.keyword import KeywordRetriever
+    from syvrio.agent.recall import RecallQueryBuilder
+    from syvrio.memory.store import MemoryStore
+    from syvrio.retrieval.keyword import KeywordRetriever
 
     monkeypatch.setattr(LLMConfig, "api_key", lambda self: "test-key")
 
@@ -468,7 +468,7 @@ def test_reload_llm_updates_model_and_extractor(tmp_path, monkeypatch):
         model="deepseek-ai/DeepSeek-V3",
     )
     monkeypatch.setattr(
-        "quiet_memo.infra.config.load_config",
+        "syvrio.infra.config.load_config",
         lambda *args, **kwargs: Config(vault=service.config.vault, llm=new_llm),
     )
 
@@ -480,7 +480,7 @@ def test_reload_llm_updates_model_and_extractor(tmp_path, monkeypatch):
 
 
 def test_apply_model_updates_config_and_runtime(tmp_path, monkeypatch):
-    from quiet_memo.app import actions
+    from syvrio.app import actions
 
     runtime, service = build_runtime(tmp_path, FakeChatModel([AssistantTurn(content="ok")]))
     config_path = tmp_path / "quiet-memo.toml"
@@ -495,7 +495,7 @@ def test_apply_model_updates_config_and_runtime(tmp_path, monkeypatch):
 
 
 def test_model_options_lists_current_first(service):
-    from quiet_memo.app import actions
+    from syvrio.app import actions
 
     options = actions.model_options(service)
 
@@ -506,7 +506,7 @@ def test_model_options_lists_current_first(service):
 
 
 def test_model_options_uses_fetched_models(service):
-    from quiet_memo.app import actions
+    from syvrio.app import actions
 
     options = actions.model_options(service, ["future-model"])
 
@@ -515,7 +515,7 @@ def test_model_options_uses_fetched_models(service):
 
 
 def test_provider_options_mark_current_and_unconfigured(service):
-    from quiet_memo.app import actions
+    from syvrio.app import actions
 
     options = actions.provider_options(service)
     by_key = {value[0]: (label, current) for label, value, current in options}
@@ -528,7 +528,7 @@ def test_configure_provider_saves_key_and_switches_model(tmp_path, monkeypatch):
     import sys
     import types
 
-    from quiet_memo.app import actions
+    from syvrio.app import actions
 
     runtime, service = build_runtime(tmp_path, FakeChatModel([AssistantTurn(content="ok")]))
     config_path = tmp_path / "quiet-memo.toml"
@@ -555,7 +555,7 @@ def test_configure_provider_keeps_state_when_keyring_fails(tmp_path, monkeypatch
     import sys
     import types
 
-    from quiet_memo.app import actions
+    from syvrio.app import actions
 
     runtime, service = build_runtime(tmp_path, FakeChatModel([AssistantTurn(content="ok")]))
     config_path = tmp_path / "quiet-memo.toml"
@@ -583,7 +583,7 @@ def test_update_provider_key_keeps_current_model(tmp_path, monkeypatch):
     import sys
     import types
 
-    from quiet_memo.app import actions
+    from syvrio.app import actions
 
     runtime, service = build_runtime(tmp_path, FakeChatModel([AssistantTurn(content="ok")]))
     keys: dict[str, str] = {}
@@ -604,7 +604,7 @@ def test_remove_provider_deletes_saved_key(tmp_path, monkeypatch):
     import sys
     import types
 
-    from quiet_memo.app import actions
+    from syvrio.app import actions
 
     runtime, service = build_runtime(tmp_path, FakeChatModel([AssistantTurn(content="ok")]))
     keys = {"SILICONFLOW_API_KEY": "sk-test"}
@@ -621,7 +621,7 @@ def test_remove_provider_deletes_saved_key(tmp_path, monkeypatch):
 
 
 def test_remove_provider_rejects_current_provider(service):
-    from quiet_memo.app import actions
+    from syvrio.app import actions
 
     message = actions.remove_provider(service, "deepseek")
 
@@ -630,7 +630,7 @@ def test_remove_provider_rejects_current_provider(service):
 
 
 def test_remove_provider_defers_to_environment_key(monkeypatch, service):
-    from quiet_memo.app import actions
+    from syvrio.app import actions
 
     monkeypatch.setenv("SILICONFLOW_API_KEY", "sk-env")
 
@@ -640,7 +640,7 @@ def test_remove_provider_defers_to_environment_key(monkeypatch, service):
 
 
 def test_apply_reasoning_updates_config_hot(tmp_path, monkeypatch, service):
-    from quiet_memo.app import actions
+    from syvrio.app import actions
 
     config_path = tmp_path / "quiet-memo.toml"
     service.config_path = config_path
@@ -655,14 +655,14 @@ def test_apply_reasoning_updates_config_hot(tmp_path, monkeypatch, service):
 
 
 def test_reasoning_options_empty_when_unsupported(service, monkeypatch):
-    from quiet_memo.app import actions
+    from syvrio.app import actions
 
     monkeypatch.setattr(actions, "supported_params", lambda model: ())
     assert actions.reasoning_options(service) == []
 
 
 def test_context_options_and_apply(tmp_path, monkeypatch, service):
-    from quiet_memo.app import actions
+    from syvrio.app import actions
 
     config_path = tmp_path / "quiet-memo.toml"
     service.config_path = config_path
@@ -698,16 +698,16 @@ def test_ask_streams_events_to_callback(tmp_path):
 
 def _config_with_vault(tmp_path_factory=None):
     import tempfile, pathlib
-    from quiet_memo.infra.config import Config, LLMConfig, RetrievalConfig
+    from syvrio.infra.config import Config, LLMConfig, RetrievalConfig
     tmp = pathlib.Path(tempfile.mkdtemp())
     return Config(vault=tmp / "vault", llm=LLMConfig(), retrieval=RetrievalConfig(method="keyword"))
 
 
 def test_recall_tool_guides_query_with_synonyms():
     """身份类查询召回：自然问句还要带常见同义词/字段名，避免“名字”漏掉“姓名”。"""
-    from quiet_memo.agent.tools import build_tools
-    from quiet_memo.agent.session import SessionStore
-    from quiet_memo.memory.service import MemoryService
+    from syvrio.agent.tools import build_tools
+    from syvrio.agent.session import SessionStore
+    from syvrio.memory.service import MemoryService
 
     config = _config_with_vault()
     service = MemoryService(config)
@@ -722,7 +722,7 @@ def test_recall_tool_guides_query_with_synonyms():
 
 def test_import_prompt_forbids_section_prefix():
     """身份类查询召回缺口的修复之二：导入条目不带小节前缀，超短条目正文即事实。"""
-    from quiet_memo.memory.extractor import IMPORT_PROMPT
+    from syvrio.memory.extractor import IMPORT_PROMPT
 
     assert "小节编号或标题前缀" in IMPORT_PROMPT
     assert "稀释向量语义" in IMPORT_PROMPT
@@ -1006,7 +1006,7 @@ def test_consolidate_threshold_and_cursor_partition(tmp_path):
     class CountingExtractor:
         def extract(self, text, context=""):
             calls.append(text)
-            from quiet_memo.memory.models import ExtractionResult
+            from syvrio.memory.models import ExtractionResult
 
             return ExtractionResult(
                 memories=[Candidate(text=words[len(calls) - 1], topic="misc", confidence=0.95)]
@@ -1056,7 +1056,7 @@ def test_consolidate_threshold_and_cursor_partition(tmp_path):
 
 
 def test_compact_tool_outputs_budget_ignores_system_and_history():
-    from quiet_memo.agent.tools import compact_tool_outputs
+    from syvrio.agent.tools import compact_tool_outputs
 
     messages = [
         {"role": "system", "content": "系统提示" * 5000},
@@ -1078,7 +1078,7 @@ def test_tool_output_budget_scales_with_context_window(tmp_path, monkeypatch):
         captured["budget"] = max_tokens
         return 0
 
-    monkeypatch.setattr("quiet_memo.agent.runtime.compact_tool_outputs", fake_compact)
+    monkeypatch.setattr("syvrio.agent.runtime.compact_tool_outputs", fake_compact)
     model = FakeChatModel(
         [
             AssistantTurn(
@@ -1115,8 +1115,8 @@ def test_consolidate_skips_active_session_even_when_scan_includes_it(tmp_path, m
 
 @pytest.mark.parametrize("recovery", ["close", "startup"])
 def test_failed_compaction_flush_keeps_budget_and_recovers_all_chunks(tmp_path, monkeypatch, recovery):
-    from quiet_memo.agent import runtime as runtime_module
-    from quiet_memo.infra.tokens import estimate_messages_tokens
+    from syvrio.agent import runtime as runtime_module
+    from syvrio.infra.tokens import estimate_messages_tokens
 
     monkeypatch.setattr(runtime_module, "DISTILL_MAX_CHARS", 3000)
 
@@ -1209,7 +1209,7 @@ def test_general_question_skips_automatic_memory(tmp_path, monkeypatch):
 
 
 def test_progress_precedes_model_and_tool_execution(tmp_path, monkeypatch):
-    from quiet_memo.agent.tools import ToolOutcome, ToolRegistry
+    from syvrio.agent.tools import ToolOutcome, ToolRegistry
 
     progress = []
 
@@ -1234,9 +1234,9 @@ def test_progress_precedes_model_and_tool_execution(tmp_path, monkeypatch):
 @pytest.mark.parametrize("stop_at", ["context", "stream", "tool"])
 def test_cancel_preserves_partial_and_tool_pairs(tmp_path, monkeypatch, stop_at):
     from threading import Event
-    from quiet_memo.llm import GenerationCancelled
-    from quiet_memo.agent import runtime as module
-    from quiet_memo.agent.tools import ToolOutcome
+    from syvrio.llm import GenerationCancelled
+    from syvrio.agent import runtime as module
+    from syvrio.agent.tools import ToolOutcome
 
     cancel = Event()
     calls = []

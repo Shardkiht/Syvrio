@@ -4,8 +4,8 @@ import pytest
 
 pytestmark = pytest.mark.memory
 
-from quiet_memo.memory.detect import contains_secret, find_conflicts
-from quiet_memo.memory.models import Candidate, Entry
+from syvrio.memory.detect import contains_secret, find_conflicts
+from syvrio.memory.models import Candidate, Entry
 
 
 def entry(entry_id: str, text: str, topic: str = "housing") -> Entry:

@@ -11,23 +11,23 @@ import pytest
 
 pytestmark = pytest.mark.search
 
-from quiet_memo.infra.config import SearchConfig
-from quiet_memo.infra.search.base import (
+from syvrio.infra.config import SearchConfig
+from syvrio.infra.search.base import (
     FetchQuery,
     ProviderError,
     ProviderErrorKind,
     SearchQuery,
 )
-from quiet_memo.infra.search.baidu import BaiduSearchProvider
-from quiet_memo.infra.search.exa import ExaFetchProvider, ExaSearchProvider
-from quiet_memo.infra.search.http_client import JsonApiClient
-from quiet_memo.infra.search.router import build_registry
-from quiet_memo.infra.search.tavily import TavilyFetchProvider, TavilySearchProvider
-from quiet_memo.infra.search.volcengine import (
+from syvrio.infra.search.baidu import BaiduSearchProvider
+from syvrio.infra.search.exa import ExaFetchProvider, ExaSearchProvider
+from syvrio.infra.search.http_client import JsonApiClient
+from syvrio.infra.search.router import build_registry
+from syvrio.infra.search.tavily import TavilyFetchProvider, TavilySearchProvider
+from syvrio.infra.search.volcengine import (
     VolcengineFetchProvider,
     VolcengineSearchProvider,
 )
-from quiet_memo.infra.search.you import YouFetchProvider, YouSearchProvider
+from syvrio.infra.search.you import YouFetchProvider, YouSearchProvider
 
 KEY = "test-key-placeholder"
 
@@ -616,8 +616,8 @@ def test_tavily_fetch_429_maps_to_rate_limit():
 
 
 def test_fetch_registry_registers_tavily_with_api_key(monkeypatch):
-    from quiet_memo.infra.config import FetchConfig
-    from quiet_memo.infra.search.fetch_router import build_fetch_registry
+    from syvrio.infra.config import FetchConfig
+    from syvrio.infra.search.fetch_router import build_fetch_registry
 
     monkeypatch.setenv("TAVILY_API_KEY", KEY)
     registry = build_fetch_registry(FetchConfig(providers=["tavily"]), SearchConfig())

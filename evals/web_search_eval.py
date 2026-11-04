@@ -24,8 +24,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from quiet_memo.infra.search.base import SearchQuery, SearchResult
-from quiet_memo.infra.search.router import SearchRouter
+from syvrio.infra.search.base import SearchQuery, SearchResult
+from syvrio.infra.search.router import SearchRouter
 
 
 @dataclass(frozen=True)

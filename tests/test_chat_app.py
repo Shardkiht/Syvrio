@@ -10,17 +10,17 @@ pytestmark = pytest.mark.ui
 from textual.geometry import Offset
 from textual.widgets import Input, Static
 
-from quiet_memo.agent.runtime import AgentRuntime
-from quiet_memo.agent.session import SessionStore, new_message_id
-from quiet_memo.app.chat_app import ChatApp, SidebarToggle
-from quiet_memo.app.chat_input import BarInput
-from quiet_memo.app.command_catalog import SLASH_COMMANDS
-from quiet_memo.infra.config import ChatConfig, Config, LLMConfig, RetrievalConfig, SearchConfig
-from quiet_memo.infra.tokens import format_tokens
-from quiet_memo.llm import AssistantTurn
-from quiet_memo.memory.extractor import StaticExtractor
-from quiet_memo.memory.models import ExtractionResult
-from quiet_memo.memory.service import MemoryService
+from syvrio.agent.runtime import AgentRuntime
+from syvrio.agent.session import SessionStore, new_message_id
+from syvrio.app.chat_app import ChatApp, SidebarToggle
+from syvrio.app.chat_input import BarInput
+from syvrio.app.command_catalog import SLASH_COMMANDS
+from syvrio.infra.config import ChatConfig, Config, LLMConfig, RetrievalConfig, SearchConfig
+from syvrio.infra.tokens import format_tokens
+from syvrio.llm import AssistantTurn
+from syvrio.memory.extractor import StaticExtractor
+from syvrio.memory.models import ExtractionResult
+from syvrio.memory.service import MemoryService
 
 
 class FakeChatModel:
@@ -45,8 +45,8 @@ class FakeSummarizer:
 
 @pytest.mark.parametrize("apply", [False, True])
 async def test_import_command_uses_worker_and_releases_busy(tmp_path, monkeypatch, apply):
-    from quiet_memo.memory import service as module
-    from quiet_memo.memory.models import Candidate
+    from syvrio.memory import service as module
+    from syvrio.memory.models import Candidate
 
     class Extractor:
         def __init__(self, *args, **kwargs):
@@ -285,7 +285,7 @@ async def test_status_context_usage_matches_last_plan(tmp_path):
 
 
 async def test_history_pages_preserve_records_and_flat_reply_widgets(tmp_path):
-    from quiet_memo.app.chat_widgets import ChatReply, HistoryMore, TranscriptView
+    from syvrio.app.chat_widgets import ChatReply, HistoryMore, TranscriptView
 
     app = build_app(tmp_path, [])
     session = app.sessions.create()
@@ -309,7 +309,7 @@ async def test_history_pages_preserve_records_and_flat_reply_widgets(tmp_path):
 
 @pytest.mark.parametrize("restored", [False, True])
 async def test_assistant_markdown_can_be_selected_and_copied(tmp_path, restored):
-    from quiet_memo.app.chat_widgets import ChatReply
+    from syvrio.app.chat_widgets import ChatReply
 
     app = build_app(tmp_path, [AssistantTurn(content="**合成回复** sample")])
     if restored:
@@ -351,7 +351,7 @@ async def test_resume_session_does_not_show_success_notification(tmp_path, monke
 
 async def test_reply_selection_tracks_stream_updates_and_resize(tmp_path):
     from textual.selection import SELECT_ALL
-    from quiet_memo.app.chat_widgets import ChatReply
+    from syvrio.app.chat_widgets import ChatReply
 
     app = build_app(tmp_path, [])
     async with app.run_test(size=(120, 40)) as pilot:
@@ -377,7 +377,7 @@ async def test_reply_selection_tracks_stream_updates_and_resize(tmp_path):
 
 
 async def test_switch_clears_previous_history_page_state(tmp_path):
-    from quiet_memo.app.chat_widgets import HistoryMore, TranscriptView
+    from syvrio.app.chat_widgets import HistoryMore, TranscriptView
 
     app = build_app(tmp_path, [])
     first, second = app.sessions.create(), app.sessions.create()
@@ -487,7 +487,7 @@ async def test_slash_help_card(tmp_path):
 
 
 async def test_command_palette_filter_navigate_execute(tmp_path):
-    from quiet_memo.app.chat_app import CommandPalette
+    from syvrio.app.chat_app import CommandPalette
 
     app = build_app(tmp_path, [])
     async with app.run_test(size=(120, 40)) as pilot:
@@ -509,7 +509,7 @@ async def test_command_palette_filter_navigate_execute(tmp_path):
 
 
 async def test_command_palette_escape_closes(tmp_path):
-    from quiet_memo.app.chat_app import CommandPalette
+    from syvrio.app.chat_app import CommandPalette
 
     app = build_app(tmp_path, [])
     async with app.run_test(size=(120, 40)) as pilot:
@@ -526,7 +526,7 @@ async def test_command_palette_escape_closes(tmp_path):
 
 @pytest.mark.parametrize("prefix", ["/", "/rename"])
 async def test_command_palette_sits_above_input(tmp_path, prefix):
-    from quiet_memo.app.chat_app import CommandPalette
+    from syvrio.app.chat_app import CommandPalette
 
     app = build_app(tmp_path, [])
     async with app.run_test(size=(120, 40)) as pilot:
@@ -544,8 +544,8 @@ async def test_command_palette_sits_above_input(tmp_path, prefix):
 
 
 async def test_command_palette_columns_align(tmp_path):
-    from quiet_memo.app.chat_app import CommandPalette
-    from quiet_memo.app.chat_widgets import CommandRow
+    from syvrio.app.chat_app import CommandPalette
+    from syvrio.app.chat_widgets import CommandRow
 
     app = build_app(tmp_path, [])
     async with app.run_test(size=(120, 40)) as pilot:
@@ -565,7 +565,7 @@ async def test_command_palette_columns_align(tmp_path):
 
 
 async def test_rename_command_prompts_for_title(tmp_path):
-    from quiet_memo.app.chat_widgets import TextInputScreen
+    from syvrio.app.chat_widgets import TextInputScreen
 
     app = build_app(tmp_path, [])
     session = app.sessions.create()
@@ -601,7 +601,7 @@ async def test_model_picker_can_configure_provider_key(tmp_path, monkeypatch):
 
     from textual.widgets import Label, ListView
 
-    from quiet_memo.app.chat_widgets import PickScreen
+    from syvrio.app.chat_widgets import PickScreen
 
     keys: dict[str, str] = {}
     fake = types.ModuleType("keyring")
@@ -675,7 +675,7 @@ async def test_model_picker_can_remove_provider_key(tmp_path, monkeypatch):
 
     from textual.widgets import Label, ListView
 
-    from quiet_memo.app.chat_widgets import PickScreen
+    from syvrio.app.chat_widgets import PickScreen
 
     keys = {"SILICONFLOW_API_KEY": "sk-test"}
     fake = types.ModuleType("keyring")
@@ -728,9 +728,9 @@ async def test_model_picker_can_remove_provider_key(tmp_path, monkeypatch):
 
 async def test_model_picker_provider_menu_returns_to_models(tmp_path, monkeypatch):
     from textual.widgets import ListView
-    from quiet_memo.app.chat_widgets import ModelPickerScreen
+    from syvrio.app.chat_widgets import ModelPickerScreen
 
-    monkeypatch.setattr("quiet_memo.app.chat_commands.fetch_provider_models", lambda *args, **kwargs: [])
+    monkeypatch.setattr("syvrio.app.chat_commands.fetch_provider_models", lambda *args, **kwargs: [])
     app = build_app(tmp_path, [])
     async with app.run_test(size=(120, 40)) as pilot:
         app._show_model_picker(app._model_entries())
@@ -792,7 +792,7 @@ async def test_ctrl_p_outside_model_picker_keeps_command_palette(tmp_path):
 async def test_model_picker_filters_by_search(tmp_path):
     from textual.widgets import ListView
 
-    from quiet_memo.app.chat_widgets import PickScreen
+    from syvrio.app.chat_widgets import PickScreen
 
     app = build_app(tmp_path, [])
     entries = [
@@ -825,7 +825,7 @@ async def test_model_picker_filters_by_search(tmp_path):
 async def test_model_picker_uses_cache_and_refreshes_in_background(tmp_path, monkeypatch):
     import threading
 
-    from quiet_memo.app.chat_widgets import PickScreen
+    from syvrio.app.chat_widgets import PickScreen
 
     release = threading.Event()
 
@@ -834,11 +834,11 @@ async def test_model_picker_uses_cache_and_refreshes_in_background(tmp_path, mon
         return ["fresh-model"]
 
     monkeypatch.setattr(
-        "quiet_memo.app.chat_commands.cached_provider_models",
+        "syvrio.app.chat_commands.cached_provider_models",
         lambda config: ["cached-model"],
     )
     monkeypatch.setattr(
-        "quiet_memo.app.chat_commands.fetch_provider_models", fake_fetch
+        "syvrio.app.chat_commands.fetch_provider_models", fake_fetch
     )
 
     app = build_app(tmp_path, [])
@@ -873,7 +873,7 @@ async def test_model_picker_uses_cache_and_refreshes_in_background(tmp_path, mon
 async def test_ctrl_b_toggles_sidebar(tmp_path):
     from textual.containers import Vertical
 
-    from quiet_memo.app.chat_app import SidebarToggle
+    from syvrio.app.chat_app import SidebarToggle
 
     app = build_app(tmp_path, [])
     async with app.run_test(size=(120, 40)) as pilot:
@@ -972,8 +972,8 @@ async def test_sidebar_rows_align_with_new_session(tmp_path):
 
 
 async def test_sidebar_items_are_compact_and_clickable(tmp_path):
-    from quiet_memo.agent.session import new_message_id
-    from quiet_memo.app.chat_app import SessionItem
+    from syvrio.agent.session import new_message_id
+    from syvrio.app.chat_app import SessionItem
 
     app = build_app(tmp_path, [])
     ids = []
@@ -1081,7 +1081,7 @@ async def test_resuming_torn_session_shows_recovery_notice_and_continues(tmp_pat
 
 
 async def test_session_switch_updates_sidebar_without_reload(tmp_path, monkeypatch):
-    from quiet_memo.app.chat_app import SessionItem
+    from syvrio.app.chat_app import SessionItem
 
     app = build_app(tmp_path, [])
     store = app.sessions
@@ -1130,7 +1130,7 @@ async def test_delete_session_uses_captured_row(tmp_path):
     app = build_app(tmp_path, [])
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        from quiet_memo.agent.session import new_message_id
+        from syvrio.agent.session import new_message_id
 
         # 待删目标是非当前会话；再留一个有消息的会话撑住列表渲染。
         store = app.sessions
@@ -1164,7 +1164,7 @@ async def test_delete_session_uses_captured_row(tmp_path):
 
         assert not store.exists(session.id)
         assert store.exists(survivor.id)
-        from quiet_memo.app.chat_app import SessionItem
+        from syvrio.app.chat_app import SessionItem
 
         # 文件删除先于 DOM 异步清理完成；等到旧节点移除、列表收敛后再断言。
         remaining = []
@@ -1227,7 +1227,7 @@ async def test_context_custom_rejects_unicode_digits(tmp_path):
 async def test_context_custom_does_not_send_value_as_chat_message(tmp_path):
     from textual.widgets import Label, ListView
 
-    from quiet_memo.app.chat_widgets import PickScreen, TextInputScreen
+    from syvrio.app.chat_widgets import PickScreen, TextInputScreen
 
     app = build_app(tmp_path, [])
     async with app.run_test(size=(120, 40)) as pilot:
@@ -1273,7 +1273,7 @@ async def test_session_picker_focus_bar_follows_selection(tmp_path):
     from textual.color import Color
     from textual.widgets import ListView
 
-    from quiet_memo.app.chat_widgets import SessionPickerScreen
+    from syvrio.app.chat_widgets import SessionPickerScreen
 
     app = build_app(tmp_path, [])
     store = app.sessions
@@ -1381,7 +1381,7 @@ async def test_input_cursor_is_vertical_bar(tmp_path):
 async def test_auto_start_warms_search_in_background(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(
-        "quiet_memo.app.chat_app.ensure_search_daemon",
+        "syvrio.app.chat_app.ensure_search_daemon",
         lambda base_url: calls.append(base_url) or "running",
     )
     app = build_app(
@@ -1443,7 +1443,7 @@ async def test_pending_interactive_approve(tmp_path):
     app = build_app(tmp_path, [])
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        from quiet_memo.memory.models import Candidate, PendingItem
+        from syvrio.memory.models import Candidate, PendingItem
 
         item = PendingItem.from_candidate(
             Candidate(text="低置信的偏好内容", topic="preferences", confidence=0.5), "chat", "low confidence"
@@ -1477,8 +1477,8 @@ async def test_pending_interactive_approve(tmp_path):
 async def test_pending_interactive_edit_approves_only_final_text(tmp_path):
     from textual.widgets import ListView
 
-    from quiet_memo.app.chat_widgets import PickScreen, TextInputScreen
-    from quiet_memo.memory.models import Candidate, PendingItem
+    from syvrio.app.chat_widgets import PickScreen, TextInputScreen
+    from syvrio.memory.models import Candidate, PendingItem
 
     app = build_app(tmp_path, [])
     async with app.run_test(size=(120, 40)) as pilot:
@@ -1578,7 +1578,7 @@ async def test_streaming_roundtrip_renders_single_reply(tmp_path):
 
 async def test_streaming_keeps_text_before_tool_calls(tmp_path):
     # 回归：工具调用前的流式正文不能被最终回复覆盖，事件顺序保持生成顺序。
-    from quiet_memo.llm import ToolCall
+    from syvrio.llm import ToolCall
 
     app = build_app(
         tmp_path,
@@ -1609,7 +1609,7 @@ async def test_streaming_keeps_text_before_tool_calls(tmp_path):
 
 async def test_tool_event_rows_use_single_border_and_assistant_is_qmo(tmp_path):
     # 事件行由 CSS 左边框画一条竖线，正文里不再拼前缀；助手标签统一为 qmo。
-    from quiet_memo.llm import ToolCall
+    from syvrio.llm import ToolCall
 
     app = build_app(
         tmp_path,
@@ -1640,7 +1640,7 @@ async def test_tool_event_rows_use_single_border_and_assistant_is_qmo(tmp_path):
 async def test_streaming_error_marks_interruption(tmp_path):
     # 回归（issue #4）：中途断流保留半截内容并显式标注，不静默吞掉。
     app = build_app(tmp_path, [])
-    from quiet_memo.llm import ChatModelError
+    from syvrio.llm import ChatModelError
 
     class BoomModel:
         def __init__(self):
@@ -1675,7 +1675,7 @@ async def test_streaming_error_marks_interruption(tmp_path):
 async def test_switch_defers_distill_then_catches_up_in_background(tmp_path):
     # 回归：切换会话不做内联抽取（不卡顿），deferred 标记由后台补沉淀消化。
     app = build_app(tmp_path, [], extract_on_exit=True)
-    from quiet_memo.memory.models import Candidate
+    from syvrio.memory.models import Candidate
 
     class CountingExtractor:
         def __init__(self):
@@ -1683,7 +1683,7 @@ async def test_switch_defers_distill_then_catches_up_in_background(tmp_path):
 
         def extract(self, text, context=""):
             self.calls += 1
-            from quiet_memo.memory.models import ExtractionResult
+            from syvrio.memory.models import ExtractionResult
 
             return ExtractionResult(
                 memories=[Candidate(text="后台补记的内容", topic="misc", confidence=0.95)]
@@ -1730,8 +1730,8 @@ async def test_session_picker_search_resume_and_delete(tmp_path):
 
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        from quiet_memo.agent.session import new_message_id
-        from quiet_memo.app.chat_widgets import SessionPickerScreen
+        from syvrio.agent.session import new_message_id
+        from syvrio.app.chat_widgets import SessionPickerScreen
 
         store = app.sessions
         s1 = store.create()
@@ -1847,7 +1847,7 @@ async def test_transcript_replays_tool_events(tmp_path):
     # 回归：旧会话不仅回放问答正文，也要能看到当时的工具事件。
     import json
 
-    from quiet_memo.agent.tools import SEARCH_NOTICE
+    from syvrio.agent.tools import SEARCH_NOTICE
 
     app = build_app(tmp_path, [])
     session = app.sessions.create()
@@ -1894,7 +1894,7 @@ async def test_transcript_replays_tool_events(tmp_path):
 
 
 async def test_modal_lists_share_chat_scrollbar_style(tmp_path):
-    from quiet_memo.app.chat_widgets import PickScreen, SessionPickerScreen
+    from syvrio.app.chat_widgets import PickScreen, SessionPickerScreen
 
     def scrollbar_style(widget):
         return (
@@ -1933,7 +1933,7 @@ async def test_modal_lists_share_chat_scrollbar_style(tmp_path):
 
 
 async def test_session_picker_is_centered(tmp_path):
-    from quiet_memo.app.chat_widgets import SessionPickerScreen
+    from syvrio.app.chat_widgets import SessionPickerScreen
 
     app = build_app(tmp_path, [])
     session = app.sessions.create()
@@ -1957,7 +1957,7 @@ async def test_session_picker_is_centered(tmp_path):
 async def test_dialog_inputs_share_neutral_focus_style(tmp_path):
     from textual.color import Color
 
-    from quiet_memo.app.chat_widgets import SessionPickerScreen
+    from syvrio.app.chat_widgets import SessionPickerScreen
 
     app = build_app(tmp_path, [])
     session = app.sessions.create()
@@ -1984,7 +1984,7 @@ async def test_dialog_inputs_share_neutral_focus_style(tmp_path):
 
 
 async def test_session_picker_ctrl_r_renames_session(tmp_path):
-    from quiet_memo.app.chat_widgets import SessionPickerScreen, TextInputScreen
+    from syvrio.app.chat_widgets import SessionPickerScreen, TextInputScreen
 
     app = build_app(tmp_path, [])
     session = app.sessions.create()
@@ -2015,7 +2015,7 @@ async def test_session_picker_ctrl_r_renames_session(tmp_path):
 
 
 async def test_session_picker_rename_current_updates_runtime(tmp_path):
-    from quiet_memo.app.chat_widgets import SessionPickerScreen, TextInputScreen
+    from syvrio.app.chat_widgets import SessionPickerScreen, TextInputScreen
 
     app = build_app(tmp_path, [])
     session = app.sessions.create()
@@ -2083,7 +2083,7 @@ def test_fixed_tui_text_is_english():
     import ast
     import re
     from pathlib import Path
-    from quiet_memo.app import chat_app
+    from syvrio.app import chat_app
 
     directory = Path(chat_app.__file__).parent
     for name in ("chat_app", "chat_commands", "chat_widgets", "chat_flow", "command_catalog", "chat_reflection"):
@@ -2578,7 +2578,7 @@ async def test_native_cursor_position_refreshed_on_resize(tmp_path, monkeypatch)
 
 
 async def test_queued_command_rechecks_target_after_another_navigation(tmp_path, monkeypatch):
-    from quiet_memo.app.chat_flow import _QueuedLine
+    from syvrio.app.chat_flow import _QueuedLine
 
     app = build_app(tmp_path, [])
     a = app.sessions.create()
@@ -2611,7 +2611,7 @@ async def test_queued_command_rechecks_target_after_another_navigation(tmp_path,
 
 
 async def test_queued_sync_command_continues_following_message(tmp_path, monkeypatch):
-    from quiet_memo.app.chat_flow import _QueuedLine
+    from syvrio.app.chat_flow import _QueuedLine
 
     app = build_app(tmp_path, [])
     a = app.sessions.create()
@@ -2725,8 +2725,8 @@ async def test_escape_closes_palette_before_stopping(tmp_path):
 async def test_pending_long_text_scrolls_without_hiding_actions(tmp_path, size):
     from textual.containers import VerticalScroll
     from textual.widgets import ListView
-    from quiet_memo.app.chat_widgets import PickScreen
-    from quiet_memo.memory.models import Candidate, PendingItem
+    from syvrio.app.chat_widgets import PickScreen
+    from syvrio.memory.models import Candidate, PendingItem
     app = build_app(tmp_path, [])
     text = "Synthetic [bold] literal 中文 \n" * 100 + "END OF FULL PENDING TEXT"
     item = PendingItem.from_candidate(Candidate(text=text, topic="preferences", confidence=0.5),
@@ -2764,8 +2764,8 @@ async def test_pending_long_text_scrolls_without_hiding_actions(tmp_path, size):
 @pytest.mark.parametrize("action", ["approve", "edit", "reject"])
 async def test_long_pending_review_actions_keep_full_text(tmp_path, action):
     from textual.containers import VerticalScroll
-    from quiet_memo.app.chat_widgets import TextInputScreen
-    from quiet_memo.memory.models import Candidate, PendingItem
+    from syvrio.app.chat_widgets import TextInputScreen
+    from syvrio.memory.models import Candidate, PendingItem
     app = build_app(tmp_path, [])
     text = "Synthetic pending full text 中文 \n" * 30 + "LAST LINE"
     item = PendingItem.from_candidate(Candidate(text=text, confidence=0.5), "chat", "low confidence")
@@ -2800,7 +2800,7 @@ async def test_long_pending_review_actions_keep_full_text(tmp_path, action):
 @pytest.mark.parametrize("size", [(80, 24), (120, 40), (160, 50)])
 async def test_short_pending_review_stays_compact(tmp_path, size):
     from textual.containers import VerticalScroll
-    from quiet_memo.memory.models import Candidate, PendingItem
+    from syvrio.memory.models import Candidate, PendingItem
 
     app = build_app(tmp_path, [])
     item = PendingItem.from_candidate(Candidate(text="Synthetic short confirmation.", confidence=0.5),

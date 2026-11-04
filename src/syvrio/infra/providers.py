@@ -298,7 +298,7 @@ def test_connection(llm: LLMConfig) -> tuple[bool, str]:
 
 def write_config(path: Path, config: Config) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    content = f'''# quiet-memo 配置（由 qm setup 生成）
+    content = f'''# Syvrio 配置（由 syvrio setup 生成）
 vault = {toml_literal(config.vault.as_posix())}
 
 confidence_threshold = {config.confidence_threshold}
@@ -365,7 +365,7 @@ providers = {toml_literal(config.fetch.providers)}
 def resolve_config_path(config_path: Path | None) -> Path:
     if config_path:
         return config_path.expanduser()
-    env_path = os.environ.get("QUIET_MEMO_CONFIG")
+    env_path = os.environ.get("SYVRIO_CONFIG") or os.environ.get("QUIET_MEMO_CONFIG")
     if env_path:
         # 环境变量优先于 CWD：测试隔离与显式选择配置都不应被仓库里的本地配置抢走。
         return Path(env_path).expanduser()
@@ -377,7 +377,7 @@ def resolve_config_path(config_path: Path | None) -> Path:
 
 
 def run_setup(config_path: Path | None = None, vault: Path | None = None) -> dict:
-    """qm setup 顶层入口：先选配置内容，再进入对应向导。"""
+    """syvrio setup 顶层入口：先选配置内容，再进入对应向导。"""
     path = resolve_config_path(config_path)
     config = load_config(path) if path.exists() else Config(vault=default_vault_path())
     if vault is not None:

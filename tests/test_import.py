@@ -6,15 +6,15 @@ import pytest
 
 pytestmark = pytest.mark.memory
 
-from quiet_memo.infra.config import Config, LLMConfig, RetrievalConfig
-from quiet_memo.memory.extractor import (
+from syvrio.infra.config import Config, LLMConfig, RetrievalConfig
+from syvrio.memory.extractor import (
     ExtractorError,
     ImportExtractor,
     parse_import,
     split_chunks,
 )
-from quiet_memo.memory.models import Candidate, ExtractionResult
-from quiet_memo.memory.service import MemoryService
+from syvrio.memory.models import Candidate, ExtractionResult
+from syvrio.memory.service import MemoryService
 
 
 def response(text: str):
@@ -159,7 +159,7 @@ def test_split_chunks_respects_boundaries():
 
 class _StaticResult:
     def __init__(self, memories: list[Candidate]):
-        from quiet_memo.memory.models import ExtractionResult
+        from syvrio.memory.models import ExtractionResult
 
         self.result = ExtractionResult(memories=memories)
 
@@ -197,8 +197,8 @@ def test_import_extractor_injects_existing_topics(monkeypatch):
 
 def test_import_text_passes_store_topics_to_extractor(tmp_path, monkeypatch):
     # 回归：service 注入路径要把 store.topics() 的主题名传给 ImportExtractor。
-    import quiet_memo.memory.service as service_module
-    from quiet_memo.memory.extractor import StaticExtractor
+    import syvrio.memory.service as service_module
+    from syvrio.memory.extractor import StaticExtractor
 
     captured = {}
 

@@ -5,6 +5,8 @@ from pathlib import Path
 
 import typer
 
+from .. import __version__
+
 from ..agent.session import SessionStore
 from ..infra.config import (
     Config,
@@ -22,7 +24,7 @@ from .tui import run_chat
 from .ui import padded, console, fail, print_hits, styled_table
 
 app = typer.Typer(
-    help="quiet-memo — 安静的个人记忆库：默认无感写入本地 Markdown，Git 可回滚，MCP 可调用。",
+    help="Syvrio — Local-first personal AI agent with persistent memory.",
     no_args_is_help=False,
     invoke_without_command=True,
     add_completion=False,
@@ -33,8 +35,11 @@ VAULT_OPTION = typer.Option(None, "--vault", help="覆盖配置中的记忆库�
 
 
 @app.callback()
-def _root(ctx: typer.Context) -> None:
+def _root(ctx: typer.Context, version: bool = typer.Option(False, "--version", help="Show Syvrio version", is_eager=True)) -> None:
     """无子命令时直接进入对话；非交互环境回退到帮助。"""
+    if version:
+        typer.echo(f"Syvrio {__version__}")
+        raise typer.Exit()
     if ctx.invoked_subcommand is not None:
         return
     if not sys.stdin.isatty():
@@ -42,7 +47,7 @@ def _root(ctx: typer.Context) -> None:
         return
     service = _service(None, None)
     if service.config.llm.requires_api_key() and not service.config.llm.api_key():
-        console.print(padded("[#b8b8b8]未配置 API Key，先运行 qm setup。[/]"))
+        console.print(padded("[#b8b8b8]未配置 API Key，先运行 syvrio setup。[/]"))
         return
     try:
         run_chat(service)
@@ -64,7 +69,7 @@ def init(
     """初始化记忆库与 Git 仓库。"""
     vault = vault.expanduser().resolve()
     if vault.exists() and any(vault.iterdir()) and not (vault / ".git").exists() and not force:
-        fail(f"{vault} 非空且不是 quiet-memo 记忆库；确认无误后加 --force。")
+        fail(f"{vault} 非空且不是 Syvrio 记忆库；确认无误后加 --force。")
     config_path = config.expanduser() if config else default_config_path()
     cfg = load_config(config_path) if config_path.exists() else Config(vault=vault)
     vault_changed = cfg.vault.expanduser().resolve() != vault
@@ -240,7 +245,7 @@ def import_memories(
         f"重复 {totals['duplicates']} · 拦截 {totals['blocked']}"
     )
     if apply and totals["queued"]:
-        console.print("运行 qm pending 查看待确认条目。")
+        console.print("运行 syvrio pending 查看待确认条目。")
     if failed_files or failed_chunks:
         console.print(f"部分导入失败：{failed_files} 个文件、{failed_chunks} 个文本块；已处理部分不会回滚。")
         raise typer.Exit(code=1)

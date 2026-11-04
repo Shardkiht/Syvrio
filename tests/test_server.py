@@ -6,11 +6,11 @@ pytestmark = pytest.mark.mcp
 
 from fastmcp import Client
 
-from quiet_memo.app.server import build_server
-from quiet_memo.infra.config import Config, LLMConfig
-from quiet_memo.memory.extractor import StaticExtractor
-from quiet_memo.memory.models import Candidate, ExtractionResult
-from quiet_memo.memory.service import MemoryService
+from syvrio.app.server import build_server
+from syvrio.infra.config import Config, LLMConfig
+from syvrio.memory.extractor import StaticExtractor
+from syvrio.memory.models import Candidate, ExtractionResult
+from syvrio.memory.service import MemoryService
 
 
 def make_server(tmp_path, candidates):

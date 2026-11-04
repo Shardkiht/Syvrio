@@ -8,7 +8,7 @@ import sys
 import tomllib
 import types
 
-from quiet_memo.infra.config import (
+from syvrio.infra.config import (
     ChatConfig,
     Config,
     ConfigError,
@@ -19,14 +19,14 @@ from quiet_memo.infra.config import (
     load_config,
     toml_literal,
 )
-from quiet_memo.infra.providers import PRESETS, display_model, provider_label, write_config
+from syvrio.infra.providers import PRESETS, display_model, provider_label, write_config
 
 
 @pytest.mark.parametrize("provider", ["custom", "deepseek", "spark"])
 def test_model_change_preserves_same_provider_endpoint_and_credentials(tmp_path, monkeypatch, provider):
     from types import SimpleNamespace
-    from quiet_memo.app import actions
-    from quiet_memo.memory.service import MemoryService
+    from syvrio.app import actions
+    from syvrio.memory.service import MemoryService
 
     config_path = tmp_path / "config.toml"
     config = Config(
@@ -63,7 +63,7 @@ def test_litellm_model_names():
 
 
 def test_spark_preset_and_configuration_roundtrip(tmp_path):
-    from quiet_memo.infra.config import infer_provider
+    from syvrio.infra.config import infer_provider
 
     preset = next(item for item in PRESETS if item.key == "spark")
     assert preset.base_url == "https://maas-api.cn-huabei-1.xf-yun.com/v2"
@@ -81,7 +81,7 @@ def test_spark_preset_and_configuration_roundtrip(tmp_path):
 
 def test_spark_chat_parameters_match_maas_contract(monkeypatch):
     from types import SimpleNamespace
-    from quiet_memo.llm import client
+    from syvrio.llm import client
 
     calls = []
     monkeypatch.setenv("SPARK_API_KEY", "synthetic-key")
@@ -103,7 +103,7 @@ def test_spark_chat_parameters_match_maas_contract(monkeypatch):
 
 def test_spark_streaming_preserves_deltas_and_usage(monkeypatch):
     from types import SimpleNamespace
-    from quiet_memo.llm import client
+    from syvrio.llm import client
 
     calls = []
     monkeypatch.setenv("SPARK_API_KEY", "synthetic-key")
@@ -124,7 +124,7 @@ def test_spark_streaming_preserves_deltas_and_usage(monkeypatch):
 
 
 def test_spark_does_not_offer_openai_reasoning_effort():
-    from quiet_memo.llm.client import supported_params
+    from syvrio.llm.client import supported_params
 
     assert "reasoning_effort" not in supported_params("openai/spark-x2.6")
     assert "tools" in supported_params("openai/spark-x2.6")
@@ -252,7 +252,7 @@ def test_search_auto_start_defaults_match_example(tmp_path):
 def test_local_provider_without_key_reaches_backend(monkeypatch):
     import pytest
 
-    from quiet_memo.llm.client import LiteLLMChatModel
+    from syvrio.llm.client import LiteLLMChatModel
 
     model = LiteLLMChatModel(LLMConfig(provider="ollama", api_key_env="MISSING_LOCAL_KEY"))
     called = []
@@ -261,7 +261,7 @@ def test_local_provider_without_key_reaches_backend(monkeypatch):
         called.append(True)
         raise RuntimeError("backend reached")
 
-    monkeypatch.setattr("quiet_memo.llm.client.complete", fake_complete)
+    monkeypatch.setattr("syvrio.llm.client.complete", fake_complete)
     with pytest.raises(RuntimeError, match="backend reached"):
         model.chat([], [])
     assert called
@@ -309,7 +309,7 @@ def test_search_config_roundtrip(tmp_path):
 
 
 def test_resolve_config_path_env_wins_over_cwd(tmp_path, monkeypatch):
-    from quiet_memo.infra.providers import resolve_config_path
+    from syvrio.infra.providers import resolve_config_path
 
     (tmp_path / "quiet-memo.toml").write_text("vault = 'local'\n", encoding="utf-8")
     env_path = tmp_path / "isolated.toml"
@@ -337,7 +337,7 @@ def test_provider_presets_cover_domestic_providers():
 
 
 def test_litellm_metadata_exposes_context_and_reasoning():
-    from quiet_memo.llm import model_metadata, supported_params
+    from syvrio.llm import model_metadata, supported_params
 
     info = model_metadata("openai/gpt-4o-mini")
     assert info.get("max_input_tokens", 0) > 0
@@ -345,14 +345,14 @@ def test_litellm_metadata_exposes_context_and_reasoning():
 
 
 def test_openai_compatible_model_does_not_claim_openai_params():
-    from quiet_memo.llm import supported_params
+    from syvrio.llm import supported_params
 
     # 硅基流动等自定义端点用 openai/ 前缀；未知 id 不能套用通用 OpenAI 参数表。
     assert supported_params("openai/deepseek-ai/DeepSeek-V4.1-Flash") == ()
 
 
 def test_provider_model_list_cache(monkeypatch):
-    from quiet_memo.llm import client
+    from syvrio.llm import client
 
     config = LLMConfig()
     calls = []
@@ -375,7 +375,7 @@ def test_provider_model_list_cache(monkeypatch):
 
 
 def test_cached_provider_models_reads_cache_only(monkeypatch):
-    from quiet_memo.llm import client
+    from syvrio.llm import client
 
     config = LLMConfig()
     calls = []
@@ -400,7 +400,7 @@ def test_cancellable_transport_closes_without_waiting_for_tokens(monkeypatch, be
     import asyncio
     from threading import Event
     from types import SimpleNamespace
-    from quiet_memo.llm import client
+    from syvrio.llm import client
 
     cancel = Event()
     closed = []
@@ -433,7 +433,7 @@ def test_cancellable_transport_closes_without_waiting_for_tokens(monkeypatch, be
 def test_cancellable_transport_normal_completion_and_tool_fragments(monkeypatch):
     from threading import Event
     from types import SimpleNamespace
-    from quiet_memo.llm import client
+    from syvrio.llm import client
 
     closed = []
     sent = []
@@ -468,7 +468,7 @@ def test_cancellable_transport_normal_completion_and_tool_fragments(monkeypatch)
 
 def test_cancellable_stream_with_installed_litellm_mock_transport(monkeypatch):
     from threading import Event
-    from quiet_memo.llm import client
+    from syvrio.llm import client
 
     litellm = client._litellm()
     original = litellm.acompletion
@@ -520,7 +520,7 @@ class _FakeQuestionary:
 
 def _script_answers(monkeypatch, answers: list):
     """把 providers.ask/questionary 换成按脚本出队的假交互。"""
-    from quiet_memo.infra import providers as providers_module
+    from syvrio.infra import providers as providers_module
 
     queue = list(answers)
 
@@ -553,7 +553,7 @@ def test_run_setup_routes_to_search_wizard(tmp_path, monkeypatch):
     _script_answers(
         monkeypatch, ["search", "providers", "open_websearch", "back", "done"]
     )
-    from quiet_memo.infra.providers import run_setup
+    from syvrio.infra.providers import run_setup
 
     result = run_setup(config_path, None)
     assert result["mode"] == "search"
@@ -568,7 +568,7 @@ def test_run_setup_routes_to_search_wizard(tmp_path, monkeypatch):
 def test_search_setup_saves_key_and_enables_search_and_fetch(tmp_path, monkeypatch):
     import tomllib
 
-    from quiet_memo.infra import providers as providers_module
+    from syvrio.infra import providers as providers_module
 
     config_path = tmp_path / "quiet-memo.toml"
     config_path.write_text("[search]\n", encoding="utf-8")
@@ -601,7 +601,7 @@ def test_search_setup_saves_key_and_enables_search_and_fetch(tmp_path, monkeypat
 
 
 def test_search_setup_refuses_enable_without_key(tmp_path, monkeypatch):
-    from quiet_memo.infra import providers as providers_module
+    from syvrio.infra import providers as providers_module
 
     config_path = tmp_path / "quiet-memo.toml"
     config_path.write_text("[search]\n", encoding="utf-8")
@@ -619,7 +619,7 @@ def test_search_setup_refuses_enable_without_key(tmp_path, monkeypatch):
 
 
 def test_search_setup_updates_existing_key(tmp_path, monkeypatch):
-    from quiet_memo.infra import providers as providers_module
+    from syvrio.infra import providers as providers_module
 
     config_path = tmp_path / "quiet-memo.toml"
     config_path.write_text("[search]\n", encoding="utf-8")
@@ -636,7 +636,7 @@ def test_search_setup_updates_existing_key(tmp_path, monkeypatch):
 def test_search_setup_adjusts_provider_order(tmp_path, monkeypatch):
     import tomllib
 
-    from quiet_memo.infra import providers as providers_module
+    from syvrio.infra import providers as providers_module
 
     config_path = tmp_path / "quiet-memo.toml"
     config_path.write_text(
@@ -661,7 +661,7 @@ def test_search_setup_adjusts_provider_order(tmp_path, monkeypatch):
 
 
 def test_search_setup_search_and_fetch_independent(tmp_path, monkeypatch):
-    from quiet_memo.infra import providers as providers_module
+    from syvrio.infra import providers as providers_module
 
     config_path = tmp_path / "quiet-memo.toml"
     config_path.write_text("[search]\n", encoding="utf-8")
@@ -688,7 +688,7 @@ def test_search_setup_search_and_fetch_independent(tmp_path, monkeypatch):
 
 def test_llm_setup_flow_unchanged(tmp_path, monkeypatch):
     """顶层菜单选 LLM 时走原有流程，返回结构不变。"""
-    from quiet_memo.infra import providers as providers_module
+    from syvrio.infra import providers as providers_module
 
     config_path = tmp_path / "quiet-memo.toml"
     config_path.write_text("[search]\n", encoding="utf-8")
@@ -720,7 +720,7 @@ def test_search_setup_can_edit_daily_and_monthly_limits(tmp_path, monkeypatch):
     """启用官方厂商时询问每日上限；留空回退默认 20。"""
     import tomllib
 
-    from quiet_memo.infra import providers as providers_module
+    from syvrio.infra import providers as providers_module
 
     config_path = tmp_path / "quiet-memo.toml"
     config_path.write_text("[search]\n", encoding="utf-8")
@@ -752,7 +752,7 @@ def test_search_setup_can_edit_daily_and_monthly_limits(tmp_path, monkeypatch):
 
 
 def test_search_setup_uses_exa_monthly_default(tmp_path, monkeypatch):
-    from quiet_memo.infra import providers as providers_module
+    from syvrio.infra import providers as providers_module
 
     config_path = tmp_path / "quiet-memo.toml"
     config_path.write_text("[search]\n", encoding="utf-8")
@@ -778,8 +778,8 @@ def test_search_setup_uses_exa_monthly_default(tmp_path, monkeypatch):
 
 
 def test_baidu_menu_only_offers_search(monkeypatch, tmp_path):
-    from quiet_memo.infra import providers as module
-    from quiet_memo.infra.config import Config
+    from syvrio.infra import providers as module
+    from syvrio.infra.config import Config
     menus = []
     def select(title, choices):
         menus.append([choice.value for choice in choices])
@@ -794,9 +794,9 @@ def test_baidu_menu_only_offers_search(monkeypatch, tmp_path):
 
 
 def test_usage_menu_zero_reset_and_resume(tmp_path, monkeypatch, capsys):
-    from quiet_memo.infra import providers as module
-    from quiet_memo.infra.config import Config, UsageLimit, load_config
-    from quiet_memo.infra.search.usage import UsageLimiter
+    from syvrio.infra import providers as module
+    from syvrio.infra.config import Config, UsageLimit, load_config
+    from syvrio.infra.search.usage import UsageLimiter
     config = Config(vault=tmp_path / "vault")
     limiter = UsageLimiter(config.search.usage_limits, config.vault / ".quiet-memo/usage.json")
     limiter.record("exa")
