@@ -84,7 +84,7 @@ def run_case(case: Case, vault: Path) -> str | None:
 
 def main() -> int:
     failures = []
-    with TemporaryDirectory(prefix="qm-memory-eval-") as directory:
+    with TemporaryDirectory(prefix="syvrio-memory-eval-") as directory:
         for index, case in enumerate(CASES):
             error = run_case(case, Path(directory) / str(index))
             if error:
