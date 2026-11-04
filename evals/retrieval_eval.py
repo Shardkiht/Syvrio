@@ -188,7 +188,7 @@ def main() -> None:
     parser.add_argument("--failures", action="store_true", help="打印未过 @3 的用例")
     args = parser.parse_args()
 
-    with tempfile.TemporaryDirectory(prefix="qm-eval-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="syvrio-eval-") as tmp:
         vault = Path(tmp) / "vault"
         config = Config(vault=vault, llm=LLMConfig(), retrieval=RetrievalConfig(method="keyword"))
         service = MemoryService(config)
