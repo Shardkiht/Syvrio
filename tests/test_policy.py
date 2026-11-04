@@ -4,8 +4,8 @@ import pytest
 
 pytestmark = pytest.mark.memory
 
-from quiet_memo.memory.models import Candidate
-from quiet_memo.memory.policy import decide
+from syvrio.memory.models import Candidate
+from syvrio.memory.policy import decide
 
 
 def test_high_confidence_is_admitted():
