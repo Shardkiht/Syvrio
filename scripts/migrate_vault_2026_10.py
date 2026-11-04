@@ -14,9 +14,9 @@ import json
 import re
 from pathlib import Path
 
-from quiet_memo.infra.config import load_config
-from quiet_memo.infra.gitops import GitRepo
-from quiet_memo.memory.service import MemoryService
+from syvrio.infra.config import load_config
+from syvrio.infra.gitops import GitRepo
+from syvrio.memory.service import MemoryService
 
 # 行首小节前缀：1-2 位数字 + 空格 + 含 CJK 的短标签 + ｜（只剥第一段）。
 # 日期开头（"2026-10-24 …"）因第 3 位非空格不会误中；无 ｜ 的正文不会误中。
