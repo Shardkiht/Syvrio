@@ -8,15 +8,15 @@ import pytest
 
 pytestmark = pytest.mark.search
 
-from quiet_memo.infra.search.base import (
+from syvrio.infra.search.base import (
     ProviderError,
     ProviderErrorKind,
     SearchQuery,
     SearchResult,
 )
-from quiet_memo.infra.search.quality import analyze_query, result_relevance
-from quiet_memo.infra.search.cache import SearchCache
-from quiet_memo.infra.search.router import SearchRouter
+from syvrio.infra.search.quality import analyze_query, result_relevance
+from syvrio.infra.search.cache import SearchCache
+from syvrio.infra.search.router import SearchRouter
 
 
 class EngineProvider:
@@ -275,7 +275,7 @@ def test_multi_engine_request_preserves_real_engine():
 
 def test_mapped_result_keeps_daemon_engine():
     """T07：daemon 逐条返回的 engine/source 必须映射进结果，不能全标成槽位引擎。"""
-    from quiet_memo.infra.search.open_websearch import _map_result
+    from syvrio.infra.search.open_websearch import _map_result
 
     mapped = _map_result(
         {"title": "t", "url": "https://example.com/a", "engine": "baidu"}
@@ -289,7 +289,7 @@ def test_mapped_result_keeps_daemon_engine():
 
 def test_request_timeout_bounded_by_remaining_budget(monkeypatch):
     """T14：单次请求超时上限取剩余预算，不能拿默认 10s 越过总预算。"""
-    from quiet_memo.infra.search import router as router_module
+    from syvrio.infra.search import router as router_module
 
     clock = [0.0]
     seen_timeouts: list[float | None] = []
@@ -319,7 +319,7 @@ def test_request_timeout_bounded_by_remaining_budget(monkeypatch):
 
 def test_partial_failures_surfaced_with_results():
     """partialFailures 不因有部分结果被静默吞掉：转换成结构化失败随结果返回。"""
-    from quiet_memo.infra.search.base import SearchFailure
+    from syvrio.infra.search.base import SearchFailure
 
     class PartialProvider:
         name = "fake"
@@ -343,7 +343,7 @@ def test_partial_failures_surfaced_with_results():
 
 def test_engine_rank_evidence_breaks_relevance_ties():
     """同等相关时，引擎内名次靠前的候选排前（上游排序信号）。"""
-    from quiet_memo.infra.search.router import CandidatePool
+    from syvrio.infra.search.router import CandidatePool
 
     analysis = analyze_query("tibo")
     second = SearchResult("Tibo shares update", "https://example.com/second", "")
@@ -357,7 +357,7 @@ def test_engine_rank_evidence_breaks_relevance_ties():
 
 def test_cross_engine_corroboration_boosts_confidence():
     """多引擎独立返回同一 URL：交叉命中证据提升排序，排名证据保留。"""
-    from quiet_memo.infra.search.router import CandidatePool
+    from syvrio.infra.search.router import CandidatePool
 
     analysis = analyze_query("tibo")
     corroborated = SearchResult("Tibo update", "https://example.com/a", "")
@@ -378,7 +378,7 @@ def test_cross_engine_corroboration_boosts_confidence():
 
 def test_cross_provider_same_url_counts_as_corroboration():
     """不同 Provider 返回同一 URL：交叉来源按 (provider, engine) 身份统计。"""
-    from quiet_memo.infra.search.router import CandidatePool
+    from syvrio.infra.search.router import CandidatePool
 
     analysis = analyze_query("tibo")
     from_a = SearchResult("Tibo update", "https://example.com/a", "")
@@ -395,7 +395,7 @@ def test_cross_provider_same_url_counts_as_corroboration():
 
 def test_published_boost_only_for_freshness_queries():
     """发布时间只在时效查询里加权；无 published 保持未知，不伪造日期。"""
-    from quiet_memo.infra.search.quality import score_entry
+    from syvrio.infra.search.quality import score_entry
 
     result = SearchResult("Tibo announcement", "https://example.com/a", "", published="2026-01-05")
     fresh = analyze_query("Tibo 最新消息")
@@ -410,7 +410,7 @@ def test_published_boost_only_for_freshness_queries():
 
 def test_score_breakdown_sums_to_total():
     """逐特征贡献可解释：各分量之和等于总分。"""
-    from quiet_memo.infra.search.quality import score_entry
+    from syvrio.infra.search.quality import score_entry
 
     analysis = analyze_query("tibo codex announcement", context_terms=("openai",))
     result = SearchResult(
@@ -437,7 +437,7 @@ def test_score_breakdown_sums_to_total():
 
 def test_www_host_variants_dedupe():
     """www. 前缀差异视为同一页面；其余路径参数谨慎不动。"""
-    from quiet_memo.infra.search.router import CandidatePool, normalize_url
+    from syvrio.infra.search.router import CandidatePool, normalize_url
 
     assert normalize_url("https://WWW.Example.com/a/") == "https://example.com/a"
     pool = CandidatePool()
@@ -448,7 +448,7 @@ def test_www_host_variants_dedupe():
 
 def test_freshness_prefers_dated_result_without_fabricating_dates():
     """T10：时效查询里已解析日期轻度优先；无日期保持未知，不被填充。"""
-    from quiet_memo.infra.search.router import CandidatePool
+    from syvrio.infra.search.router import CandidatePool
 
     dated = SearchResult("Tibo announcement", "https://example.com/a", "")
     dated.published = "2026-01-05"
@@ -469,7 +469,7 @@ def test_freshness_prefers_dated_result_without_fabricating_dates():
 
 def test_baidu_redirect_link_kept_without_auto_follow():
     """T09：跳转链接原样保留，不主动追踪解析；解析只能走 fetch_web。"""
-    from quiet_memo.infra.search.router import normalize_url
+    from syvrio.infra.search.router import normalize_url
 
     link = "https://baidu.com/link?url=zzz"
     # 链接不被解析追踪：URL 原样保留（www. 前缀归一是仅有的宿主差异合并）。
@@ -584,7 +584,7 @@ def test_all_providers_exhausted_finalizes_with_collected_pool():
 
 def test_provider_budget_shared_across_providers(monkeypatch):
     """全局超时预算跨 provider 共享：第一家耗时耗尽后不再打第二家。"""
-    from quiet_memo.infra.search import router as router_module
+    from syvrio.infra.search import router as router_module
 
     clock = [0.0]
 
