@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from quiet_memo.infra.config import Config, RetrievalConfig
-from quiet_memo.memory.extractor import StaticExtractor, parse_extraction
-from quiet_memo.memory.service import MemoryService
+from syvrio.infra.config import Config, RetrievalConfig
+from syvrio.memory.extractor import StaticExtractor, parse_extraction
+from syvrio.memory.service import MemoryService
 
 
 @dataclass(frozen=True)
