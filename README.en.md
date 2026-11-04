@@ -1,13 +1,13 @@
 <div align="center">
 
-# Quiet-Memo
+# Syvrio
 
 **A local-first memory agent that remembers you.**
 
 Turn everyday conversations into long-term Markdown memories you can inspect, trace, and roll back. Use the terminal chat or connect an MCP client.
 
-[![test](https://github.com/Shardkiht/quiet-memo/actions/workflows/test.yml/badge.svg)](https://github.com/Shardkiht/quiet-memo/actions/workflows/test.yml)
-[![PyPI](https://img.shields.io/pypi/v/quiet-memo)](https://pypi.org/project/quiet-memo/)
+[![test](https://github.com/Shardkiht/Syvrio/actions/workflows/test.yml/badge.svg)](https://github.com/Shardkiht/Syvrio/actions/workflows/test.yml)
+![PyPI status](https://img.shields.io/badge/PyPI-syvrio%20pending-lightgrey)
 ![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
@@ -27,15 +27,17 @@ Stable showcase: `main` was frozen after PR #15; `portfolio-2026-11-01` (`316a03
 
 Requires Python 3.12+, uv, and git.
 
+**Publication status (2026-11-04):** `syvrio` is not yet published on PyPI. The install command below applies only after publication; until then install from source. The existing `quiet-memo` distribution is unchanged. `qm` and `quietmemo` remain compatible CLI aliases.
+
 ```bash
-uv tool install quiet-memo
-qm setup
+uv tool install syvrio
+syvrio setup
 qm
 ```
 
-`qm setup` selects a model provider and configures its API key, and also offers a "search & fetch API" wizard: enter or update keys for Baidu Qianfan, Tavily, Exa, You.com, and Volcengine (stored in the system credential store, never written as plaintext to TOML), enable each vendor's supported Search / Fetch separately (Baidu Qianfan supports Search only), and reorder both provider lists. Official vendors are never enabled automatically just because a key exists — enable them explicitly here; enabling without a valid key is refused. AnySearch and Parallel Search MCP can be enabled anonymously without registration; setting `ANYSEARCH_API_KEY` / `PARALLEL_API_KEY` switches them to authenticated mode, and clearing the key restores anonymous mode. A self-hosted SearXNG instance also needs no key: enter or change its address here and enable it. QM never probes, starts, or modifies that service. open-websearch is free and remains the default, and the default provider order is unchanged. The standard installation does not download a local embedding model; keyword retrieval is used when the vector backend is not installed. Update later with `uv tool upgrade quiet-memo`.
+`syvrio setup` selects a model provider and configures its API key, and also offers a "search & fetch API" wizard: enter or update keys for Baidu Qianfan, Tavily, Exa, You.com, and Volcengine (stored in the system credential store, never written as plaintext to TOML), enable each vendor's supported Search / Fetch separately (Baidu Qianfan supports Search only), and reorder both provider lists. Official vendors are never enabled automatically just because a key exists — enable them explicitly here; enabling without a valid key is refused. AnySearch and Parallel Search MCP can be enabled anonymously without registration; setting `ANYSEARCH_API_KEY` / `PARALLEL_API_KEY` switches them to authenticated mode, and clearing the key restores anonymous mode. A self-hosted SearXNG instance also needs no key: enter or change its address here and enable it. QM never probes, starts, or modifies that service. open-websearch is free and remains the default, and the default provider order is unchanged. The standard installation does not download a local embedding model; keyword retrieval is used when the vector backend is not installed. Update later with `uv tool upgrade syvrio`.
 
-## Why Quiet-Memo
+## Why Syvrio
 
 - **Pick up where you left off.** Personal statements worth keeping can be distilled automatically. Trusted content is written quietly; conflicting or uncertain candidates wait for review.
 - **Inspect and correct what it remembers.** Memories are plain Markdown. Corrections, soft deletions, and sources are recorded, with version history in Git.
@@ -54,21 +56,21 @@ qm
 For development or local code changes:
 
 ```bash
-git clone https://github.com/Shardkiht/quiet-memo.git
-cd quiet-memo
+git clone https://github.com/Shardkiht/Syvrio.git
+cd Syvrio
 uv sync
 
 # Optional: enable local vector retrieval (fastembed + bge-small-zh; ~100MB model download on first run)
 uv sync --extra local-embed
 
 # Enter chat directly (a session is created when you send the first message)
-uv run qm
+uv run syvrio
 uv run quietmemo        # Same as above; equivalent alias
 ```
 
-On first use, run `uv run qm setup` to configure the model and API key. Use `/model` to search and switch models. Press `Ctrl+P` in that screen to open separate provider management for adding, updating, or removing built-in provider API keys; `Esc` returns to the model list. The model picker also supports `Ctrl+R` to refresh and `Ctrl+N` to enter a custom model name.
+On first use, run `uv run syvrio setup` to configure the model and API key. Use `/model` to search and switch models. Press `Ctrl+P` in that screen to open separate provider management for adding, updating, or removing built-in provider API keys; `Esc` returns to the model list. The model picker also supports `Ctrl+R` to refresh and `Ctrl+N` to enter a custom model name.
 
-`qm setup` writes the config file (default: `quiet-memo.toml`), initializes the vault, and optionally runs a connection test. Keys can also be provided through environment variables, which take precedence over keyring:
+`syvrio setup` writes the config file (default: `quiet-memo.toml`), initializes the vault, and optionally runs a connection test. Keys can also be provided through environment variables, which take precedence over keyring:
 
 ```bash
 export DEEPSEEK_API_KEY=sk-...
@@ -153,7 +155,7 @@ fetch_timeout = 45.0            # Separate timeout for fetching page text (secon
 providers = ["open_websearch"] # Fetch provider order, independent from search
 ```
 
-Select iFLYTEK Spark MaaS in `qm setup`, or replace `[llm]` above with this configuration and set the `SPARK_API_KEY` environment variable. Credentials come from the environment or system keyring and are not stored in TOML.
+Select iFLYTEK Spark MaaS in `syvrio setup`, or replace `[llm]` above with this configuration and set the `SPARK_API_KEY` environment variable. Credentials come from the environment or system keyring and are not stored in TOML.
 
 ```toml
 [llm]
@@ -173,7 +175,7 @@ Web search is enabled by default but requires a local open-websearch daemon; see
 
 After sending, an animated indicator, current phase and elapsed seconds appear beside the model name. Context usage is right-aligned, and tool calls are shown when execution starts.
 
-Run `qm` or `quietmemo` to enter the full-screen chat UI (built on Textual; the whole screen reflows when you resize the window); a session is created when you send the first message. `qm chat` is equivalent. The collapsible left sidebar lists sessions: click a session to resume; after clicking the list you can also browse with arrow keys and press Enter, while delete and rename live in `/sessions`; click « at the sidebar's top-right corner (or Ctrl+B) to collapse, and » appears at the chat's top-left corner to expand. The main pane is a wide two-column layout: user messages appear as right-aligned bubbles, assistant replies span the left with speaker headers and times. Typing `/` opens a vertical command palette above the input (arrows to select, Enter to run, ESC to dismiss, rows clickable); the bottom status bar shows the model, context usage as a progress line with used/total numbers, and the pending count; retrieval mode and shortcut hints live in the empty-session welcome, warning past the compaction threshold. Reply text streams in as it is generated (interrupted generations keep the partial text with a marker); tool and retrieval events appear as cards, turns are separated by a divider; exiting (Ctrl+Q or `/exit`) distills the turn's statements with a summary, and uncommitted vault changes found by the startup check are committed automatically.
+Run `syvrio` (legacy aliases: `qm`, `quietmemo`) to enter the full-screen chat UI (built on Textual; the whole screen reflows when you resize the window); a session is created when you send the first message. `qm chat` is equivalent. The collapsible left sidebar lists sessions: click a session to resume; after clicking the list you can also browse with arrow keys and press Enter, while delete and rename live in `/sessions`; click « at the sidebar's top-right corner (or Ctrl+B) to collapse, and » appears at the chat's top-left corner to expand. The main pane is a wide two-column layout: user messages appear as right-aligned bubbles, assistant replies span the left with speaker headers and times. Typing `/` opens a vertical command palette above the input (arrows to select, Enter to run, ESC to dismiss, rows clickable); the bottom status bar shows the model, context usage as a progress line with used/total numbers, and the pending count; retrieval mode and shortcut hints live in the empty-session welcome, warning past the compaction threshold. Reply text streams in as it is generated (interrupted generations keep the partial text with a marker); tool and retrieval events appear as cards, turns are separated by a divider; exiting (Ctrl+Q or `/exit`) distills the turn's statements with a summary, and uncommitted vault changes found by the startup check are committed automatically.
 
 While a reply is generating, keep typing and press Enter to queue messages above the input. They are sent in order after the current reply completes or stops. Press Esc to stop generation while preserving partial output and the unsent draft. Completed tools are not rolled back; an active tool finishes safely before further calls stop. Esc dismisses an open command palette or modal first. The queue is in memory only and is not restored after exit. Sending `/undo` during generation is different from sending a normal message: it immediately signals cancellation instead of entering the FIFO, waits for the worker to stop writing, then withdraws only the in-flight turn bound to its originating session and user message. Repeated `/undo` presses are idempotent, and a background generation cannot undo the session currently being viewed. Existing queued messages are kept but paused after undo so they cannot overwrite the restored text; they resume in order after the user sends the next message. Pending restore text is tracked per session, so undos in different background sessions do not overwrite each other. If the input already contains unsent text it is not replaced; the restore is kept and retried when that session is shown with an empty input. If undo fails or has no target message, queued messages are not paused and continue in order.
 
@@ -202,7 +204,7 @@ In-session commands:
 | `/model` | Search and switch models; `Ctrl+P` opens separate provider management, `Ctrl+R` refreshes, and `Ctrl+N` enters a custom model name. Opens from cache or presets, then refreshes in the background; `/model refresh` skips the old cache |
 | `/think` | Switch reasoning effort: default / low / medium / high, only when the model supports it; applies immediately and persists to the config |
 | `/context` | Switch the context window: presets generated from the current model's limit, custom value allowed; effective on the next turn |
-| `/setup` | Reminds you that the full setup wizard runs `qm setup` in a terminal (manage built-in provider keys with `Ctrl+P` in `/model`) |
+| `/setup` | Reminds you that the full setup wizard runs `syvrio setup` in a terminal (manage built-in provider keys with `Ctrl+P` in `/model`) |
 | `/rename <title>` | Rename the session |
 | `/import <path> [--apply]` | Import a file or the current directory; preview by default, reanalyze and write with `--apply`. Without a path, opens an input dialog |
 | `/inferences` | Inspect, confirm, reject or correct separate inferences |
@@ -218,7 +220,7 @@ In-session commands:
 
 `/git` opens a dedicated Git management screen backed by the real repository: initialization state, Remote and Upstream, current branch, modified files, unpushed commits, the latest commit and latest successful push, auto-sync state, daily time, next run, last result, and the latest failure reason. Missing or unverifiable values are shown as `Not configured` or `Unknown`; a configured Remote is never reported as a verified connection.
 
-`Ctrl+S` only works inside the Git screen and never commits immediately: it opens a confirmation screen, `Enter` runs the background Worker, and `Esc` cancels. Stages are reported as Checking working tree / Creating commit / Pushing to remote / Refreshing status. Stages that did not run are marked `Skipped`; no fake percentage is shown. Closing the screen does not cancel a running operation or release its locks early, and repeated `Ctrl+S` during a run is rejected. If the terminal intercepts `Ctrl+S` as XON/XOFF flow control, click the Synchronize row or adjust the terminal yourself; QuietMemo does not modify terminal settings.
+`Ctrl+S` only works inside the Git screen and never commits immediately: it opens a confirmation screen, `Enter` runs the background Worker, and `Esc` cancels. Stages are reported as Checking working tree / Creating commit / Pushing to remote / Refreshing status. Stages that did not run are marked `Skipped`; no fake percentage is shown. Closing the screen does not cancel a running operation or release its locks early, and repeated `Ctrl+S` during a run is rejected. If the terminal intercepts `Ctrl+S` as XON/XOFF flow control, click the Synchronize row or adjust the terminal yourself; Syvrio does not modify terminal settings.
 
 Sync rules:
 
@@ -278,44 +280,44 @@ You are Ache, my old friend. Keep replies concise, occasionally dry-humored, and
 
 ```bash
 # Extract from a conversation and write silently
-uv run qm memorize "I'm looking for an apartment downtown, budget under 4000, no shared housing"
+uv run syvrio memorize "I'm looking for an apartment downtown, budget under 4000, no shared housing"
 
 # Record directly (no LLM call)
-uv run qm note "I prefer light, tea-like coffee" --topic preferences --title Preferences
+uv run syvrio note "I prefer light, tea-like coffee" --topic preferences --title Preferences
 
 # Import text, chat exports, or documents (dry-run still calls the model;
 # --apply writes the extracted memories)
-uv run qm import ~/personal-memory/profile
-uv run qm import ~/personal-memory/profile --apply
+uv run syvrio import ~/personal-memory/profile
+uv run syvrio import ~/personal-memory/profile --apply
 
 # Initialize / list topics
-uv run qm init
-uv run qm topics
+uv run syvrio init
+uv run syvrio topics
 
 # Search / review pending / approve or reject
-uv run qm recall "downtown"
-uv run qm recall "exhibition" --from 2024 --to 2024-06 --location "Synthetic Gallery"
-uv run qm profile
-uv run qm profile --refresh --requests 1
-uv run qm dream --requests 1
-uv run qm evolve <id> "New synthetic state" --from 2024-06-01
-uv run qm recall "state" --as-of 2024-05-01
-uv run qm recall "state" --view history
-uv run qm inferences
-uv run qm inferences <id> --action confirm
-uv run qm pending
-uv run qm approve p-20261022-140312-a1b2
-uv run qm reject p-20261022-140312-c3d4
+uv run syvrio recall "downtown"
+uv run syvrio recall "exhibition" --from 2024 --to 2024-06 --location "Synthetic Gallery"
+uv run syvrio profile
+uv run syvrio profile --refresh --requests 1
+uv run syvrio dream --requests 1
+uv run syvrio evolve <id> "New synthetic state" --from 2024-06-01
+uv run syvrio recall "state" --as-of 2024-05-01
+uv run syvrio recall "state" --view history
+uv run syvrio inferences
+uv run syvrio inferences <id> --action confirm
+uv run syvrio pending
+uv run syvrio approve p-20261022-140312-a1b2
+uv run syvrio reject p-20261022-140312-c3d4
 
 # Manually correct / forget a memory (soft delete, auditable)
-uv run qm correct mem-20261022-194250-8f1e "The corrected full statement" --reason "info updated"
-uv run qm forget mem-20261022-194250-8f1e
+uv run syvrio correct mem-20261022-194250-8f1e "The corrected full statement" --reason "info updated"
+uv run syvrio forget mem-20261022-194250-8f1e
 
 # Sessions and commits
-uv run qm sessions
-uv run qm status
-uv run qm commit --no-push
-uv run qm history
+uv run syvrio sessions
+uv run syvrio status
+uv run syvrio commit --no-push
+uv run syvrio history
 ```
 
 You can also paste or drag an absolute file path into a chat and ask to summarize it or import the conversation into long-term memory. Quote paths containing spaces. `read_file` (paged analysis) and `import_file` (chunked preview/write) are available only for paths supplied in the current user message. They do not grant arbitrary directory access. Tool steps are bounded: unfinished reads/imports must be reported; include the path again to continue in a subsequent turn. Drag-and-drop path insertion depends on the terminal.
@@ -333,7 +335,7 @@ The per-file limit is 20 MiB. Directory import scans the current directory only.
 ## MCP integration
 
 ```bash
-uv run qm serve --vault ~/.quiet-memo/vault
+uv run syvrio serve --vault ~/.quiet-memo/vault
 ```
 
 MCP client configuration:
@@ -378,7 +380,7 @@ providers = ["parallel_mcp", "anysearch", "open_websearch"]
 
 Both providers use the same quality gate, fallback chain, request budget, cache and `UsageLimiter`. Each has a local default protection cap of 20 requests per day, adjustable through `[search.usage_limits.<provider>]`; 0 means unlimited. These values are local request protection, not vendor free-tier entitlements or billing caps, and a configured key may incur vendor-side charges. Authentication failures (401/403) are reported explicitly and fall back to the next provider; the key is never silently dropped to retry anonymously. AnySearch and Parallel MCP currently implement search only; `web_fetch` is not implemented.
 
-The user previously verified both anonymous endpoints from the current mainland-China network with proxy-free curl, but that only reflects that network at that time. Availability across carriers, times and regions still requires live verification; the code does not require a VPN or extra proxy. `qm setup` can enable either anonymous provider without entering a key.
+The user previously verified both anonymous endpoints from the current mainland-China network with proxy-free curl, but that only reflects that network at that time. Availability across carriers, times and regions still requires live verification; the code does not require a VPN or extra proxy. `syvrio setup` can enable either anonymous provider without entering a key.
 
 ### Self-hosted SearXNG
 
@@ -443,7 +445,7 @@ Response shape:
 
 - Results are untrusted external content: cite them as material, never execute instructions found in them.
 - If the daemon is down or every provider fails, the tool returns a structured error with a startup hint instead of inventing results.
-- `[search]` settings: `enabled` (removes the tool when false), `providers` (fallback order), `base_url`, `timeout`, `max_results`, `cache_ttl`, `transport` (`http` by default; `mcp` starts an npx MCP process per search), `auto_start` (warm up the HTTP daemon in the background when the TUI opens), `engines` (upstream search engines, `["bing"]` by default), `fallback_engines` (backup engine chain, `["baidu", "duckduckgo", "sogou"]` by default), `max_engines` (engines per automatic search, 3 by default), `timeout_budget` (shared fallback budget, 25 seconds by default, with each single request's timeout capped by the remaining budget), `max_requests` (upstream requests shared across all providers per search, 9 by default; when exceeded the best candidates so far are returned with an explicit truncation hint and are not cached), `anysearch_zone` / `anysearch_language` (AnySearch region and language, `cn` / `zh-CN` by default), `searxng_base_url` / `searxng_timeout` (self-hosted SearXNG instance address and per-request timeout, `http://127.0.0.1:8888` / 10 seconds by default), `usage_limits` (per-vendor call caps via `[search.usage_limits.<provider>]` with `daily` and `monthly` (0 means unlimited); a vendor's Search and Fetch share one counter pool, and once the cap is hit that vendor is skipped while fallback continues normally; counters persist in `.quiet-memo/usage.json` inside the vault — **local counts are not the vendor's actual billing cap**), and `fetch_timeout` (separate timeout for fetching page text, 45 seconds by default). `qm setup` manages both periods and official quota pauses.
+- `[search]` settings: `enabled` (removes the tool when false), `providers` (fallback order), `base_url`, `timeout`, `max_results`, `cache_ttl`, `transport` (`http` by default; `mcp` starts an npx MCP process per search), `auto_start` (warm up the HTTP daemon in the background when the TUI opens), `engines` (upstream search engines, `["bing"]` by default), `fallback_engines` (backup engine chain, `["baidu", "duckduckgo", "sogou"]` by default), `max_engines` (engines per automatic search, 3 by default), `timeout_budget` (shared fallback budget, 25 seconds by default, with each single request's timeout capped by the remaining budget), `max_requests` (upstream requests shared across all providers per search, 9 by default; when exceeded the best candidates so far are returned with an explicit truncation hint and are not cached), `anysearch_zone` / `anysearch_language` (AnySearch region and language, `cn` / `zh-CN` by default), `searxng_base_url` / `searxng_timeout` (self-hosted SearXNG instance address and per-request timeout, `http://127.0.0.1:8888` / 10 seconds by default), `usage_limits` (per-vendor call caps via `[search.usage_limits.<provider>]` with `daily` and `monthly` (0 means unlimited); a vendor's Search and Fetch share one counter pool, and once the cap is hit that vendor is skipped while fallback continues normally; counters persist in `.quiet-memo/usage.json` inside the vault — **local counts are not the vendor's actual billing cap**), and `fetch_timeout` (separate timeout for fetching page text, 45 seconds by default). `syvrio setup` manages both periods and official quota pauses.
 
 Controlled real-network smoke test: `scripts/smoke_search_apis.py` by default only performs local checks (key readability, whether each vendor would register; anonymous providers are marked registrable without a key) and never sends a request; adding `--provider <vendor> --operation search|fetch --live` sends at most `--max-requests` (default 1, cap 10) real requests to a single vendor and prints a desensitized report (success, result count or content length, error kind, duration and unverified fields). Keys are read only from environment variables or the system credential store and never echoed. Page fetching is controlled by a separate `[fetch]` section: `providers` is the fetch provider order (`["open_websearch"]` by default), independent of the search provider order; official vendors with a configured key (tavily / exa / you / volcengine) join fetching only once listed here.
 - A daemon started by `auto_start` has no visible console window on Windows and stays resident for reuse after the TUI exits.
@@ -500,7 +502,7 @@ Credential detection considers assignment syntax and separators. It permits Chin
 ## Structure
 
 ```text
-src/quiet_memo/
+src/syvrio/
 ├── app/          cli.py, server.py, tui.py, chat_app.py, chat_commands.py, chat_flow.py,
 │                 chat_widgets.py, chat_input.py, chat_theme.py, command_catalog.py,
 │                 actions.py, ui.py, session_ui.py, chat_reflection.py, chat_git.py,
@@ -586,18 +588,18 @@ On a real 797-entry personal vault (anonymized, aggregate metrics only), after f
 
 ## Roadmap
 
-The full backlog lives in [GitHub Issues](https://github.com/Shardkiht/quiet-memo/issues). The directions below are ordered by **approximate implementation difficulty**, not a fixed shipping sequence. All features serve **personal, everyday conversational memory**, not a general-purpose work agent.
+The full backlog lives in [GitHub Issues](https://github.com/Shardkiht/Syvrio/issues). The directions below are ordered by **approximate implementation difficulty**, not a fixed shipping sequence. All features serve **personal, everyday conversational memory**, not a general-purpose work agent.
 
 | Difficulty | Direction | Scope |
 | --- | --- | --- |
-| Low–medium-low | [Memory context: time, place, emotion](https://github.com/Shardkiht/quiet-memo/issues/10) | Fields, storage, timezone-aware message anchors and relative-date rules are implemented; inferred emotion remains planned |
-| Low–medium | [Separate inference records and user review](https://github.com/Shardkiht/quiet-memo/issues/11) | Separate storage, evidence deduplication, CLI/TUI review and source invalidation are implemented; review UX remains extensible |
-| Medium–medium-high | [Temporal evolution and contextual recall](https://github.com/Shardkiht/quiet-memo/issues/12) | Context filters, current/historical views and explicit evolution are implemented; advanced temporal reranking remains planned |
-| High | [Dream memory / Dreaming](https://github.com/Shardkiht/quiet-memo/issues/8) | Idle TUI reflection, request budgets, pause and recovery are implemented |
-| High | [Dynamic user profiles](https://github.com/Shardkiht/quiet-memo/issues/9) | Rebuildable fact/inference profiles, automatic idle refresh and relevant confirmed context are implemented; longitudinal semantic evaluation remains planned |
-| Very high / long-term | [Longitudinal user understanding / evolutionary cognition](https://github.com/Shardkiht/quiet-memo/issues/18) | Planned: trace evidence across time to distinguish stable traits, short-term fluctuations, life phases and long-term trends; produce reviewable, rebuildable insights distinct from individual fact evolution or current profiles |
-| Very high / long-term | [Proactive recall across AI clients](https://github.com/Shardkiht/quiet-memo/issues/13) | Surface relevant memories without explicit prompts where client integrations permit |
-| Ongoing | [Memory quality and regression evaluation](https://github.com/Shardkiht/quiet-memo/issues/14) | Synthetic tests for extraction/conflicts, temporal change, emotional inference, and implicit recall |
+| Low–medium-low | [Memory context: time, place, emotion](https://github.com/Shardkiht/Syvrio/issues/10) | Fields, storage, timezone-aware message anchors and relative-date rules are implemented; inferred emotion remains planned |
+| Low–medium | [Separate inference records and user review](https://github.com/Shardkiht/Syvrio/issues/11) | Separate storage, evidence deduplication, CLI/TUI review and source invalidation are implemented; review UX remains extensible |
+| Medium–medium-high | [Temporal evolution and contextual recall](https://github.com/Shardkiht/Syvrio/issues/12) | Context filters, current/historical views and explicit evolution are implemented; advanced temporal reranking remains planned |
+| High | [Dream memory / Dreaming](https://github.com/Shardkiht/Syvrio/issues/8) | Idle TUI reflection, request budgets, pause and recovery are implemented |
+| High | [Dynamic user profiles](https://github.com/Shardkiht/Syvrio/issues/9) | Rebuildable fact/inference profiles, automatic idle refresh and relevant confirmed context are implemented; longitudinal semantic evaluation remains planned |
+| Very high / long-term | [Longitudinal user understanding / evolutionary cognition](https://github.com/Shardkiht/Syvrio/issues/18) | Planned: trace evidence across time to distinguish stable traits, short-term fluctuations, life phases and long-term trends; produce reviewable, rebuildable insights distinct from individual fact evolution or current profiles |
+| Very high / long-term | [Proactive recall across AI clients](https://github.com/Shardkiht/Syvrio/issues/13) | Surface relevant memories without explicit prompts where client integrations permit |
+| Ongoing | [Memory quality and regression evaluation](https://github.com/Shardkiht/Syvrio/issues/14) | Synthetic tests for extraction/conflicts, temporal change, emotional inference, and implicit recall |
 
 Other backlog items:
 
@@ -680,7 +682,7 @@ monthly = 800
 
 Legacy `period` / `max_calls` settings override defaults and save in the new format. Legacy records preserve their known period; the other period's unknown history is labeled rather than invented, with newly observed requests counted thereafter. Tavily Credits, Exa dollar credits and You.com balances are not interchangeable with request counts: balances may run out, or charges may accrue, before the local limit.
 
-In `qm setup`, select search/fetch setup then quota and official-pause management to view defaults, effective limits, tracked usage, remaining counts and pause reasons; edit both caps (0 means unlimited), restore defaults, or clear an official pause without resetting counters. Enabling a provider no longer assigns a universal daily cap of 20.
+In `syvrio setup`, select search/fetch setup then quota and official-pause management to view defaults, effective limits, tracked usage, remaining counts and pause reasons; edit both caps (0 means unlimited), restore defaults, or clear an official pause without resetting counters. Enabling a provider no longer assigns a universal daily cap of 20.
 
 Only documented official quota/balance/spending-limit errors persist a pause. Ordinary rate limits, timeouts, 5xx and authentication failures do not. Local-limit and official-pause reasons differ; automatic fallback continues, while explicit provider selection never silently substitutes another provider. Cached results remain available. A pause expires automatically only with a reliable recovery timestamp. The checked vendor documents do not establish exact reset instants/timezones for these account errors, so current recognized errors require manual recovery rather than guessed calendar resets.
 
@@ -700,9 +702,9 @@ The evolution TUI uses neutral gray surfaces with a sky-blue accent (`#6CB6FF`).
 The sidebar starts collapsed. Press `Ctrl+B` or click the top-left expand control to show conversations.
 
 
-The minimal home screen uses a large, uniformly soft-gray QuietMemo outline terminal wordmark (taller uppercase Q/M with smaller lowercase letters) and one short prompt, with no overview data or conversation cards. Use `/sessions` or expand the sidebar to access conversations.
+The minimal home screen uses a large, uniformly soft-gray Syvrio outline terminal wordmark (taller uppercase Q/M with smaller lowercase letters) and one short prompt, with no overview data or conversation cards. Use `/sessions` or expand the sidebar to access conversations.
 
-The wordmark uses thin strokes and open counters. Narrow terminals fall back to the full plain QuietMemo title rather than cropping the lettering.
+The wordmark uses thin strokes and open counters. Narrow terminals fall back to the full plain Syvrio title rather than cropping the lettering.
 
 AI output follows only while you are at the bottom. Scrolling up or selecting conversation text preserves your reading position; returning to the bottom resumes following. The input caret pauses during conversation selection and returns when you click the composer or type. User messages use a blue left marker.
 

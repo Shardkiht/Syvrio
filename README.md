@@ -1,13 +1,13 @@
 <div align="center">
 
-# Quiet-Memo
+# Syvrio
 
 **让下一次对话，仍然记得你。**
 
 将日常对话中的事实、偏好和计划沉淀为本地 Markdown 长期记忆，可审阅、可追溯、可回滚。支持终端对话与 MCP。
 
-[![test](https://github.com/Shardkiht/quiet-memo/actions/workflows/test.yml/badge.svg)](https://github.com/Shardkiht/quiet-memo/actions/workflows/test.yml)
-[![PyPI](https://img.shields.io/pypi/v/quiet-memo)](https://pypi.org/project/quiet-memo/)
+[![test](https://github.com/Shardkiht/Syvrio/actions/workflows/test.yml/badge.svg)](https://github.com/Shardkiht/Syvrio/actions/workflows/test.yml)
+![PyPI status](https://img.shields.io/badge/PyPI-syvrio%20pending-lightgrey)
 ![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
@@ -27,15 +27,17 @@
 
 需要 Python 3.12+、uv、git。
 
+**发布状态（2026-11-04）：** `syvrio` 尚未发布到 PyPI。以下安装命令在新包发布后才可使用；目前请按下文从源码运行。旧版 `quiet-memo` 发行包保持不变，`qm`、`quietmemo` 继续作为兼容 CLI。
+
 ```bash
-uv tool install quiet-memo
-qm setup
+uv tool install syvrio
+syvrio setup
 qm
 ```
 
-`qm setup` 选择模型供应商并配置 API Key，也可进入「搜索与网页抓取 API」向导：为百度千帆、Tavily、Exa、You.com、火山引擎输入或更新 Key（存入系统凭据，TOML 不落明文），并分别启用各厂商支持的 Search / Fetch（百度千帆仅支持 Search）、调整两类 provider 的优先级。官方厂商即使已有 Key 也不会自动启用，必须在此显式开启；未配置有效 Key 时无法启用。AnySearch 与 Parallel Search MCP 可以匿名启用，无需先注册；填写 `ANYSEARCH_API_KEY` / `PARALLEL_API_KEY` 后自动改用认证模式，清除 Key 后恢复匿名。自托管 SearXNG 同样无需 Key，可在此填写或修改实例地址并启用；QM 不会探测、启动或改动该服务。open-websearch 免费且始终是默认项，默认 provider 顺序不变。标准安装不需要下载本地向量模型；未安装向量后端时自动使用关键词检索。之后可用 `uv tool upgrade quiet-memo` 更新。
+`syvrio setup` 选择模型供应商并配置 API Key，也可进入「搜索与网页抓取 API」向导：为百度千帆、Tavily、Exa、You.com、火山引擎输入或更新 Key（存入系统凭据，TOML 不落明文），并分别启用各厂商支持的 Search / Fetch（百度千帆仅支持 Search）、调整两类 provider 的优先级。官方厂商即使已有 Key 也不会自动启用，必须在此显式开启；未配置有效 Key 时无法启用。AnySearch 与 Parallel Search MCP 可以匿名启用，无需先注册；填写 `ANYSEARCH_API_KEY` / `PARALLEL_API_KEY` 后自动改用认证模式，清除 Key 后恢复匿名。自托管 SearXNG 同样无需 Key，可在此填写或修改实例地址并启用；QM 不会探测、启动或改动该服务。open-websearch 免费且始终是默认项，默认 provider 顺序不变。标准安装不需要下载本地向量模型；未安装向量后端时自动使用关键词检索。之后可用 `uv tool upgrade syvrio` 更新。
 
-## 为什么用 Quiet-Memo
+## 为什么用 Syvrio
 
 - **下次对话不用从头讲起**：值得保留的本人陈述可自动沉淀，可信内容静默写入，冲突或不确定内容留待确认。
 - **能检查，也能改正**：记忆是普通 Markdown；更正、软删除与来源有记录，Git 保留版本历史。
@@ -54,21 +56,21 @@ qm
 开发或本地修改代码时使用：
 
 ```bash
-git clone https://github.com/Shardkiht/quiet-memo.git
-cd quiet-memo
+git clone https://github.com/Shardkiht/Syvrio.git
+cd Syvrio
 uv sync
 
 # 可选：启用本地向量检索（fastembed + bge-small-zh，首次运行下载约 100MB 模型）
 uv sync --extra local-embed
 
 # 直接进入对话（发送第一条消息时才创建会话）
-uv run qm
+uv run syvrio
 uv run quietmemo        # 同上，等价别名
 ```
 
-首次使用先运行 `uv run qm setup` 配置模型和 API Key；进入对话后用 `/model` 搜索和切换模型，在该界面按 `Ctrl+P` 才打开供应商管理，可添加、更新或移除内置厂商的 API Key，`Esc` 返回模型列表。模型界面还支持 `Ctrl+R` 刷新、`Ctrl+N` 输入自定义模型名。
+首次使用先运行 `uv run syvrio setup` 配置模型和 API Key；进入对话后用 `/model` 搜索和切换模型，在该界面按 `Ctrl+P` 才打开供应商管理，可添加、更新或移除内置厂商的 API Key，`Esc` 返回模型列表。模型界面还支持 `Ctrl+R` 刷新、`Ctrl+N` 输入自定义模型名。
 
-`qm setup` 会写入配置文件（默认 `quiet-memo.toml`），初始化记忆库，并可选做一次连接测试。Key 也可以用环境变量提供，环境变量优先于 keyring：
+`syvrio setup` 会写入配置文件（默认 `quiet-memo.toml`），初始化记忆库，并可选做一次连接测试。Key 也可以用环境变量提供，环境变量优先于 keyring：
 
 ```bash
 export DEEPSEEK_API_KEY=sk-...
@@ -153,7 +155,7 @@ fetch_timeout = 45.0          # 抓取正文的单独超时（秒）
 providers = ["open_websearch"] # 抓取正文用的 provider 顺序，与搜索相互独立
 ```
 
-讯飞 Spark MaaS 可在 `qm setup` 中选择；也可把上面的 `[llm]` 替换为以下配置，并设置环境变量 `SPARK_API_KEY`。凭据由环境变量或系统密钥环读取，不写进 TOML。
+讯飞 Spark MaaS 可在 `syvrio setup` 中选择；也可把上面的 `[llm]` 替换为以下配置，并设置环境变量 `SPARK_API_KEY`。凭据由环境变量或系统密钥环读取，不写进 TOML。
 
 ```toml
 [llm]
@@ -173,7 +175,7 @@ Spark 使用 MaaS 的 Bearer API Key；适配层保留服务端采样默认值�
 
 发送后模型名称旁显示活动加载条、当前阶段和等待秒数；上下文占用位于状态栏右侧，工具开始执行时显示调用提示。
 
-直接运行 `qm` 或 `quietmemo` 进入全屏对话界面（基于 Textual，窗口拉伸时整个画面自适应重排）；会话在发送第一条消息时创建。`qm chat` 等价。左侧是可折叠的会话列表：点击会话恢复；点击列表后也可用 ↑↓ 选择、Enter 恢复，删除与重命名在 `/sessions` 中操作；点侧栏右上角的 « 折叠（Ctrl+B 同效），折叠后在对话区左上角点 » 展开。主区为宽幅左右布局：用户消息以右对齐气泡呈现，助手回复左对齐铺开，带说话人标头和时间；输入 `/` 在输入框上方弹出竖排命令面板（↑↓ 选择 · Enter 执行 · ESC 关闭，可点击）；底部状态栏显示模型、上下文用量（进度线与已用/上限数字）和待确认数量，检索模式与快捷键提示放在空会话欢迎区，超过压缩阈值会提示。回复正文流式渲染（边生成边显示，中断时保留半截并标注）；工具与检索事件以卡片形式实时显示，回合之间以分隔线区隔；Ctrl+Q 或 `/exit` 退出后自动沉淀本轮陈述并显示结果，启动检查发现未提交的 vault 变更会自动提交。
+直接运行 `syvrio`（兼容别名 `qm`、`quietmemo`） 进入全屏对话界面（基于 Textual，窗口拉伸时整个画面自适应重排）；会话在发送第一条消息时创建。`qm chat` 等价。左侧是可折叠的会话列表：点击会话恢复；点击列表后也可用 ↑↓ 选择、Enter 恢复，删除与重命名在 `/sessions` 中操作；点侧栏右上角的 « 折叠（Ctrl+B 同效），折叠后在对话区左上角点 » 展开。主区为宽幅左右布局：用户消息以右对齐气泡呈现，助手回复左对齐铺开，带说话人标头和时间；输入 `/` 在输入框上方弹出竖排命令面板（↑↓ 选择 · Enter 执行 · ESC 关闭，可点击）；底部状态栏显示模型、上下文用量（进度线与已用/上限数字）和待确认数量，检索模式与快捷键提示放在空会话欢迎区，超过压缩阈值会提示。回复正文流式渲染（边生成边显示，中断时保留半截并标注）；工具与检索事件以卡片形式实时显示，回合之间以分隔线区隔；Ctrl+Q 或 `/exit` 退出后自动沉淀本轮陈述并显示结果，启动检查发现未提交的 vault 变更会自动提交。
 
 生成期间可继续输入：按 Enter 将消息放入输入框上方的发送队列，当前回复完成或停止后按提交顺序自动发送。按 Esc 停止当前生成，保留已输出内容和未发送草稿；已执行的工具不回滚，正在执行的工具安全收尾后停止后续调用。命令面板或选择弹窗打开时，Esc 优先关闭面板。队列仅保存在当前进程内，退出后不恢复。
 
@@ -203,7 +205,7 @@ Spark 使用 MaaS 的 Bearer API Key；适配层保留服务端采样默认值�
 | `/model` | 搜索切换模型；`Ctrl+P` 打开独立供应商管理，`Ctrl+R` 刷新，`Ctrl+N` 输入自定义模型名。列表先用缓存或预设打开，再后台刷新；`/model refresh` 跳过旧缓存 |
 | `/think` | 切换思考强度：默认 / low / medium / high，仅模型支持时可选，实时生效并写回配置 |
 | `/context` | 切换上下文长度：档位按当前模型上限生成，也可自定义，下一轮即生效 |
-| `/setup` | 提示完整配置向导需在终端运行 `qm setup`（内置厂商的 Key 增删在 `/model` 按 `Ctrl+P` 管理） |
+| `/setup` | 提示完整配置向导需在终端运行 `syvrio setup`（内置厂商的 Key 增删在 `/model` 按 `Ctrl+P` 管理） |
 | `/rename <title>` | 重命名会话 |
 | `/import <path> [--apply]` | 导入文件或当前层目录；默认预览，`--apply` 重新分析并写入。不带路径时弹出输入框 |
 | `/inferences` | 查看、确认、拒绝或纠正独立推断 |
@@ -219,7 +221,7 @@ Spark 使用 MaaS 的 Bearer API Key；适配层保留服务端采样默认值�
 
 `/git` 打开独立的 Git 管理界面，展示真实仓库状态：仓库是否初始化、Remote 与 Upstream、当前分支、工作区变更数、未推送提交数、最近 Commit 与最近成功 Push 时间、自动同步开关、每日时间、下次执行时间、最近结果与失败原因。尚未配置 Remote/Upstream 或无法确认的数量显示 `Not configured` / `Unknown`，不会因为配置了 Remote 就声称远程已连通。
 
-`Ctrl+S` 只在 Git 管理界面内有效，且不会直接提交：先弹出确认界面，`Enter` 确认后由后台 Worker 执行，`Esc` 取消。执行阶段逐项显示 Checking working tree / Creating commit / Pushing to remote / Refreshing status；没有实际执行的阶段标记 `Skipped`，不显示虚构进度百分比。同步过程中可以关闭界面，Git 操作与锁会继续完成；任务执行中重复按 `Ctrl+S` 会被拒绝。若终端把 `Ctrl+S` 当作 XON/XOFF 流控拦截，可点击界面中的 Synchronize 行，或自行调整终端设置（QuietMemo 不修改系统终端配置）。
+`Ctrl+S` 只在 Git 管理界面内有效，且不会直接提交：先弹出确认界面，`Enter` 确认后由后台 Worker 执行，`Esc` 取消。执行阶段逐项显示 Checking working tree / Creating commit / Pushing to remote / Refreshing status；没有实际执行的阶段标记 `Skipped`，不显示虚构进度百分比。同步过程中可以关闭界面，Git 操作与锁会继续完成；任务执行中重复按 `Ctrl+S` 会被拒绝。若终端把 `Ctrl+S` 当作 XON/XOFF 流控拦截，可点击界面中的 Synchronize 行，或自行调整终端设置（Syvrio 不修改系统终端配置）。
 
 同步规则：
 
@@ -279,43 +281,43 @@ flowchart TD
 
 ```bash
 # 从一段对话抽取并静默写入
-uv run qm memorize "我最近在找市区的房子，预算 4000 以内，不接受合租"
+uv run syvrio memorize "我最近在找市区的房子，预算 4000 以内，不接受合租"
 
 # 直接记录（不调用 LLM）
-uv run qm note "喝咖啡偏好清淡、像茶的风味" --topic preferences --title 偏好
+uv run syvrio note "喝咖啡偏好清淡、像茶的风味" --topic preferences --title 偏好
 
 # 导入文本、聊天导出或文档（默认 dry-run，仍调用模型；--apply 落盘）
-uv run qm import ~/personal-memory/profile
-uv run qm import ~/personal-memory/profile --apply
+uv run syvrio import ~/personal-memory/profile
+uv run syvrio import ~/personal-memory/profile --apply
 
 # 初始化 / 查看主题
-uv run qm init
-uv run qm topics
+uv run syvrio init
+uv run syvrio topics
 
 # 检索 / 查看待确认 / 确认或拒绝
-uv run qm recall "市区"
-uv run qm recall "展览" --from 2024 --to 2024-06 --location "合成展馆"
-uv run qm profile
-uv run qm profile --refresh --requests 1
-uv run qm dream --requests 1
-uv run qm evolve <id> "新的合成状态" --from 2024-06-01
-uv run qm recall "状态" --as-of 2024-05-01
-uv run qm recall "状态" --view history
-uv run qm inferences
-uv run qm inferences <id> --action confirm
-uv run qm pending
-uv run qm approve p-20261022-140312-a1b2
-uv run qm reject p-20261022-140312-c3d4
+uv run syvrio recall "市区"
+uv run syvrio recall "展览" --from 2024 --to 2024-06 --location "合成展馆"
+uv run syvrio profile
+uv run syvrio profile --refresh --requests 1
+uv run syvrio dream --requests 1
+uv run syvrio evolve <id> "新的合成状态" --from 2024-06-01
+uv run syvrio recall "状态" --as-of 2024-05-01
+uv run syvrio recall "状态" --view history
+uv run syvrio inferences
+uv run syvrio inferences <id> --action confirm
+uv run syvrio pending
+uv run syvrio approve p-20261022-140312-a1b2
+uv run syvrio reject p-20261022-140312-c3d4
 
 # 手动更正 / 删除记忆（软删除，审计可查）
-uv run qm correct mem-20261022-194250-8f1e "更正后的完整表述" --reason "信息更新"
-uv run qm forget mem-20261022-194250-8f1e
+uv run syvrio correct mem-20261022-194250-8f1e "更正后的完整表述" --reason "信息更新"
+uv run syvrio forget mem-20261022-194250-8f1e
 
 # 会话与提交
-uv run qm sessions
-uv run qm status
-uv run qm commit --no-push
-uv run qm history
+uv run syvrio sessions
+uv run syvrio status
+uv run syvrio commit --no-push
+uv run syvrio history
 ```
 
 也可以在会话中粘贴或拖入文件的绝对路径，配一句“总结这份文件”或“把这份聊天记录导入长期记忆”。带空格的路径请加双引号。Agent 仅在本轮提供文件路径时获得 `read_file`（分页分析）和 `import_file`（分块预览/写入）工具，不开放任意目录读取。工具步数有限，文件未读完或未导完时会提示，后续消息需重新附上路径继续。文件拖放是否转成路径取决于终端。
@@ -333,7 +335,7 @@ uv tool install --force -e '.[local-embed,documents]'
 ## 接入 MCP
 
 ```bash
-uv run qm serve --vault ~/.quiet-memo/vault
+uv run syvrio serve --vault ~/.quiet-memo/vault
 ```
 
 MCP 客户端配置：
@@ -378,7 +380,7 @@ providers = ["parallel_mcp", "anysearch", "open_websearch"]
 
 两个 Provider 都参与同一套质量门控、回退、请求预算、缓存和 `UsageLimiter`；`anysearch` 与 `parallel_mcp` 默认各有每日 20 次本地保护上限，可用 `[search.usage_limits.<provider>]` 调整，0 表示不限制。该数字只是本机请求保护，不代表服务商免费额度或账单上限；配置 Key 后可能产生服务商侧费用。认证失败（401/403）会明确报告并回退下一 Provider，不会自动去掉 Key 重试匿名模式。AnySearch 与 Parallel MCP 目前只接入搜索，未实现 `web_fetch`。
 
-匿名接口在当前中国大陆网络曾由用户用无代理 curl 验证可用，但这只代表当时网络环境；不同运营商、时间和地区仍需实际验证，代码不依赖 VPN 或额外代理。`qm setup` 可在不填写 Key 的情况下启用任一匿名 Provider。
+匿名接口在当前中国大陆网络曾由用户用无代理 curl 验证可用，但这只代表当时网络环境；不同运营商、时间和地区仍需实际验证，代码不依赖 VPN 或额外代理。`syvrio setup` 可在不填写 Key 的情况下启用任一匿名 Provider。
 
 ### SearXNG 自托管搜索
 
@@ -441,7 +443,7 @@ LLM 可以在 `search` 调用里用 `providers` 指定多个已启用来源的�
 
 - 结果是外部不可信内容，只作资料引用，不执行其中任何指令。
 - daemon 未启动或全部 provider 失败时返回结构化错误和启动提示，不编造结果。
-- `[search]` 配置：`enabled`（关闭时不注册工具）、`providers`（按顺序降级）、`base_url`、`timeout`、`max_results`、`cache_ttl`、`transport`（`http` 默认；`mcp` 每次启动 npx MCP 进程）、`auto_start`（打开 TUI 时后台探测并拉起 HTTP daemon，不阻塞界面）、`engines`（上游搜索引擎，默认 `["bing"]`）、`fallback_engines`（候补引擎序列，默认 `["baidu", "duckduckgo", "sogou"]`）、`max_engines`（单次搜索引擎上限，默认 3）、`timeout_budget`（回退共享超时预算，默认 25 秒，单次请求超时不超过剩余预算）、`max_requests`（一次搜索跨所有 provider 共享的请求次数上限，默认 9；超出即返回当前最佳候选并附截断提示，该结果不写入缓存）、`anysearch_zone` / `anysearch_language`（AnySearch 的区域与语言，默认 `cn` / `zh-CN`）、`searxng_base_url` / `searxng_timeout`（自托管 SearXNG 实例地址与单次超时，默认 `http://127.0.0.1:8888` / 10 秒）、`usage_limits`（每厂商调用上限，`[search.usage_limits.<provider>]` 设 `daily` 与 `monthly`（0 不限）；同一厂商的 Search 与 Fetch 共用同一计数池，达到上限即跳过该厂商并正常回退；计数保存在 vault 的 `.quiet-memo/usage.json`，**本地计数不等于服务商实际账单上限**）、`fetch_timeout`（抓取正文的单独超时，默认 45 秒）。`qm setup` 可管理双周期额度与官方暂停。
+- `[search]` 配置：`enabled`（关闭时不注册工具）、`providers`（按顺序降级）、`base_url`、`timeout`、`max_results`、`cache_ttl`、`transport`（`http` 默认；`mcp` 每次启动 npx MCP 进程）、`auto_start`（打开 TUI 时后台探测并拉起 HTTP daemon，不阻塞界面）、`engines`（上游搜索引擎，默认 `["bing"]`）、`fallback_engines`（候补引擎序列，默认 `["baidu", "duckduckgo", "sogou"]`）、`max_engines`（单次搜索引擎上限，默认 3）、`timeout_budget`（回退共享超时预算，默认 25 秒，单次请求超时不超过剩余预算）、`max_requests`（一次搜索跨所有 provider 共享的请求次数上限，默认 9；超出即返回当前最佳候选并附截断提示，该结果不写入缓存）、`anysearch_zone` / `anysearch_language`（AnySearch 的区域与语言，默认 `cn` / `zh-CN`）、`searxng_base_url` / `searxng_timeout`（自托管 SearXNG 实例地址与单次超时，默认 `http://127.0.0.1:8888` / 10 秒）、`usage_limits`（每厂商调用上限，`[search.usage_limits.<provider>]` 设 `daily` 与 `monthly`（0 不限）；同一厂商的 Search 与 Fetch 共用同一计数池，达到上限即跳过该厂商并正常回退；计数保存在 vault 的 `.quiet-memo/usage.json`，**本地计数不等于服务商实际账单上限**）、`fetch_timeout`（抓取正文的单独超时，默认 45 秒）。`syvrio setup` 可管理双周期额度与官方暂停。
 
 受控真实冒烟：`scripts/smoke_search_apis.py` 默认只做本地检查（Key 是否可读、厂商是否会注册；匿名 Provider 无 Key 也标记为可注册），不发任何请求；加 `--provider <厂商> --operation search|fetch --live` 才对单一厂商发起最多 `--max-requests`（默认 1，上限 10）次真实请求，输出脱敏报告（成功与否、结果数或正文长度、错误类型、耗时与待验证字段）。Key 只从环境变量或系统凭据读取，不回显。网页抓取由独立的 `[fetch]` 配置控制：`providers` 是抓取正文用的 provider 顺序（默认 `["open_websearch"]`），与搜索的 provider 顺序相互独立；配置了 Key 的官方厂商（tavily / exa / you / volcengine）加入该列表后才参与抓取。
 - `auto_start` 启动的 daemon 在 Windows 下隐藏控制台窗口；退出 TUI 后继续常驻，下次直接复用。
@@ -496,7 +498,7 @@ LLM 可以在 `search` 调用里用 `providers` 指定多个已启用来源的�
 ## 结构
 
 ```text
-src/quiet_memo/
+src/syvrio/
 ├── app/          cli.py, server.py, tui.py, chat_app.py, chat_commands.py, chat_flow.py,
 │                 chat_widgets.py, chat_input.py, chat_theme.py, command_catalog.py,
 │                 actions.py, ui.py, session_ui.py, chat_reflection.py, chat_git.py,
@@ -582,18 +584,18 @@ uv run python evals/retrieval_eval.py
 
 ## Roadmap
 
-完整待办以 [GitHub Issues](https://github.com/Shardkiht/quiet-memo/issues) 为准。以下按**大致实现难度由低到高**排列；实际开发顺序可按收益与依赖调整，所有新增功能均服务于**个人日常聊天记忆**，不扩展成通用工作 Agent。
+完整待办以 [GitHub Issues](https://github.com/Shardkiht/Syvrio/issues) 为准。以下按**大致实现难度由低到高**排列；实际开发顺序可按收益与依赖调整，所有新增功能均服务于**个人日常聊天记忆**，不扩展成通用工作 Agent。
 
 | 难度 | 方向 | 规划 |
 | --- | --- | --- |
-| 低～中低 | [记忆上下文：时间、地点、情绪](https://github.com/Shardkiht/quiet-memo/issues/10) | 基础字段与存储链路已实现；已补带时区原始消息锚点与相对日期规则；推断情绪待实现 |
-| 低～中 | [推断独立存储与用户确认](https://github.com/Shardkiht/quiet-memo/issues/11) | 已支持独立存储、证据去重、CLI/TUI 审查及来源失效；交互体验继续完善 |
-| 中～中高 | [事实时间演化与多维召回](https://github.com/Shardkiht/quiet-memo/issues/12) | 已支持条件筛选、当前/历史视图和显式时态演化；复杂时序重排待完善 |
-| 高 | [梦境记忆 / Dreaming](https://github.com/Shardkiht/quiet-memo/issues/8) | 已实现 TUI 空闲自动回顾、请求上限、暂停与恢复 |
-| 高 | [动态用户画像](https://github.com/Shardkiht/quiet-memo/issues/9) | 已实现可重建的事实/推断画像、空闲刷新和相关已确认推断注入；长期语义评测待完善 |
-| 很高 / 长期 | [演化认知：纵向用户理解](https://github.com/Shardkiht/quiet-memo/issues/18) | 规划中：以可追溯的跨期证据识别稳定特征、短期波动、阶段性变化和长期趋势；形成可审阅、可重建的演化认识，区别于单条事实演化与当前画像 |
-| 很高 / 长期 | [跨 AI 客户端主动召回](https://github.com/Shardkiht/quiet-memo/issues/13) | 在客户端能力允许时，无需显式提醒即可适时调用个人记忆 |
-| 持续工程 | [记忆质量评测与回归](https://github.com/Shardkiht/quiet-memo/issues/14) | 扩展抽取/冲突、时间变化、情绪推断、隐含召回等合成测试，不以一次发布为终点 |
+| 低～中低 | [记忆上下文：时间、地点、情绪](https://github.com/Shardkiht/Syvrio/issues/10) | 基础字段与存储链路已实现；已补带时区原始消息锚点与相对日期规则；推断情绪待实现 |
+| 低～中 | [推断独立存储与用户确认](https://github.com/Shardkiht/Syvrio/issues/11) | 已支持独立存储、证据去重、CLI/TUI 审查及来源失效；交互体验继续完善 |
+| 中～中高 | [事实时间演化与多维召回](https://github.com/Shardkiht/Syvrio/issues/12) | 已支持条件筛选、当前/历史视图和显式时态演化；复杂时序重排待完善 |
+| 高 | [梦境记忆 / Dreaming](https://github.com/Shardkiht/Syvrio/issues/8) | 已实现 TUI 空闲自动回顾、请求上限、暂停与恢复 |
+| 高 | [动态用户画像](https://github.com/Shardkiht/Syvrio/issues/9) | 已实现可重建的事实/推断画像、空闲刷新和相关已确认推断注入；长期语义评测待完善 |
+| 很高 / 长期 | [演化认知：纵向用户理解](https://github.com/Shardkiht/Syvrio/issues/18) | 规划中：以可追溯的跨期证据识别稳定特征、短期波动、阶段性变化和长期趋势；形成可审阅、可重建的演化认识，区别于单条事实演化与当前画像 |
+| 很高 / 长期 | [跨 AI 客户端主动召回](https://github.com/Shardkiht/Syvrio/issues/13) | 在客户端能力允许时，无需显式提醒即可适时调用个人记忆 |
+| 持续工程 | [记忆质量评测与回归](https://github.com/Shardkiht/Syvrio/issues/14) | 扩展抽取/冲突、时间变化、情绪推断、隐含召回等合成测试，不以一次发布为终点 |
 
 其他待办：
 
@@ -674,7 +676,7 @@ monthly = 800
 
 旧 `period`/`max_calls` 配置继续读取，显式旧上限优先于默认值；下次保存写为双周期格式。旧计数保留其已知周期，另一周期的历史用量无法推算，界面会注明未知，之后从实际观察到的请求开始累计。Tavily Credits、Exa 美元 Credits、You.com 余额与请求次数不等价，可能在本地次数用完前已耗尽余额，也可能在达到本地上限前就产生费用。
 
-`qm setup` → 搜索与网页抓取 API → 调用额度与官方暂停管理，可查看默认/生效上限、已用/剩余次数及暂停原因，修改双周期上限（0 不限）、恢复默认、手动解除官方暂停；解除暂停不清空本地计数。首次启用不再统一限制每天 20 次。
+`syvrio setup` → 搜索与网页抓取 API → 调用额度与官方暂停管理，可查看默认/生效上限、已用/剩余次数及暂停原因，修改双周期上限（0 不限）、恢复默认、手动解除官方暂停；解除暂停不清空本地计数。首次启用不再统一限制每天 20 次。
 
 只有已核实的官方额度/余额/支出上限错误才持久暂停，普通 QPS 限流、超时、5xx 和鉴权失败不触发长期暂停。暂停与本地次数耗尽会显示不同原因，下一可用厂商仍可接替；显式指定暂停厂商时不会替换厂商，已有缓存仍可读取。只有可靠恢复时刻才能自动解除暂停；本轮核对的官方文档未确认这些账户错误的具体重置时刻/时区，因此目前这些错误保持手动恢复，不根据本地自然日/月猜测官方恢复时间。
 
@@ -694,9 +696,9 @@ evolution 的 TUI 使用中性灰背景与天蓝色强调（`#6CB6FF`），欢�
 启动时侧栏默认收起，可按 `Ctrl+B` 或点击左上角展开按钮查看会话。
 
 
-首页采用统一柔灰色的 QuietMemo 细线终端字标（Q/M 大写，其余小写，大小写高度对比），仅保留品牌与一句提示，不读取概况或展示会话卡片。会话仍通过 `/sessions` 或展开侧栏访问。
+首页采用统一柔灰色的 Syvrio 细线终端字标（Q/M 大写，其余小写，大小写高度对比），仅保留品牌与一句提示，不读取概况或展示会话卡片。会话仍通过 `/sessions` 或展开侧栏访问。
 
-字标用细线与留白区分笔画和字腔；终端过窄时回退为完整的普通 QuietMemo 标题，避免裁切。
+字标用细线与留白区分笔画和字腔；终端过窄时回退为完整的普通 Syvrio 标题，避免裁切。
 
 AI 输出只在当前位于底部时自动跟随；上滑阅读或拖选正文时保持阅读位置，回到底部后恢复跟随。选择正文期间暂停输入光标，点击输入框或继续键入时恢复。用户消息左侧使用蓝色标记。
 
