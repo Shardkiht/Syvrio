@@ -42,9 +42,9 @@ class GitRepo:
         email = self._run(["config", "user.email"]).stdout.strip()
         args: list[str] = []
         if not name:
-            args += ["-c", "user.name=quiet-memo"]
+            args += ["-c", "user.name=syvrio"]
         if not email:
-            args += ["-c", "user.email=quiet-memo@localhost"]
+            args += ["-c", "user.email=syvrio@localhost"]
         return args
 
     def status_short(self) -> str:
