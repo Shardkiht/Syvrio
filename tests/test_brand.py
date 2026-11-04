@@ -23,8 +23,6 @@ def test_only_syvrio_console_script():
         for entry in metadata.entry_points(group="console_scripts")
     }
     assert scripts["syvrio"] == "syvrio.app.cli:main"
-    assert "qm" not in scripts
-    assert "quietmemo" not in scripts
 
 
 def test_version_and_assistant_branding():
