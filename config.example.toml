@@ -41,9 +41,12 @@ timeout = 60.0
 
 [chat]
 auto_reflect = true
-reflect_idle_seconds = 60.0
-reflect_interval_seconds = 300.0
-reflect_request_budget = 20
+reflect_idle_seconds = 60.0      # 仅用于判断 TUI 是否空闲
+reflect_interval_seconds = 300.0 # 任意两个自动任务之间的最小间隔
+profile_auto_interval_hours = 168.0   # Profile 自动更新周期（7 天）
+profile_min_cooldown_hours = 24.0     # 重要变化提前更新的冷却
+profile_min_changes = 20              # 提前更新参考的变更条数
+dream_auto_interval_hours = 24.0      # Dreaming 自动批次周期
 # 自动召回时参考最近几轮用户消息
 recall_context_turns = 2
 # 允许用 LLM 把追问改写成检索 query（需要 API Key）

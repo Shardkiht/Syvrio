@@ -99,9 +99,12 @@ timeout = 60.0
 
 [chat]
 auto_reflect = true
-reflect_idle_seconds = 60.0
-reflect_interval_seconds = 300.0
-reflect_request_budget = 20
+reflect_idle_seconds = 60.0       # Idle detection only
+reflect_interval_seconds = 300.0  # Minimum gap between automatic jobs
+profile_auto_interval_hours = 168.0
+profile_min_cooldown_hours = 24.0
+profile_min_changes = 20
+dream_auto_interval_hours = 24.0
 context_window = 32000
 reserve_output_tokens = 1500
 keep_recent_tokens = 6000
@@ -203,7 +206,7 @@ In-session commands:
 | `/rename <title>` | Rename the session |
 | `/import <path> [--apply]` | Import a file or the current directory; preview by default, reanalyze and write with `--apply`. Without a path, opens an input dialog |
 | `/inferences` | Inspect, confirm, reject or correct separate inferences |
-| `/profile [refresh [requests]]` | View a profile; refresh explicitly calls the model |
+| `/profile [refresh [requests]]` | View the generated profile summary (cached, no model call); refresh builds the summary and proposes inferences |
 | `/dream [requests\|status\|cancel\|resume]` | Start, inspect or cancel background reflection; one request by default |
 | `/pending` | Work through pending candidates one by one: approve / reject / edit then write; automatically advances to the next until the queue is empty |
 | `/topics [name]` | Browse memory topics and entry counts; with a name, drills into that topic's entries |
@@ -505,7 +508,8 @@ src/quiet_memo/
 ├── agent/        runtime.py, prompts.py, context.py, tools.py,
 │                 session.py, recall.py, file_tools.py # Agent loop, tools, sessions, file analysis
 ├── memory/       service.py, store.py, models.py, queue.py,
-│                 policy.py, detect.py, extractor.py, audit.py, inference.py, temporal.py, reflection.py
+│                 policy.py, detect.py, extractor.py, audit.py, inference.py, temporal.py,
+│                 reflection.py, reflection_schedule.py
 │                                                   # Memory domain and write decisions
 ├── retrieval/    base.py, keyword.py, vector.py, hybrid.py
 │                                                   # Retriever interface + BM25/vector/hybrid
@@ -620,23 +624,23 @@ MCP `memorize` accepts optional `observed_at`, an original message timestamp wit
 
 Normal recall and topic reads exclude expired and future facts while retaining active undated legacy entries. `recall --as-of YYYY-MM-DD` queries a specific date; `--view history` shows traceable evolution. Agent/MCP parameters are `as_of` and `view`. Historical queries use keyword retrieval without replacing vector caches. Facts without a known start cannot be asserted at a historical date. Corrections, deletions and ambiguous successor chains never resurrect old content as facts; original records and audit history remain. Explicitly disjoint validity periods no longer conflict; unknown or overlapping periods retain existing adjudication.
 
-`qm profile`, `/profile` and MCP `profile` read a profile without model requests. The view rebuilds from common profile topics, evidence cited by valid profile inferences, and separate profile inferences, showing source IDs and distinguishing facts, hypotheses and confirmed inferences. Use existing correction/forget operations for facts and `/inferences` for hypotheses. Even confirmed profiles are not objective facts: only those related to the current recalled evidence enter limited auxiliary context. Unconfirmed hypotheses are never injected.
+`qm profile` and MCP `profile` keep the source-traceable fact/inference detail view without model requests. The TUI `/profile` now opens the generated profile summary: it reads `.quiet-memo/profile-summary.json` without scanning all memories or calling a model. With no summary it points to `/profile refresh`; after source changes it explicitly marks the summary Outdated so old content is never presented as current. The summary is rebuilt from currently valid facts, adapts its length to deduplicated information density, and synthesizes long-term traits, stable preferences, thinking and behavior patterns, current state and evidence-backed changes across topics. Source references stay internal rather than showing many source IDs by default, and the summary is never written back as facts or a second database.
 
-`qm profile --refresh --requests 1` or `/profile refresh 1` proposes profile inferences; `qm dream --requests 1` or `/dream 1` reflects on currently valid facts. TUI reflection starts automatically while idle and runs in the background while chat and session switching remain available. `/dream status` checks the shared task and `/dream cancel` requests cancellation of either mode. Already sent requests may still be billed; publication stops after they return. Previously saved candidates and all sessions remain intact.
+`/profile refresh [n]` or `qm profile --refresh` builds or updates the summary and continues proposing profile inferences. When the summary is missing or stale, refresh allocates at most one request to it and the remaining n-1 requests to inference batches; n=0 sends no request and n=1 sends at most one, with no implicitly added manual request. Unchanged facts skip summary generation. A failed or cancelled summary keeps the previous text marked stale and never publishes an incomplete result. `qm dream --requests 1` or `/dream 1` still reflects across facts, finding reviewable connections and hypotheses. Reflection runs in the background while chat and session switching remain available. `/dream status` checks the shared task and schedule; `/dream cancel` requests cancellation of either mode. Already sent requests may still be billed; publication stops after they return. Previously saved candidates and all sessions remain intact.
 
 A run defaults to one model request, configurable from 0 to 20, with retries and fallback models disabled for this task. Each request times out within 60 seconds and requires a configured context window of at least 2048 tokens. Only new or changed facts are processed, with limited previously processed evidence as context. Idle scheduling resumes after TUI restart; run the same command for immediate continuation; budget 0 can publish validated cached results without requests. Dreaming uses distilled facts, not raw session scans, and does not enumerate every possible cross-fact relationship.
 
-Progress appends to `.quiet-memo/reflection-jobs.jsonl`, recording batch hashes, validated candidates and completion. A truncated final line is preserved with an appended recovery marker; middle corruption stops processing. Candidates enter only the inference log, never overwrite Markdown facts. New inferences carry evidence fingerprints and become invalid after source expiry, correction, deletion or manual edits. Legacy inferences without fingerprints can only check source IDs and validity, not reconstruct prior text edits. Task exclusion is scoped to one service instance; do not start reflection against one vault from multiple processes simultaneously.
+Progress appends to `.quiet-memo/reflection-jobs.jsonl`, recording batch hashes, validated candidates and completion. A truncated final line is preserved with an appended recovery marker; middle corruption stops processing. The summary and schedule use `.quiet-memo/profile-summary.json`, `.quiet-memo/reflection-state.json` and `.quiet-memo/profile-fingerprints.json`; all are rebuildable derived state and never enter Git history. Candidates enter only the inference log, never overwrite Markdown facts. New inferences carry evidence fingerprints and become invalid after source expiry, correction, deletion or manual edits. Legacy inferences without fingerprints can only check source IDs and validity, not reconstruct prior text edits. Task exclusion is scoped to one service instance; do not start reflection against one vault from multiple processes simultaneously.
 
 Implementation boundaries: the memory service owns temporal writes; temporal helpers compute dates and views. Reflection uses public service APIs. Pending resolution logs before removing a candidate, preserving it on write failure; retries after partial failures may leave duplicate resolution records. Malformed vector caches rebuild, and reflection responses missing proposals fail without advancing progress.
 
 Reflection failures distinguish request timeouts, output validation and local storage errors. The journal stores only the error category, never raw provider exception text. A timed-out batch remains pending and can resume on a subsequent run.
 
-After startup catch-up, the TUI automatically alternates Dreaming and profile refresh after 60 seconds idle. Each round allows one request, with 300 seconds between rounds and a shared 20-request budget per TUI launch. Draft input, modal screens and busy chat defer new jobs; unchanged facts require no request. `/dream cancel` pauses automatic scheduling and cancels the current job; `/dream resume` resumes; `/dream status` shows the remaining budget. Set `[chat] auto_reflect=false` to disable persistently. No scheduler runs after TUI exit; manual jobs use their own budget.
+After startup catch-up, the TUI waits for 60 seconds of idle time before checking automatic jobs, but no longer rotates on a fixed 300-second cycle. Dreaming runs at most once per day with at most one request per batch. Profile refreshes at most once every 7 days and only when valid facts changed. Minor additions are recorded as pending changes rather than triggering an immediate rebuild; reaching `profile_min_changes` (20 by default) or an important change to goals, preferences or career direction can allow an early update after a 24-hour cooldown. Without changes, only file fingerprints are checked: no full memory scan and no model request. Cadence, cooldown and failure backoff persist in derived vault state and survive TUI restarts; failures back off 1/2/4… hours up to a cap instead of retrying frequently. Draft input, modal screens, busy chat or a running reflection job defer new jobs. Manual `/profile refresh` and `/dream` bypass the automatic cadence while still respecting their command budget. `/dream cancel` pauses automatic scheduling and cancels the current job; `/dream resume` resumes; `/dream status` shows the next schedule and pending changes. Set `[chat] auto_reflect=false` to disable persistently. No scheduler runs after TUI exit.
 
 Use `/sessions` to browse, search and resume sessions. Ask naturally to recall or remember information; the Agent uses recall / memorize tools. These memory actions have no TUI slash commands; CLI management commands remain available.
 
-Profile generation considers currently valid facts from all topics and selects preferences, goals, constraints and habits. The fact view includes common Chinese/English profile topics and sources cited by active profile inferences; unrelated facts are not listed wholesale.
+The profile summary is regenerated from currently valid facts every time, never treating an older summary as new evidence, so repeated summarization cannot drift. Before generation it deduplicates by topic and covers as many topics as the input token cap allows; it expands for dense, multi-topic data and stays short for sparse data. Deleting, correcting, superseding or manually editing a fact immediately marks the summary outdated without immediately triggering a model request; the next eligible background refresh rebuilds it, and manual refresh remains available.
 
 Updated retrieval measurements and their evaluation limits are documented in [evals/README.md](evals/README.md); generated private queries are distinct from the fixed synthetic benchmark.
 

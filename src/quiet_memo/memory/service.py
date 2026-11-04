@@ -50,6 +50,9 @@ VAULT_README = """# quiet-memo vault
 - `.quiet-memo/resolved.jsonl`：已确认/已拒绝记录。
 - `.quiet-memo/audit.jsonl`：更正、删除等审计记录。
 - `.quiet-memo/inferences.jsonl`：独立假设与去重后的事实来源，不参与事实检索。
+- `.quiet-memo/profile-summary.json`：画像摘要派生缓存，可删除重建，不纳入 Git 历史。
+- `.quiet-memo/profile-fingerprints.json`：画像来源指纹基线，用于增量变更判断，不纳入 Git 历史。
+- `.quiet-memo/reflection-state.json`：自动回顾的跨重启调度状态，不纳入 Git 历史。
 - `.quiet-memo/git-sync-state.json`：本机 Git 同步状态，不纳入 Git 历史。
 - `SOUL.md`（可选）：自定义人设，替代系统提示词里的默认人设段。
 - 全部变更由 Git 跟踪，可回滚、可审计。
@@ -61,6 +64,9 @@ VAULT_GITIGNORE = """__pycache__/
 Thumbs.db
 .quiet-memo/vectors.npz
 .quiet-memo/search-cache.json
+.quiet-memo/profile-summary.json
+.quiet-memo/profile-fingerprints.json
+.quiet-memo/reflection-state.json
 .quiet-memo/git-sync-state.json
 .quiet-memo/*.lock
 """

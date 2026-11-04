@@ -143,6 +143,18 @@ class ReflectionResponse(BaseModel):
     proposals: list[ReflectionProposal] = Field(max_length=12)
 
 
+class ProfileSummaryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    summary: str = Field(min_length=1)
+
+    @field_validator("summary")
+    @classmethod
+    def nonempty_summary(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("画像摘要不能为空。")
+        return value.strip()
+
+
 class ProfileItem(BaseModel):
     id: str
     text: str

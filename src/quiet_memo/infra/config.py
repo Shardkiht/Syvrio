@@ -82,8 +82,12 @@ class ChatConfig:
     recall_context_turns: int = 2
     auto_reflect: bool = True
     reflect_idle_seconds: float = 60.0
+    # 任意两个自动回顾之间的最小间隔；自动任务本身按天/周周期调度。
     reflect_interval_seconds: float = 300.0
-    reflect_request_budget: int = 20
+    profile_auto_interval_hours: float = 168.0
+    profile_min_cooldown_hours: float = 24.0
+    profile_min_changes: int = 20
+    dream_auto_interval_hours: float = 24.0
     extract_on_exit: bool = True
 
 
@@ -359,7 +363,10 @@ def load_config(path: Path | str | None = None) -> Config:
         auto_reflect=bool(chat_raw.get("auto_reflect", True)),
         reflect_idle_seconds=float(chat_raw.get("reflect_idle_seconds", 60.0)),
         reflect_interval_seconds=float(chat_raw.get("reflect_interval_seconds", 300.0)),
-        reflect_request_budget=int(chat_raw.get("reflect_request_budget", 20)),
+        profile_auto_interval_hours=float(chat_raw.get("profile_auto_interval_hours", 168.0)),
+        profile_min_cooldown_hours=float(chat_raw.get("profile_min_cooldown_hours", 24.0)),
+        profile_min_changes=int(chat_raw.get("profile_min_changes", 20)),
+        dream_auto_interval_hours=float(chat_raw.get("dream_auto_interval_hours", 24.0)),
         extract_on_exit=bool(chat_raw.get("extract_on_exit", True)),
     )
     git_raw = data.get("git", {})
@@ -513,7 +520,10 @@ recall_context_turns = 2
 auto_reflect = true
 reflect_idle_seconds = 60.0
 reflect_interval_seconds = 300.0
-reflect_request_budget = 20
+profile_auto_interval_hours = 168.0
+profile_min_cooldown_hours = 24.0
+profile_min_changes = 20
+dream_auto_interval_hours = 24.0
 extract_on_exit = true
 
 [retrieval]

@@ -119,15 +119,110 @@ async def test_dream_background_allows_session_switch_and_cancellation(tmp_path,
 
 async def test_profile_view_does_not_invoke_model(tmp_path, monkeypatch):
     import asyncio
+    from quiet_memo.app.chat_widgets import ProfileScreen
 
     app = build_app(tmp_path, [])
     app.service.note("合成偏好", topic="preferences")
+    app.service.reflection.run("profile", 1, refresh_summary=True,
+                               summary_model=lambda payload: "缓存中的画像正文")
     monkeypatch.setattr(app.service.reflection, "_model", lambda *_: pytest.fail("查看不应调用模型"))
+    monkeypatch.setattr(app.service.reflection, "profile", lambda: pytest.fail("查看不得全量遍历画像"))
     async with app.run_test() as pilot:
         app._command("/profile")
         await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
         await pilot.pause()
         assert not app.busy
+        assert isinstance(app.screen, ProfileScreen)
+        assert "缓存中的画像正文" in str(app.screen.query_one("#profile-text", Static).content)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, ProfileScreen)
+
+
+async def test_profile_view_shows_empty_state_without_cache(tmp_path):
+    import asyncio
+    from quiet_memo.app.chat_widgets import ProfileScreen
+
+    app = build_app(tmp_path, [])
+    async with app.run_test() as pilot:
+        app._command("/profile")
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        await pilot.pause()
+        assert isinstance(app.screen, ProfileScreen)
+        assert "No profile summary yet" in str(app.screen.query_one("#profile-text", Static).content)
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+async def test_profile_view_marks_outdated_summary(tmp_path):
+    import asyncio
+    from quiet_memo.app.chat_widgets import ProfileScreen
+
+    app = build_app(tmp_path, [])
+    app.service.note("合成早期偏好", topic="preferences")
+    app.service.reflection.run("profile", 1, refresh_summary=True,
+                               summary_model=lambda payload: "旧画像")
+    path = app.service.store.topic_path("preferences")
+    path.write_text(path.read_text(encoding="utf-8").replace("合成早期偏好", "合成后期偏好"),
+                    encoding="utf-8")
+    async with app.run_test() as pilot:
+        app._command("/profile")
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        await pilot.pause()
+        assert isinstance(app.screen, ProfileScreen)
+        assert "旧画像" in str(app.screen.query_one("#profile-text", Static).content)
+        assert "Outdated" in str(app.screen.query_one("#profile-status", Static).content)
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+async def test_profile_refresh_updates_cache_in_background(tmp_path, monkeypatch):
+    import asyncio
+
+    app = build_app(tmp_path, [])
+    app.service.note("合成偏好", topic="preferences")
+    monkeypatch.setattr(app.service.reflection, "_summary_model",
+                        lambda payload: "刷新后的画像摘要")
+    monkeypatch.setattr(app.service.reflection, "_model", lambda *_: [])
+    async with app.run_test() as pilot:
+        app._command("/profile refresh 1")
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        await pilot.pause()
+        assert not app.busy
+        assert not app.query_one("#input", Input).disabled
+        assert app.service.reflection.profile_summary().text == "刷新后的画像摘要"
+        cards = [str(card.content) for card in app.query(".card")]
+        assert any("Profile summary: updated" in text for text in cards)
+
+
+async def test_profile_refresh_does_not_block_chat_while_running(tmp_path, monkeypatch):
+    import asyncio
+
+    app = build_app(tmp_path, [])
+    app.service.note("合成偏好", topic="preferences")
+    started, release = threading.Event(), threading.Event()
+
+    def slow_summary(payload):
+        started.set()
+        assert release.wait(10)
+        return "慢速画像摘要"
+
+    monkeypatch.setattr(app.service.reflection, "_summary_model", slow_summary)
+    try:
+        async with app.run_test() as pilot:
+            app._command("/profile refresh 1")
+            assert await asyncio.to_thread(started.wait, 5)
+            assert not app.busy
+            assert not app.query_one("#input", Input).disabled
+            app._command("/profile")
+            await pilot.pause()
+            # 摘要生成中仍可打开当前缓存视图（此时应显示空状态）。
+            assert "No profile summary yet" in str(app.screen.query_one("#profile-text", Static).content)
+            await pilot.press("escape")
+            release.set()
+            await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+    finally:
+        release.set()
 
 
 @pytest.mark.parametrize("apply", [False, True])
@@ -642,6 +737,7 @@ async def test_command_palette_columns_align(tmp_path):
         palette = app.query_one("#cmd-palette", CommandPalette)
         rows = list(palette.query(CommandRow))
         assert len(rows) == len(SLASH_COMMANDS)
+        assert rows[0].has_class("cmd-active")
 
         starts = set()
         for row, (_, usage, description) in zip(rows, SLASH_COMMANDS):
@@ -650,6 +746,103 @@ async def test_command_palette_columns_align(tmp_path):
             assert usage in plain
             starts.add(plain.index(description))
         assert len(starts) == 1
+
+
+async def test_command_palette_scrolls_highlighted_command_into_view(tmp_path):
+    from quiet_memo.app.chat_app import CommandPalette
+
+    app = build_app(tmp_path, [])
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.query_one("#input", Input).value = "/"
+        await pilot.pause()
+        palette = app.query_one("#cmd-palette", CommandPalette)
+        assert palette.listing.max_scroll_y > 0
+
+        for _ in range(len(SLASH_COMMANDS) - 1):
+            await pilot.press("down")
+        await pilot.pause()
+        assert palette.index == len(SLASH_COMMANDS) - 1
+        last = palette.rows()[-1]
+        assert last.region.y >= palette.listing.region.y
+        assert last.region.bottom <= palette.listing.region.bottom
+
+        await pilot.press("up")
+        await pilot.pause()
+        assert palette.index == len(SLASH_COMMANDS) - 2
+        previous = palette.rows()[palette.index]
+        assert previous.region.y >= palette.listing.region.y
+        assert previous.region.bottom <= palette.listing.region.bottom
+
+
+async def test_command_palette_mouse_wheel_scrolls(tmp_path):
+    from quiet_memo.app.chat_app import CommandPalette
+    from textual.events import MouseScrollDown
+
+    app = build_app(tmp_path, [])
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.query_one("#input", Input).value = "/"
+        await pilot.pause()
+        palette = app.query_one("#cmd-palette", CommandPalette)
+        before = palette.listing.scroll_y
+        palette.listing.post_message(MouseScrollDown(
+            palette.listing, 0, 0, 0, 1, 0, False, False, False))
+        await pilot.pause()
+        assert palette.listing.scroll_y > before
+
+
+@pytest.mark.parametrize(
+    ("prefix", "expected"),
+    [("/pro", ["profile"]), ("/dre", ["dream"]), ("/inf", ["inferences"])],
+)
+async def test_command_palette_prefix_filters(tmp_path, prefix, expected):
+    from quiet_memo.app.chat_app import CommandPalette
+
+    app = build_app(tmp_path, [])
+    async with app.run_test() as pilot:
+        app.query_one("#input", Input).value = prefix
+        await pilot.pause()
+        palette = app.query_one("#cmd-palette", CommandPalette)
+        assert palette.display
+        assert [match[0] for match in palette.matches] == expected
+
+
+async def test_command_palette_click_runs_visible_command(tmp_path):
+    import asyncio
+    from quiet_memo.app.chat_app import CommandPalette
+
+    app = build_app(tmp_path, [])
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.query_one("#input", Input).value = "/hel"
+        await pilot.pause()
+        palette = app.query_one("#cmd-palette", CommandPalette)
+        await pilot.click(palette.rows()[0])
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        await pilot.pause()
+        assert not palette.display
+        assert any("Commands" in str(card.content) for card in app.query(".card"))
+
+
+@pytest.mark.parametrize("size", [(80, 24), (120, 40)])
+async def test_command_palette_fits_small_viewport_and_input_stays_visible(tmp_path, size):
+    from quiet_memo.app.chat_app import CommandPalette
+
+    app = build_app(tmp_path, [])
+    async with app.run_test(size=size) as pilot:
+        widget = app.query_one("#input", Input)
+        widget.value = "/"
+        await pilot.pause()
+        palette = app.query_one("#cmd-palette", CommandPalette)
+        assert palette.display
+        assert palette.region.height <= 16
+        assert palette.region.bottom <= widget.region.y
+        assert widget.region.height > 0
+
+        for _ in range(len(SLASH_COMMANDS) - 1):
+            await pilot.press("down")
+        await pilot.pause()
+        last = palette.rows()[-1]
+        assert last.region.y >= palette.listing.region.y
+        assert last.region.bottom <= palette.listing.region.bottom
 
 
 async def test_rename_command_prompts_for_title(tmp_path):
@@ -2171,18 +2364,19 @@ async def test_session_picker_rename_current_updates_runtime(tmp_path):
         assert app.runtime.current.title() == "当前新标题"
 
 
-async def test_automatic_reflection_idle_budget_and_pause(tmp_path, monkeypatch):
+async def test_automatic_reflection_idle_uses_persistent_schedule(tmp_path, monkeypatch):
     import asyncio
     from quiet_memo.memory.reflection import ReflectionResult
     app = build_app(tmp_path, [])
     calls = []
-    def run(mode, budget, cancel_event=None):
-        calls.append((mode, budget))
+    monkeypatch.setattr(app.service.reflection, "auto_check_due", lambda now=None: True)
+    monkeypatch.setattr(app.service.reflection, "auto_plan", lambda now=None: "dream")
+    def run(mode, budget, cancel_event=None, **kwargs):
+        calls.append((mode, budget, kwargs.get("auto")))
         return ReflectionResult(mode, requests=1)
     monkeypatch.setattr(app.service.reflection, "run", run)
     async with app.run_test() as pilot:
         await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
-        app._reflection_remaining = 1
         app._reflection_last_activity = 0
         app._navigation_busy = True
         app._auto_reflection_tick()
@@ -2194,17 +2388,89 @@ async def test_automatic_reflection_idle_budget_and_pause(tmp_path, monkeypatch)
         app._reflection_command("dream", "resume")
         app._auto_reflection_tick()
         await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
-        assert calls == [("dream", 1)]
-        assert app._reflection_remaining == 0
-        app._reflection_next = 0
+        await pilot.pause()
+        assert calls == [("dream", 1, True)]
+        assert not app._reflection_pending
         app._auto_reflection_tick()
+        await pilot.pause()
         assert len(calls) == 1
+
+
+async def test_automatic_profile_refresh_spends_one_request(tmp_path, monkeypatch):
+    import asyncio
+    from quiet_memo.memory.reflection import ReflectionResult
+    app = build_app(tmp_path, [])
+    calls = []
+    monkeypatch.setattr(app.service.reflection, "auto_check_due", lambda now=None: True)
+    monkeypatch.setattr(app.service.reflection, "auto_plan", lambda now=None: "profile")
+    def run(mode, budget, cancel_event=None, **kwargs):
+        calls.append((mode, budget, kwargs.get("auto"), kwargs.get("refresh_summary")))
+        return ReflectionResult(mode, requests=1, summary_status="updated")
+    monkeypatch.setattr(app.service.reflection, "run", run)
+    async with app.run_test() as pilot:
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        app._reflection_last_activity = 0
+        app._auto_reflection_tick()
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        await pilot.pause()
+        assert calls == [("profile", 1, True, True)]
+        assert not app._reflection_pending
+
+
+async def test_automatic_reflection_skips_when_schedule_not_due(tmp_path, monkeypatch):
+    import asyncio
+    app = build_app(tmp_path, [])
+    monkeypatch.setattr(app.service.reflection, "auto_check_due", lambda now=None: False)
+    monkeypatch.setattr(app.service.reflection, "auto_plan", lambda now=None: pytest.fail("到期前不得扫描"))
+    monkeypatch.setattr(app.service.reflection, "run", lambda *a, **k: pytest.fail("到期前不得请求"))
+    async with app.run_test() as pilot:
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        app._reflection_last_activity = 0
+        app._auto_reflection_tick()
+        await pilot.pause()
+        assert not app._reflection_pending
+
+
+async def test_automatic_reflection_plan_without_work_does_not_run(tmp_path, monkeypatch):
+    import asyncio
+    app = build_app(tmp_path, [])
+    monkeypatch.setattr(app.service.reflection, "auto_check_due", lambda now=None: True)
+    monkeypatch.setattr(app.service.reflection, "auto_plan", lambda now=None: None)
+    monkeypatch.setattr(app.service.reflection, "run", lambda *a, **k: pytest.fail("无任务不得请求"))
+    async with app.run_test() as pilot:
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        app._reflection_last_activity = 0
+        app._auto_reflection_tick()
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        await pilot.pause()
+        assert not app._reflection_pending
+        assert not app.busy
+
+
+async def test_automatic_reflection_failure_releases_state(tmp_path, monkeypatch):
+    import asyncio
+    app = build_app(tmp_path, [])
+    monkeypatch.setattr(app.service.reflection, "auto_check_due", lambda now=None: True)
+    monkeypatch.setattr(app.service.reflection, "auto_plan", lambda now=None: "dream")
+    def fail(*args, **kwargs):
+        raise RuntimeError("synthetic auto failure")
+    monkeypatch.setattr(app.service.reflection, "run", fail)
+    async with app.run_test() as pilot:
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        app._reflection_last_activity = 0
+        app._auto_reflection_tick()
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        await pilot.pause()
+        assert not app._reflection_pending
+        assert not app.busy
+        assert not app.query_one("#input", Input).disabled
 
 
 async def test_automatic_reflection_disabled_or_draft_does_not_start(tmp_path, monkeypatch):
     import asyncio
     app = build_app(tmp_path, [])
-    monkeypatch.setattr(app.service.reflection, "run", lambda *a, **k: pytest.fail("不得请求"))
+    monkeypatch.setattr(app.service.reflection, "auto_check_due",
+                        lambda now=None: pytest.fail("禁用或草稿时不得检查调度"))
     async with app.run_test() as pilot:
         await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
         app.service.config.chat.auto_reflect = False

@@ -530,12 +530,19 @@ class CommandRow(Static):
 
 
 class CommandPalette(Vertical):
-    """竖排命令面板：跟随输入前缀过滤，↑↓ 移动高亮，Enter 执行。"""
+    """浮层命令列表：外层限高，内层滚动；高亮项始终滚入可视区域。"""
 
     def __init__(self) -> None:
         super().__init__(id="cmd-palette")
         self.matches: list[tuple[str, str, str]] = []
         self.index = 0
+
+    def compose(self) -> ComposeResult:
+        yield VerticalScroll(id="cmd-list", classes="thin-scroll")
+
+    @property
+    def listing(self) -> VerticalScroll:
+        return self.query_one("#cmd-list", VerticalScroll)
 
     def open(self, prefix: str) -> None:
         needle = prefix.lower()
@@ -557,6 +564,7 @@ class CommandPalette(Vertical):
             return
         self.index = (self.index + delta) % len(self.matches)
         self.refresh_rows()
+        self.scroll_current()
 
     @property
     def current(self) -> str | None:
@@ -565,14 +573,29 @@ class CommandPalette(Vertical):
         return None
 
     def rebuild(self) -> None:
-        self.remove_children()
-        if self.matches:
-            self.mount(*[CommandRow(*match) for match in self.matches])
+        self.listing.remove_children()
+        rows = [CommandRow(*match) for match in self.matches]
+        for position, row in enumerate(rows):
+            row.set_class(position == self.index, "cmd-active")
+        if rows:
+            self.listing.mount(*rows)
+        self.call_after_refresh(self._after_rebuild)
+
+    def _after_rebuild(self) -> None:
         self.refresh_rows()
+        self.scroll_current()
+
+    def rows(self) -> list[CommandRow]:
+        return list(self.listing.query(CommandRow))
 
     def refresh_rows(self) -> None:
-        for position, row in enumerate(self.children):
+        for position, row in enumerate(self.rows()):
             row.set_class(position == self.index, "cmd-active")
+
+    def scroll_current(self) -> None:
+        rows = self.rows()
+        if 0 <= self.index < len(rows):
+            self.listing.scroll_to_widget(rows[self.index], animate=False, immediate=True)
 
 
 class SessionPickerScreen(ModalScreen):
@@ -679,6 +702,34 @@ class SessionPickerScreen(ModalScreen):
         on_result = self._on_result
         self.dismiss()
         self.app.call_later(on_result, value)
+
+
+class ProfileScreen(ModalScreen):
+    """画像摘要独立弹窗：内容在限高区域内滚动，不向聊天流追加长卡片。"""
+
+    BINDINGS = [("escape", "close", "Close")]
+
+    def __init__(self, body: str, status: str, stale: bool = False) -> None:
+        super().__init__()
+        self._body = body
+        self._status = status
+        self._stale = stale
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="profile-card"):
+            yield Static("User Profile", classes="pick-title")
+            with VerticalScroll(id="profile-body", classes="thin-scroll"):
+                yield Static(self._body, id="profile-text", markup=False)
+            yield Static(self._status, id="profile-status",
+                         classes="profile-status stale" if self._stale else "profile-status")
+
+    def on_mount(self) -> None:
+        body = self.query_one("#profile-body", VerticalScroll)
+        body.can_focus = True
+        body.focus()
+
+    def action_close(self) -> None:
+        self.dismiss()
 
 
 class TextInputScreen(ModalScreen):

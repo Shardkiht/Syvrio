@@ -113,13 +113,19 @@ APP_CSS = """
 
     /* 命令面板：浮在输入框上方，只显示命令、参数和一句短语。
        -6 = status 2 行 + 快捷键 1 行 + 输入框 3 行；偏移不够会盖住输入框。 */
-    #cmd-palette { layer: overlay; dock: bottom; offset-x: 3; offset-y: -6; width: 64; height: auto; max-height: 16; background: $panel; border: round #484848; padding: 0 1; display: none; }
+    #cmd-palette { layer: overlay; dock: bottom; offset-x: 3; offset-y: -6; width: 64; max-width: 92%; height: auto; max-height: 16; background: $panel; border: round #484848; padding: 0 1; display: none; }
+    #cmd-list { height: auto; max-height: 14; scrollbar-size-vertical: 1; }
     .cmd-row { width: 1fr; height: 1; padding: 0 1; color: #d1d1d1; }
     .cmd-row.cmd-active { background: #303030; }
     .cmd-usage { color: $accent; }
     .cmd-desc { color: #a3a3a3; }
 
-    PickScreen, SessionPickerScreen, TextInputScreen { align: center middle; background: #0d0d0d 75%; }
+    PickScreen, SessionPickerScreen, TextInputScreen, ProfileScreen { align: center middle; background: #0d0d0d 75%; }
+    #profile-card { width: 72; max-width: 92%; height: auto; max-height: 80%; background: $panel; border: round #484848; padding: 1 2; }
+    #profile-body { height: auto; max-height: 58vh; min-height: 6; padding: 0 1; background: $bg; }
+    #profile-text { height: auto; width: 1fr; color: #d5d5d5; }
+    .profile-status { height: auto; color: #858585; margin-top: 1; }
+    .profile-status.stale { color: #d1a05a; }
     GitScreen, GitConfirmScreen { align: center middle; background: #0d0d0d 75%; }
     #git-card { width: 72; max-width: 92%; height: auto; max-height: 85%; background: $panel; border: round #484848; padding: 1 2; }
     #git-body { height: auto; max-height: 55vh; min-height: 8; padding: 0 1; background: $bg; }

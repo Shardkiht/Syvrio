@@ -99,9 +99,12 @@ timeout = 60.0
 
 [chat]
 auto_reflect = true
-reflect_idle_seconds = 60.0
-reflect_interval_seconds = 300.0
-reflect_request_budget = 20
+reflect_idle_seconds = 60.0       # 仅用于判断空闲
+reflect_interval_seconds = 300.0  # 自动任务之间的最小间隔
+profile_auto_interval_hours = 168.0
+profile_min_cooldown_hours = 24.0
+profile_min_changes = 20
+dream_auto_interval_hours = 24.0
 context_window = 32000
 reserve_output_tokens = 1500
 keep_recent_tokens = 6000
@@ -204,7 +207,7 @@ Spark 使用 MaaS 的 Bearer API Key；适配层保留服务端采样默认值�
 | `/rename <title>` | 重命名会话 |
 | `/import <path> [--apply]` | 导入文件或当前层目录；默认预览，`--apply` 重新分析并写入。不带路径时弹出输入框 |
 | `/inferences` | 查看、确认、拒绝或纠正独立推断 |
-| `/profile [refresh [次数]]` | 查看画像；refresh 显式调用模型提炼 |
+| `/profile [refresh [次数]]` | 查看已生成的画像摘要（只读缓存，不调用模型）；refresh 生成摘要并提炼推断 |
 | `/dream [次数\|status\|cancel\|resume]` | 启动、查看或取消后台增量回顾，默认最多一次请求 |
 | `/pending` | 逐条处理待确认候选：确认写入 / 拒绝 / 改写后写入，队列清空前自动进入下一条 |
 | `/topics [name]` | 浏览记忆主题与条目数，带 name 下钻某主题的条目列表 |
@@ -501,7 +504,8 @@ src/quiet_memo/
 ├── agent/        runtime.py, prompts.py, context.py, tools.py,
 │                 session.py, recall.py, file_tools.py # Agent 循环、工具、会话与文件分析
 ├── memory/       service.py, store.py, models.py, queue.py,
-│                 policy.py, detect.py, extractor.py, audit.py, inference.py, temporal.py, reflection.py
+│                 policy.py, detect.py, extractor.py, audit.py, inference.py, temporal.py,
+│                 reflection.py, reflection_schedule.py
 │                                                   # 记忆领域与写入裁决
 ├── retrieval/    base.py, keyword.py, vector.py, hybrid.py
 │                                                   # Retriever 接口 + BM25/向量/混合
@@ -616,23 +620,23 @@ MCP `memorize` 可选 `observed_at` 接受带时区的原始消息时间。未�
 
 普通召回和主题读取排除已过期或尚未生效的事实；无日期的有效旧条目仍可召回。`recall --as-of YYYY-MM-DD` 查询指定日期，`--view history` 展示可追溯的演化历史；Agent/MCP 对应参数为 `as_of`、`view`。历史查询使用关键词检索，不改写向量缓存；缺少生效起点的条目不能断言在某天成立。纠错、删除和有歧义的替代链不会把旧内容重新当作事实；原始记录与审计仍保留。明确不重叠的有效期不再互判冲突，日期不明或区间重叠仍遵循现有裁决。
 
-`qm profile`、`/profile` 和 MCP `profile` 查看画像，不发模型请求。画像从常见中英文画像主题、有效推断引用的来源事实及独立画像推断重建，分别标注事实、待确认和已确认推断，显示来源 ID。事实用现有更正/忘记操作修改，推断用 `/inferences` 审查。已确认画像也不是客观事实，只在来源与本轮召回相关时作为有限的辅助上下文；未确认推断不注入。
+`qm profile` 与 MCP `profile` 保留来源可追溯的事实/推断明细视图，不发模型请求。TUI `/profile` 改为快速查看已生成的画像摘要：只读 `.quiet-memo/profile-summary.json`，不遍历全部记忆，也不调用模型；无摘要时提示先执行 `/profile refresh`，来源变化后明确标注 Outdated，旧内容不会冒充最新画像。摘要从当前有效事实出发，按去重后的有效信息量自适应长度，跨主题概括长期特征、稳定偏好、思考与行为方式、当前状态及有证据的变化；内部保留来源引用，但默认不展示大量来源 ID，也不回写成事实或第二套数据库。
 
-`qm profile --refresh --requests 1` 或 `/profile refresh 1` 提炼画像；`qm dream --requests 1` 或 `/dream 1` 回顾当前有效事实，寻找可审查的联系和假设。TUI 默认在空闲时自动启动；回顾在后台工作，可以继续聊天、切换会话。`/dream status` 查看运行态，`/dream cancel` 请求取消（两种模式共用任务）；已发送请求无法撤销计费，返回后停止发布未完成候选。已保存候选和全部会话仍保留。
+`/profile refresh [n]` 或 `qm profile --refresh` 生成/更新摘要并继续提炼画像推断。摘要缺失或来源变化时，刷新先把最多 1 次请求分配给摘要，其余 n-1 次用于推断批次；n=0 不发请求，n=1 最多一次请求，手动刷新也不会隐式增加请求。事实未变化时跳过摘要生成。摘要失败或取消时保留旧摘要并标记过期，不发布未完成结果。`qm dream --requests 1` 或 `/dream 1` 仍用于跨事实回顾，寻找可审查的联系和假设；回顾在后台工作，可以继续聊天、切换会话。`/dream status` 查看运行态与下次计划，`/dream cancel` 请求取消（两种模式共用任务）；已发送请求无法撤销计费，返回后停止发布未完成候选。已保存候选和全部会话仍保留。
 
 每次任务默认最多一次模型请求，可设 0–20；关闭该任务的底层重试与候补模型，单请求超时最多 60 秒，要求配置的上下文窗口至少 2048 tokens。只处理新增/变化的事实，有限引用已处理事实作为背景；重启 TUI 后空闲自动调度会接续，也可执行同一命令立即接续。预算 0 不发请求，仅可恢复已经校验的本地结果。Dreaming 不直接扫描原始会话，先由既有沉淀流程将会话转成事实；不承诺穷举整库所有跨条目关系。
 
-进度追加在 `.quiet-memo/reflection-jobs.jsonl`，保存批次摘要、已校验候选及完成状态；截断尾行通过追加恢复标记保留原字节，中间损坏停止处理。候选仅写独立推断日志，不直接改写 Markdown 事实。新推断携带来源内容指纹，来源到期、更正、删除或手动改变后失效；旧推断没有指纹时只能检查来源 ID 和有效状态，无法追溯旧文本编辑。当前任务互斥限于同一服务实例，请勿同时用多个进程向同一库启动回顾。
+进度追加在 `.quiet-memo/reflection-jobs.jsonl`，保存批次摘要、已校验候选及完成状态；截断尾行通过追加恢复标记保留原字节，中间损坏停止处理。加载摘要与调度状态分别使用 `.quiet-memo/profile-summary.json`、`.quiet-memo/reflection-state.json` 和 `.quiet-memo/profile-fingerprints.json`，均可删除重建且不进入 Git 历史。候选仅写独立推断日志，不直接改写 Markdown 事实。新推断携带来源内容指纹，来源到期、更正、删除或手动改变后失效；旧推断没有指纹时只能检查来源 ID 和有效状态，无法追溯旧文本编辑。当前任务互斥限于同一服务实例，请勿同时用多个进程向同一库启动回顾。
 
 代码职责：时间演化写入由记忆服务统一编排，时间模块仅负责日期与视图计算；后台回顾通过公开服务接口访问推断。待确认项先追加处理日志再移出队列，写入失败保留候选；极端失败重试可能留下重复处理日志。损坏的向量缓存按未命中重建，回顾响应缺少 proposals 字段按失败处理并保留进度。
 
 回顾失败会区分模型请求超时、结果校验失败和本地读写失败；任务日志仅保存错误类别，不记录供应商异常原文。超时请求不标记批次完成，再次执行可以接续。
 
-TUI 启动补记结束后，空闲 60 秒自动回顾，Dreaming 与画像轮流执行；每轮最多一次请求，轮次间隔 300 秒，每次 TUI 启动共享 20 次自动请求预算。输入草稿、弹窗或聊天忙碌时不启动新任务，无新材料不请求。`/dream cancel` 暂停本次运行的自动调度并取消当前任务，`/dream resume` 恢复，`/dream status` 显示状态和剩余预算；配置 `[chat] auto_reflect=false` 可持久关闭。退出 TUI 后不运行；手动命令仍可立即触发，不占自动预算。
+TUI 启动补记结束后空闲 60 秒才开始检查自动任务，但不再按固定 300 秒轮换：Dreaming 默认每天最多自动执行一次，一次最多 1 次请求；Profile 默认 7 天最多自动更新一次，且必须有有效事实变化。少量普通新增只记录待处理变更，不立即重建；变更达到 `profile_min_changes`（默认 20）或目标、偏好、职业方向等重要变化时，可在至少 24 小时冷却后提前触发。没有变化时只做文件指纹检查，不扫描完整记忆、不调用模型。周期、冷却与失败退避保存在 vault 派生状态，TUI 重启不会重置；失败按 1/2/4…小时有上限退避，不会高频重试。输入草稿、弹窗、聊天忙碌或同类任务运行时延后。手动 `/profile refresh` 与 `/dream` 可绕过自动周期，但仍遵守命令预算。`/dream cancel` 暂停自动调度并取消当前任务，`/dream resume` 恢复，`/dream status` 显示下次计划与待处理变更；配置 `[chat] auto_reflect=false` 可持久关闭。退出 TUI 后不运行。
 
 会话浏览、搜索与恢复统一使用 `/sessions`。聊天中直接说“你记得……吗”或“记住……”，由 Agent 调用 recall / memorize；不提供对应的 TUI 斜杠命令。命令行管理入口保持可用。
 
-画像提炼读取所有主题的当前有效事实，由模型筛选偏好、目标、约束与习惯。画像事实列表展示常见中英文画像主题及有效画像推断引用的来源；其他无关事实不会直接铺入画像。
+画像摘要每次从当前有效事实重新生成，不把旧摘要当作新证据，避免多轮自我总结造成漂移。生成前按主题去重，并在输入 token 上限内尽量覆盖各主题；主题多、信息密度高时才展开，资料少时保持简短。事实删除、更正、替代或手动编辑会立即让摘要标记过期，但不会立即触发模型请求；下一次符合条件的后台刷新才重建，用户也可手动立即刷新。
 
 自动记忆召回按个人话题和连续追问触发；通用问题跳过预取，模型仍可按需调用 recall。auto_recall=0 关闭预取。
 

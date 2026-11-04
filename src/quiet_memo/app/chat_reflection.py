@@ -7,6 +7,7 @@ from functools import partial
 from rich.markup import escape
 
 from ..infra.diagnostics import record_event
+from .chat_widgets import ProfileScreen
 
 
 class ChatReflectionMixin:
@@ -15,9 +16,9 @@ class ChatReflectionMixin:
     def _start_auto_reflection(self) -> None:
         self._reflection_last_activity = time.monotonic()
         self._reflection_next = 0.0
-        self._reflection_remaining = self.service.config.chat.reflect_request_budget
-        self._reflection_mode = "dream"
         self._reflection_paused = False
+        self._reflection_pending = False
+        self._reflection_cancel = None
         self.set_interval(5, self._auto_reflection_tick)
 
     def _reflection_activity(self) -> None:
@@ -27,39 +28,44 @@ class ChatReflectionMixin:
         config = self.service.config.chat
         now = time.monotonic()
         if (not config.auto_reflect or self._reflection_paused or not getattr(self, "_reflection_ready", False)
-            or self.busy or getattr(self, "_reflection_pending", False) or self._reflection_remaining <= 0
+            or self.busy or getattr(self, "_reflection_pending", False)
             or now < self._reflection_next or now - self._reflection_last_activity < config.reflect_idle_seconds):
             return
         from textual.widgets import Input
         if self.query_one("#input", Input).value.strip() or len(self.screen_stack) > 1:
             return
-        self._reflection_next = now + config.reflect_interval_seconds
+        try:
+            due = self.service.reflection.auto_check_due()
+        except Exception as exc:
+            record_event("reflection.schedule_failed", exc)
+            return
+        if not due:
+            return
+        self._reflection_next = now + max(5.0, config.reflect_interval_seconds)
         self._reflection_pending = True
         self._reflection_cancel = threading.Event()
-        mode = self._reflection_mode
-        self._reflection_mode = "profile" if mode == "dream" else "dream"
-        # 每轮只发一次；缺少新材料时引擎不调用模型，也不消耗预算。
-        self.run_worker(partial(self._auto_reflection_work, mode, self._reflection_cancel),
+        self.run_worker(partial(self._auto_reflection_work, self._reflection_cancel),
                         thread=True, group="reflection", exit_on_error=False)
 
-    def _auto_reflection_work(self, mode: str, token: threading.Event) -> None:
+    def _auto_reflection_work(self, token: threading.Event) -> None:
         try:
-            result = self.service.reflection.run(mode, 1, cancel_event=token)
-            self.call_from_thread(self._after_auto_reflection, result, None)
+            mode = self.service.reflection.auto_plan()
+            if mode is None:
+                self.call_from_thread(self._after_auto_reflection, None, None)
+                return
+            result = self.service.reflection.run(
+                mode, 1, cancel_event=token, auto=True,
+                refresh_summary=mode == "profile")
+            self.call_from_thread(self._after_auto_reflection, result, result.error)
         except Exception as exc:
             record_event("reflection.failed", exc)
             self.call_from_thread(self._after_auto_reflection, None, "Automatic reflection failed; progress preserved.")
 
     def _after_auto_reflection(self, result, error: str | None) -> None:
         self._reflection_pending = False
-        self._reflection_next = time.monotonic() + self.service.config.chat.reflect_interval_seconds
-        if result is not None:
-            self._reflection_remaining -= result.requests
-            error = result.error
-            if result.proposed:
-                self.notify(f"Background reflection proposed {result.proposed} inferences. Review with /inferences.")
-        else:
-            self._reflection_remaining -= 1
+        self._reflection_next = time.monotonic() + max(5.0, self.service.config.chat.reflect_interval_seconds)
+        if result is not None and result.proposed:
+            self.notify(f"Background reflection proposed {result.proposed} inferences. Review with /inferences.")
         if error:
             self.notify(error)
 
@@ -79,7 +85,19 @@ class ChatReflectionMixin:
         if argument == "status":
             running = "running" if getattr(self, "_reflection_pending", False) else "idle"
             enabled = self.service.config.chat.auto_reflect and not getattr(self, "_reflection_paused", False)
-            self.add_card(f"Reflection {running}; automatic reflection {'enabled' if enabled else 'paused/disabled'}; remaining request budget {getattr(self, '_reflection_remaining', 0)}.")
+            try:
+                overview = self.service.reflection.schedule_overview()
+                profile = overview["profile"]
+                dream = overview["dream"]
+                profile_next = profile["next_attempt_at"][:16].replace("T", " ")
+                dream_next = dream["next_attempt_at"][:16].replace("T", " ")
+                schedule = (
+                    f"next profile ~{profile_next} ({profile['pending']} pending changes), "
+                    f"next dream ~{dream_next} ({'pending' if dream['pending'] else 'no pending changes'})"
+                )
+            except Exception:
+                schedule = "schedule state unavailable"
+            self.add_card(f"Reflection {running}; automatic reflection {'enabled' if enabled else 'paused/disabled'}; {schedule}.")
             return
         if mode == "profile" and not argument:
             self.run_worker(self._profile_work, thread=True, group="profile-view", exit_on_error=False)
@@ -105,22 +123,54 @@ class ChatReflectionMixin:
                         thread=True, group="reflection", exit_on_error=False)
 
     def _profile_work(self) -> None:
+        """只读缓存摘要；事实/推断的完整遍历和模型调用都留给 /profile refresh。"""
         try:
-            items = self.service.reflection.profile()
-            labels = {"active": "Fact", "hypothesis": "Proposed inference", "confirmed": "Confirmed inference"}
-            text = "\n".join(f"[{labels.get(item.status, item.status)}] {item.text}\nSources: {', '.join(item.source_ids)}" for item in items)
-            text = text or "No profile yet. Save preferences, goals or habits; /profile refresh can generate proposals."
-            text += "\nCorrect or forget facts using the existing controls; review inferences in /inferences."
+            summary = self.service.reflection.profile_summary()
+            if summary is None:
+                body = ("No profile summary yet. Save preferences, goals or habits, then run "
+                        "/profile refresh to generate a cross-topic summary.")
+                status = "The summary is a derived view over valid facts; source facts stay unchanged."
+                stale = False
+            else:
+                body = summary.text
+                stale = summary.stale
+                state = ("Outdated — source facts changed; run /profile refresh."
+                         if stale else "Up to date")
+                status = (f"{state}  ·  {summary.fact_count} valid facts, {summary.unique_count} unique  ·  "
+                          f"generated {summary.generated_at[:16].replace('T', ' ')}")
         except Exception as exc:
             record_event("reflection.failed", exc)
-            text = "Could not read the profile. Check local memory and inference logs."
-        self.call_from_thread(self.add_card, escape(text))
+            body = "Could not read the profile summary cache."
+            status = "The cache is derived data; retry or run /profile refresh to rebuild it."
+            stale = False
+        try:
+            self.call_from_thread(self._show_profile, body, status, stale)
+        except RuntimeError:
+            pass  # 界面已退出，不再投递结果。
+
+    def _show_profile(self, body: str, status: str, stale: bool) -> None:
+        if len(self.screen_stack) > 1:
+            return
+        self.push_screen(ProfileScreen(body, status, stale=stale))
 
     def _reflection_work(self, mode: str, budget: int, token: threading.Event) -> None:
         try:
-            result = self.service.reflection.run(mode, budget, cancel_event=token)
+            result = self.service.reflection.run(
+                mode, budget, cancel_event=token, refresh_summary=mode == "profile")
             message = (f"Reflection {'cancelled' if result.cancelled else 'complete'}: requests {result.requests}, "
                        f"proposed {result.proposed}, remaining {result.remaining} batches.")
+            if mode == "profile":
+                labels = {
+                    "updated": "updated",
+                    "fresh": "already up to date",
+                    "skipped": "not updated (request budget 0)",
+                    "empty": "cleared (no valid facts)",
+                    "failed": "generation failed; previous summary kept",
+                    "stale": "not published (sources changed during generation)",
+                    "cancelled": "not published",
+                    "not_requested": "not requested",
+                }
+                message += f"\nProfile summary: {labels.get(result.summary_status, result.summary_status)}."
             if result.error:
                 message += f"\n{result.error}"
             if result.proposed:

@@ -319,3 +319,420 @@ def test_profile_can_derive_from_custom_topics_without_listing_unrelated_facts(s
 def test_profile_supports_chinese_topic_facts(service):
     source = service.note("合成偏好", topic="偏好")
     assert source.id in {item.id for item in service.reflection.profile()}
+
+
+def test_profile_summary_refresh_spends_one_budget_and_stays_derived(service):
+    source = service.note("合成阅读偏好：喜欢安静环境", topic="preferences")
+    payloads = []
+
+    def summary(payload):
+        payloads.append(payload)
+        return "整体特征\n偏好安静阅读，重视可维护性。"
+
+    result = service.reflection.run(
+        "profile", 1, model=lambda *_: pytest.fail("摘要预算不应再发推断请求"),
+        refresh_summary=True, summary_model=summary)
+
+    assert result.requests == 1
+    assert result.summary_status == "updated"
+    cached = service.reflection.profile_summary()
+    assert cached is not None and not cached.stale
+    assert "安静阅读" in cached.text and cached.fact_count == 1
+    assert payloads[0]["target_chars"][0] >= 100
+    assert service.store.entries() == [source]
+    assert service.inferences.all() == []
+
+
+def test_profile_summary_uses_remaining_budget_for_inferences(service):
+    service.note("合成偏好", topic="preferences")
+    calls = []
+
+    def model(mode, entries):
+        calls.append((mode, entries))
+        return []
+
+    result = service.reflection.run(
+        "profile", 2, model=model, refresh_summary=True,
+        summary_model=lambda payload: "长期偏好合成的安静活动。")
+
+    assert result.requests == 2 and len(calls) == 1
+    assert result.summary_status == "updated"
+
+
+def test_profile_summary_is_not_regenerated_when_facts_are_unchanged(service):
+    service.note("合成偏好", topic="preferences")
+    service.reflection.run("profile", 1, refresh_summary=True,
+                           summary_model=lambda payload: "合成画像。")
+    result = service.reflection.run(
+        "profile", 1, model=lambda *_: [],
+        refresh_summary=True,
+        summary_model=lambda payload: pytest.fail("来源未变不应重新生成"))
+    assert result.summary_status == "fresh"
+    assert result.requests == 1  # 预算转给推断批次
+    assert service.reflection.profile_summary().text == "合成画像。"
+
+
+def test_profile_summary_marks_stale_after_fact_edit_and_rebuilds(service):
+    source = service.note("合成早期阅读偏好", topic="preferences")
+    service.reflection.run("profile", 1, refresh_summary=True,
+                           summary_model=lambda payload: "早期画像。")
+    assert not service.reflection.profile_summary().stale
+
+    path = service.store.topic_path("preferences")
+    path.write_text(path.read_text(encoding="utf-8").replace("合成早期阅读偏好", "合成后期阅读偏好"),
+                    encoding="utf-8")
+    assert service.reflection.profile_summary().stale
+
+    seen = []
+
+    def summary(payload):
+        seen.extend(item["text"] for item in payload["facts"])
+        return "后期画像。"
+
+    result = service.reflection.run("profile", 1, refresh_summary=True, summary_model=summary)
+    assert result.summary_status == "updated"
+    assert any("合成后期阅读偏好" in text for text in seen)
+    assert all("合成早期阅读偏好" not in text for text in seen)
+    assert service.store.find(source.id).text == "合成后期阅读偏好"
+
+
+def test_profile_summary_clears_when_nothing_remains(service):
+    source = service.note("合成偏好", topic="preferences")
+    service.reflection.run("profile", 1, refresh_summary=True,
+                           summary_model=lambda payload: "合成画像。")
+    service.forget(source.id)
+    result = service.reflection.run("profile", 0, refresh_summary=True,
+                                    model=lambda *_: pytest.fail("无事实不得请求"))
+    assert result.summary_status == "empty"
+    assert service.reflection.profile_summary() is None
+
+
+def test_profile_summary_ignores_corrupt_cache_and_can_rebuild(service):
+    service.note("合成偏好", topic="preferences")
+    service.reflection.summary_path.parent.mkdir(parents=True, exist_ok=True)
+    service.reflection.summary_path.write_text("{not-json", encoding="utf-8")
+    assert service.reflection.profile_summary() is None
+    result = service.reflection.run("profile", 1, refresh_summary=True,
+                                    summary_model=lambda payload: "重建画像。")
+    assert result.summary_status == "updated"
+    assert service.reflection.profile_summary().text == "重建画像。"
+
+
+def test_profile_summary_failure_keeps_previous_and_marks_stale(service):
+    service.note("合成偏好", topic="preferences")
+    service.reflection.run("profile", 1, refresh_summary=True,
+                           summary_model=lambda payload: "旧画像。")
+    service.note("合成新增目标", topic="goals")
+
+    def fail(payload):
+        raise TimeoutError("synthetic-private-detail")
+
+    result = service.reflection.run("profile", 1, refresh_summary=True, summary_model=fail)
+    assert result.summary_status == "failed"
+    assert result.error and "摘要" in result.error
+    cached = service.reflection.profile_summary()
+    assert cached.text == "旧画像。" and cached.stale
+    assert "synthetic-private-detail" not in service.reflection.summary_path.read_text(encoding="utf-8")
+
+
+def test_profile_summary_cancel_is_not_published(service):
+    service.note("合成偏好", topic="preferences")
+    token = threading.Event()
+
+    def summary(payload):
+        token.set()
+        return "不应发布的画像。"
+
+    result = service.reflection.run("profile", 1, cancel_event=token,
+                                    refresh_summary=True, summary_model=summary)
+    assert result.cancelled and result.summary_status == "cancelled"
+    assert service.reflection.profile_summary() is None
+
+
+def test_profile_summary_rejects_secrets(service):
+    service.note("合成偏好", topic="preferences")
+    result = service.reflection.run(
+        "profile", 1, refresh_summary=True,
+        summary_model=lambda payload: "api_key = synthetic-only-placeholder")
+    assert result.summary_status == "failed"
+    assert service.reflection.profile_summary() is None
+
+
+def test_profile_summary_is_not_injected_into_chat_context(service):
+    source = service.note("合成阅读偏好", topic="preferences")
+    service.reflection.run("profile", 1, refresh_summary=True,
+                           summary_model=lambda payload: "不应进入聊天上下文的完整画像。")
+    assert service.reflection.context({source.id}) == ""
+
+
+def test_profile_refresh_zero_keeps_stale_cache_and_makes_no_request(service):
+    service.note("合成偏好", topic="preferences")
+    service.reflection.run("profile", 1, refresh_summary=True,
+                           summary_model=lambda payload: "旧画像。")
+    service.note("合成新增目标", topic="goals")
+    result = service.reflection.run(
+        "profile", 0, refresh_summary=True,
+        model=lambda *_: pytest.fail("预算 0 不得请求"),
+        summary_model=lambda payload: pytest.fail("预算 0 不得请求"))
+    assert result.requests == 0 and result.summary_status == "skipped"
+    cached = service.reflection.profile_summary()
+    assert cached.text == "旧画像。" and cached.stale
+
+
+def test_inference_review_marks_summary_outdated(service):
+    source = service.note("合成偏好", topic="preferences")
+    service.reflection.run("profile", 1, refresh_summary=True,
+                           summary_model=lambda payload: "画像。")
+    assert not service.reflection.profile_summary().stale
+    service.propose_inference("可能偏好安静活动", [source.id], kind="profile")
+    assert service.reflection.profile_summary().stale
+
+
+def test_profile_length_follows_unique_information_not_raw_count(service):
+    from quiet_memo.memory.reflection import profile_length_range
+
+    assert profile_length_range(10, 2) == (100, 225)
+    assert profile_length_range(50, 5) == (300, 700)
+    assert profile_length_range(200, 4) == (500, 1200)
+    assert profile_length_range(2000, 6) == (1000, 3000)
+
+    for index in range(120):
+        service.store.append("preferences", "合成重复偏好")
+    payloads = []
+    service.reflection.run("profile", 1, refresh_summary=True,
+                           summary_model=lambda payload: payloads.append(payload) or "重复画像。")
+    stats = payloads[0]["stats"]
+    assert stats["valid_facts"] == 120 and stats["unique_facts"] == 1
+    assert payloads[0]["target_chars"][1] <= 300
+    assert stats["sampled_facts"] == 1
+
+
+def _prime_schedule(service, now):
+    state = service.reflection.schedule_state()
+    entries = service.current_facts()
+    previous, important = service.reflection._load_profile_fingerprints()
+    changes = service.reflection._facts_changes(entries, previous, important)
+    service.reflection._write_profile_fingerprints(changes.fingerprints, changes.important_ids)
+    stamp = now.isoformat(timespec="seconds")
+    state["profile"].update({
+        "last_attempt_at": stamp,
+        "last_success_at": stamp,
+        "next_retry_at": None,
+        "fact_digest": changes.digest,
+        "pending_changes": 0,
+        "pending_important": False,
+        "consecutive_failures": 0,
+    })
+    state["dream"].update({
+        "last_attempt_at": stamp,
+        "last_success_at": stamp,
+        "next_retry_at": None,
+        "fact_digest": changes.digest,
+        "pending": False,
+        "consecutive_failures": 0,
+    })
+    state["last_seen_facts_signature"] = service.reflection._facts_signature()
+    service.reflection._save_schedule_state(state)
+
+
+def _set_attempts(service, stamp):
+    state = service.reflection.schedule_state()
+    state["profile"]["last_attempt_at"] = stamp
+    state["dream"]["last_attempt_at"] = stamp
+    service.reflection._save_schedule_state(state)
+
+
+def test_auto_profile_waits_weekly_unless_change_is_valuable(service):
+    from datetime import datetime, timedelta
+
+    service.note("合成普通事实", topic="uncategorized")
+    service.reflection.run("profile", 1, refresh_summary=True,
+                           summary_model=lambda payload: "合成画像。")
+    now = datetime.now().astimezone()
+    _prime_schedule(service, now)
+
+    for index in range(5):
+        service.store.append("uncategorized", f"合成普通新增 {index}")
+    assert not service.reflection.auto_check_due(now + timedelta(hours=1))
+    assert service.reflection.auto_plan(now + timedelta(hours=25)) == "dream"
+
+    state = service.reflection.schedule_state()
+    state["dream"]["last_attempt_at"] = (now + timedelta(hours=25)).isoformat(timespec="seconds")
+    service.reflection._save_schedule_state(state)
+    assert service.reflection.auto_plan(now + timedelta(days=8)) == "profile"
+
+
+def test_many_pending_changes_refresh_at_cooldown_even_without_new_files(service):
+    from datetime import datetime, timedelta
+
+    service.note("合成普通事实", topic="uncategorized")
+    service.reflection.run("profile", 1, refresh_summary=True,
+                           summary_model=lambda payload: "合成画像。")
+    now = datetime.now().astimezone()
+    _prime_schedule(service, now)
+    for index in range(25):
+        service.store.append("uncategorized", f"合成大批新增 {index}")
+
+    # 第一次扫描记录变更，但 24 小时冷却未到，不应立即刷新。
+    assert service.reflection.auto_plan(now + timedelta(hours=1)) is None
+    state = service.reflection.schedule_state()
+    assert state["profile"]["pending_changes"] == 25
+    # 文件不再变化，仅冷却到期也必须能触发提前更新。
+    assert service.reflection.auto_check_due(now + timedelta(hours=25))
+    assert service.reflection.auto_plan(now + timedelta(hours=25)) == "profile"
+
+
+def test_auto_plan_skips_while_another_run_is_active(service):
+    from datetime import datetime
+
+    service.note("合成普通事实", topic="uncategorized")
+    service.reflection._running.acquire()
+    try:
+        assert service.reflection.auto_plan(datetime.now().astimezone()) is None
+    finally:
+        service.reflection._running.release()
+
+
+def test_source_change_marks_summary_stale_without_immediate_model_call(service):
+    from datetime import datetime, timedelta
+
+    source = service.note("合成早期偏好", topic="preferences")
+    service.reflection.run("profile", 1, refresh_summary=True,
+                           summary_model=lambda payload: "旧画像。")
+    now = datetime.now().astimezone()
+    _prime_schedule(service, now)
+    path = service.store.topic_path("preferences")
+    path.write_text(path.read_text(encoding="utf-8").replace("合成早期偏好", "合成后期偏好"),
+                    encoding="utf-8")
+    assert service.reflection.profile_summary().stale
+    assert not service.reflection.auto_check_due(now + timedelta(hours=1))
+    assert service.store.find(source.id).text == "合成后期偏好"
+
+
+def test_auto_check_does_not_scan_fact_contents(service, monkeypatch):
+    from datetime import datetime
+
+    service.note("合成普通事实", topic="uncategorized")
+    monkeypatch.setattr(service, "current_facts",
+                        lambda: pytest.fail("轻量调度检查不得扫描完整事实"))
+    service.reflection.auto_check_due(datetime.now().astimezone())
+
+
+def test_auto_profile_skips_week_without_changes(service):
+    from datetime import datetime, timedelta
+
+    service.note("合成普通事实", topic="uncategorized")
+    service.reflection.run("profile", 1, refresh_summary=True,
+                           summary_model=lambda payload: "合成画像。")
+    now = datetime.now().astimezone()
+    _prime_schedule(service, now)
+    assert not service.reflection.auto_check_due(now + timedelta(days=8))
+    assert service.reflection.auto_plan(now + timedelta(days=8)) is None
+
+
+def test_important_change_can_refresh_after_cooldown(service):
+    from datetime import datetime, timedelta
+
+    service.note("合成普通事实", topic="uncategorized")
+    service.reflection.run("profile", 1, refresh_summary=True,
+                           summary_model=lambda payload: "合成画像。")
+    now = datetime.now().astimezone()
+    _prime_schedule(service, now)
+    service.store.append("goals", "长期目标发生变化：准备转向系统架构方向")
+
+    assert not service.reflection.auto_check_due(now + timedelta(hours=1))
+    assert service.reflection.auto_plan(now + timedelta(hours=1)) is None
+    assert service.reflection.auto_check_due(now + timedelta(hours=25))
+    assert service.reflection.auto_plan(now + timedelta(hours=25)) == "profile"
+
+
+def test_dream_auto_daily_survives_restart_and_skips_unchanged(service):
+    from datetime import datetime, timedelta
+    from quiet_memo.memory.service import MemoryService
+
+    service.note("合成普通事实", topic="uncategorized")
+    service.reflection.run("profile", 1, refresh_summary=True,
+                           summary_model=lambda payload: "合成画像。")
+    service.reflection.run("dream", 1, model=lambda *_: [])
+    now = datetime.now().astimezone()
+    _prime_schedule(service, now)
+
+    restarted = MemoryService(service.config)
+    assert not restarted.reflection.auto_check_due(now + timedelta(hours=1))
+    assert restarted.reflection.auto_plan(now + timedelta(hours=1)) is None
+
+    restarted.store.append("uncategorized", "合成新增事实")
+    assert restarted.reflection.auto_check_due(now + timedelta(hours=25))
+    assert restarted.reflection.auto_plan(now + timedelta(hours=25)) == "dream"
+
+
+def test_manual_failure_does_not_hide_pending_profile_work(service):
+    service.note("合成普通事实", topic="uncategorized")
+    result = service.reflection.run(
+        "profile", 1, refresh_summary=True,
+        summary_model=lambda payload: (_ for _ in ()).throw(TimeoutError("synthetic")))
+    assert result.error
+    state = service.reflection.schedule_state()
+    assert state["profile"]["pending_changes"] >= 1
+    assert service.reflection.auto_check_due()
+
+
+def test_auto_failure_uses_capped_backoff(service):
+    from datetime import datetime, timedelta
+
+    service.note("合成普通事实", topic="uncategorized")
+    service.reflection.run("profile", 1, refresh_summary=True,
+                           summary_model=lambda payload: "合成画像。")
+    now = datetime.now().astimezone()
+    _prime_schedule(service, now)
+    state = service.reflection.schedule_state()
+    state["dream"]["last_attempt_at"] = (now - timedelta(days=2)).isoformat(timespec="seconds")
+    service.reflection._save_schedule_state(state)
+
+    def fail(*args, **kwargs):
+        raise TimeoutError("synthetic")
+
+    for index in range(1, 7):
+        result = service.reflection.run("dream", 1, model=fail, auto=True)
+        assert result.error
+        state = service.reflection.schedule_state()
+        assert state["dream"]["consecutive_failures"] == index
+        retry = service.reflection._parse_time(state["dream"]["next_retry_at"])
+        hours = (retry - datetime.now().astimezone()).total_seconds() / 3600
+        assert 0.9 <= hours <= 24.1
+
+    assert not service.reflection.auto_check_due(now + timedelta(minutes=30))
+
+
+def test_corrupt_schedule_state_degrades_safely(service):
+    service.reflection.schedule_path.parent.mkdir(parents=True, exist_ok=True)
+    service.reflection.schedule_path.write_text('{"version": 1, "profile": []}', encoding="utf-8")
+    state = service.reflection.schedule_state()
+    assert state["version"] == 1 and state["profile"]["pending_changes"] == 0
+    assert service.reflection.auto_check_due() is True
+    service.reflection.schedule_path.write_text("not-json", encoding="utf-8")
+    assert service.reflection.schedule_state()["profile"]["pending_changes"] == 0
+    assert service.reflection.auto_plan() is None
+
+
+def test_auto_plan_never_invokes_model(service, monkeypatch):
+    from datetime import datetime
+
+    service.note("合成普通事实", topic="uncategorized")
+    monkeypatch.setattr(service.reflection, "_model", lambda *_: pytest.fail("计划阶段不得请求"))
+    monkeypatch.setattr(service.reflection, "_summary_model", lambda *_: pytest.fail("计划阶段不得请求"))
+    assert service.reflection.auto_plan(datetime.now().astimezone()) in {None, "profile", "dream"}
+
+
+def test_manual_success_resets_auto_cadence(service):
+    from datetime import datetime, timedelta
+
+    service.note("合成普通事实", topic="uncategorized")
+    result = service.reflection.run("profile", 1, refresh_summary=True,
+                                    summary_model=lambda payload: "合成画像。")
+    assert result.summary_status == "updated"
+    state = service.reflection.schedule_state()
+    assert state["profile"]["last_success_at"] and state["profile"]["consecutive_failures"] == 0
+    now = datetime.now().astimezone()
+    _set_attempts(service, now.isoformat(timespec="seconds"))
+    assert not service.reflection.auto_check_due(now + timedelta(hours=2))

@@ -307,7 +307,7 @@ def _reflect(service: MemoryService, mode: str, requests: int) -> None:
     import json
 
     try:
-        result = service.reflection.run(mode, requests)
+        result = service.reflection.run(mode, requests, refresh_summary=mode == "profile")
         console.print(json.dumps(asdict(result), ensure_ascii=False), markup=False)
         if result.error:
             raise typer.Exit(1)

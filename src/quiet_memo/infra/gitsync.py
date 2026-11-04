@@ -27,6 +27,9 @@ STAGES = (STAGE_CHECK, STAGE_COMMIT, STAGE_PUSH, STAGE_REFRESH)
 RUNTIME_IGNORE = (
     ".quiet-memo/vectors.npz",
     ".quiet-memo/search-cache.json",
+    ".quiet-memo/profile-summary.json",
+    ".quiet-memo/profile-fingerprints.json",
+    ".quiet-memo/reflection-state.json",
     ".quiet-memo/git-sync-state.json",
     ".quiet-memo/*.lock",
 )

@@ -1,0 +1,366 @@
+"""自动回顾的跨重启调度：低频周期、变更判断、冷却与失败退避。
+
+只读取状态和文件元信息供 UI 轻量检查；完整事实扫描只在 Worker 中执行。
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
+
+from .detect import contains_secret
+from .inference import source_fingerprint
+from .models import Entry
+
+if TYPE_CHECKING:
+    from .reflection import ReflectionEngine, ReflectionResult
+
+REFLECTION_STATE_VERSION = 1
+PROFILE_IMPORTANT_TOPICS = frozenset({
+    "preferences", "goals", "constraints", "schedule", "career", "work",
+    "偏好", "喜好", "目标", "约束", "习惯", "日程", "职业", "工作",
+})
+PROFILE_IMPORTANT_KEYWORDS = (
+    "长期", "目标", "职业", "工作", "转行", "计划", "方向",
+    "goal", "career", "long-term", "long term",
+)
+MAX_AUTO_RETRY_HOURS = 24.0
+
+
+@dataclass
+class FactChanges:
+    count: int
+    important: bool
+    digest: str
+    fingerprints: dict[str, str]
+    important_ids: list[str]
+
+
+class ReflectionSchedule:
+    def __init__(self, engine: ReflectionEngine) -> None:
+        self.engine = engine
+        self.service = engine.service
+        self.path = engine.service.config.vault / ".quiet-memo" / "reflection-state.json"
+        self.fingerprints_path = engine.service.config.vault / ".quiet-memo" / "profile-fingerprints.json"
+        self._vault_lock = engine._vault_lock
+
+    def default_state(self) -> dict:
+        return {
+            "version": REFLECTION_STATE_VERSION,
+            "last_seen_facts_signature": "",
+            "last_checked_at": None,
+            "profile": {
+                "last_attempt_at": None,
+                "last_success_at": None,
+                "next_retry_at": None,
+                "fact_digest": "",
+                "pending_changes": 0,
+                "pending_important": False,
+                "consecutive_failures": 0,
+                "last_error_kind": None,
+            },
+            "dream": {
+                "last_attempt_at": None,
+                "last_success_at": None,
+                "next_retry_at": None,
+                "fact_digest": "",
+                "pending": False,
+                "consecutive_failures": 0,
+                "last_error_kind": None,
+            },
+        }
+
+    def load(self) -> dict:
+        """缺失或损坏时安全回退到首次运行，不阻断自动调度。"""
+        default = self.default_state()
+        if not self.path.exists():
+            return default
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, UnicodeDecodeError):
+            return default
+        if not isinstance(data, dict) or data.get("version") != REFLECTION_STATE_VERSION:
+            return default
+        if isinstance(data.get("last_seen_facts_signature"), str):
+            default["last_seen_facts_signature"] = data["last_seen_facts_signature"]
+        if isinstance(data.get("last_checked_at"), str):
+            default["last_checked_at"] = data["last_checked_at"]
+        for section in ("profile", "dream"):
+            raw = data.get(section)
+            if not isinstance(raw, dict):
+                continue
+            for key in default[section]:
+                if key in raw:
+                    default[section][key] = raw[key]
+        for section in ("profile", "dream"):
+            for key in ("pending_changes", "consecutive_failures"):
+                if key in default[section] and type(default[section][key]) is not int:
+                    default[section][key] = 0
+            for key in ("pending", "pending_important"):
+                if key in default[section] and type(default[section][key]) is not bool:
+                    default[section][key] = False
+        return default
+
+    def save(self, state: dict) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.path.with_name(self.path.name + ".tmp")
+        with self._vault_lock:
+            temporary.write_text(json.dumps(state, ensure_ascii=False) + "\n", encoding="utf-8")
+            temporary.replace(self.path)
+
+    @staticmethod
+    def parse_time(value) -> datetime | None:
+        if not isinstance(value, str):
+            return None
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo is not None else None
+
+    @staticmethod
+    def stamp(now: datetime) -> str:
+        return now.isoformat(timespec="seconds")
+
+    def elapsed_hours(self, value, now: datetime) -> float | None:
+        parsed = self.parse_time(value)
+        if parsed is None or parsed > now + timedelta(hours=24):
+            return None
+        return max(0.0, (now - parsed).total_seconds() / 3600)
+
+    def retry_due(self, section: dict, now: datetime) -> bool:
+        retry = self.parse_time(section.get("next_retry_at"))
+        return retry is not None and now >= retry
+
+    @staticmethod
+    def important_entry(entry: Entry) -> bool:
+        if entry.topic.casefold() in PROFILE_IMPORTANT_TOPICS:
+            return True
+        text = entry.text.casefold()
+        return any(keyword in text for keyword in PROFILE_IMPORTANT_KEYWORDS)
+
+    def load_fingerprints(self) -> tuple[dict[str, str], set[str]]:
+        if not self.fingerprints_path.exists():
+            return {}, set()
+        try:
+            data = json.loads(self.fingerprints_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, UnicodeDecodeError):
+            return {}, set()
+        if not isinstance(data, dict):
+            return {}, set()
+        raw = data.get("fingerprints")
+        fingerprints = {
+            key: value for key, value in raw.items()
+            if isinstance(key, str) and isinstance(value, str)
+        } if isinstance(raw, dict) else {}
+        raw_important = data.get("important_ids")
+        important = {
+            value for value in raw_important if isinstance(value, str)
+        } if isinstance(raw_important, list) else set()
+        return fingerprints, important
+
+    def write_fingerprints(self, fingerprints: dict[str, str], important_ids: list[str]) -> None:
+        self.fingerprints_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.fingerprints_path.with_name(self.fingerprints_path.name + ".tmp")
+        payload = {
+            "version": REFLECTION_STATE_VERSION,
+            "fingerprints": fingerprints,
+            "important_ids": important_ids,
+        }
+        with self._vault_lock:
+            temporary.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+            temporary.replace(self.fingerprints_path)
+
+    def facts_changes(self, entries: list[Entry], previous: dict[str, str],
+                      remembered_important: set[str]) -> FactChanges:
+        current = {entry.id: source_fingerprint(entry) for entry in entries}
+        new_ids = set(current) - set(previous)
+        changed_ids = {
+            key for key, value in current.items()
+            if key in previous and previous[key] != value
+        }
+        removed_ids = set(previous) - set(current)
+        important_current = [entry.id for entry in entries if self.important_entry(entry)]
+        important_removed = [key for key in removed_ids if key in remembered_important]
+        important_ids = sorted(set(important_current) | set(important_removed))
+        digest = hashlib.sha256(
+            "|".join(f"{key}:{current[key]}" for key in sorted(current)).encode("utf-8")
+        ).hexdigest()
+        return FactChanges(
+            count=len(new_ids) + len(changed_ids) + len(removed_ids),
+            important=bool(important_current or important_removed),
+            digest=digest,
+            fingerprints=current,
+            important_ids=important_ids,
+        )
+
+    def check_due(self, now: datetime | None = None) -> bool:
+        """UI 线程可调用的轻量检查：只读状态和文件元信息，不扫描记忆内容。"""
+        now = now or datetime.now().astimezone()
+        config = self.service.config.chat
+        state = self.load()
+        changed = self.engine._facts_signature() != state["last_seen_facts_signature"]
+        profile, dream = state["profile"], state["dream"]
+        profile_interval = max(0.1, config.profile_auto_interval_hours)
+        profile_cooldown = max(0.1, config.profile_min_cooldown_hours)
+        dream_interval = max(0.1, config.dream_auto_interval_hours)
+        profile_elapsed = self.elapsed_hours(profile.get("last_attempt_at"), now)
+        dream_elapsed = self.elapsed_hours(dream.get("last_attempt_at"), now)
+        profile_due = profile_elapsed is None or profile_elapsed >= profile_interval
+        profile_cool = profile_elapsed is None or profile_elapsed >= profile_cooldown
+        dream_due = dream_elapsed is None or dream_elapsed >= dream_interval
+        profile_retry = self.retry_due(profile, now)
+        dream_retry = self.retry_due(dream, now)
+        pending_changes = int(profile.get("pending_changes") or 0)
+        pending_important = bool(profile.get("pending_important"))
+        dream_pending = bool(dream.get("pending"))
+        dream_ready = (changed or dream_pending) and (dream_due or dream_retry)
+        profile_ready = (
+            (changed and (profile_due or profile_cool or profile_retry))
+            or (pending_important and (profile_cool or profile_retry))
+            or (
+                pending_changes >= max(1, config.profile_min_changes)
+                and (profile_cool or profile_retry)
+            )
+            or (pending_changes > 0 and (profile_due or profile_retry))
+        )
+        return dream_ready or profile_ready
+
+    def plan(self, now: datetime | None = None) -> str | None:
+        """在 Worker 中扫描一次事实变化，决定本轮自动任务；不调用模型。"""
+        if self.engine.running:
+            return None
+        now = now or datetime.now().astimezone()
+        config = self.service.config.chat
+        state = self.load()
+        with self.service.write_lock:
+            entries = self.service.current_facts()
+        entries = sorted(
+            (item for item in entries if not contains_secret(item.model_dump_json())),
+            key=lambda item: item.id,
+        )
+        previous, remembered_important = self.load_fingerprints()
+        changes = self.facts_changes(entries, previous, remembered_important)
+        profile, dream = state["profile"], state["dream"]
+        profile_elapsed = self.elapsed_hours(profile.get("last_attempt_at"), now)
+        dream_elapsed = self.elapsed_hours(dream.get("last_attempt_at"), now)
+        profile_due = profile_elapsed is None or profile_elapsed >= max(0.1, config.profile_auto_interval_hours)
+        profile_cool = profile_elapsed is None or profile_elapsed >= max(0.1, config.profile_min_cooldown_hours)
+        dream_due = dream_elapsed is None or dream_elapsed >= max(0.1, config.dream_auto_interval_hours)
+        profile_retry = self.retry_due(profile, now)
+        dream_retry = self.retry_due(dream, now)
+        summary = self.engine.profile_summary()
+        summary_stale = (summary is not None and summary.stale) or (summary is None and bool(entries))
+        profile_pending = changes.count > 0 or summary_stale
+        valuable_now = changes.important or changes.count >= max(1, config.profile_min_changes)
+        profile_candidate = (
+            profile_pending
+            and (profile_due or profile_retry or (profile_cool and valuable_now))
+        )
+        baseline = dream.get("fact_digest")
+        dream_pending = bool(entries) if not baseline else baseline != changes.digest
+        dream_candidate = dream_pending and (dream_due or dream_retry)
+
+        state["last_seen_facts_signature"] = self.engine._facts_signature()
+        state["last_checked_at"] = self.stamp(now)
+        profile["pending_changes"] = changes.count
+        profile["pending_important"] = changes.important
+        dream["pending"] = dream_pending
+        self.save(state)
+
+        if profile_candidate and dream_candidate:
+            profile_last = self.parse_time(profile.get("last_attempt_at"))
+            dream_last = self.parse_time(dream.get("last_attempt_at"))
+            if profile_last is not None and dream_last is not None and dream_last < profile_last:
+                return "dream"
+            return "profile"
+        if profile_candidate:
+            return "profile"
+        if dream_candidate:
+            return "dream"
+        return None
+
+    @staticmethod
+    def error_kind(error: str) -> str:
+        if "超时" in error:
+            return "timeout"
+        if "来源" in error:
+            return "stale"
+        if "摘要" in error:
+            return "summary"
+        if "校验" in error:
+            return "validation"
+        return "request"
+
+    def record_run(self, mode: str, result: ReflectionResult,
+                   entries: list[Entry] | None, auto: bool) -> None:
+        if result.requests == 0 and not auto:
+            return
+        now = datetime.now().astimezone()
+        state = self.load()
+        section = state["profile" if mode == "profile" else "dream"]
+        if result.cancelled:
+            if result.requests:
+                section["last_attempt_at"] = self.stamp(now)
+        elif result.error:
+            failures = int(section.get("consecutive_failures") or 0) + 1
+            section["consecutive_failures"] = failures
+            section["last_error_kind"] = self.error_kind(result.error)
+            # 失败不等于已处理：保留待办标记，手动失败后自动调度仍可接续。
+            if mode == "profile":
+                section["pending_changes"] = max(1, int(section.get("pending_changes") or 0))
+            else:
+                section["pending"] = True
+            if auto:
+                section["last_attempt_at"] = self.stamp(now)
+                hours = min(MAX_AUTO_RETRY_HOURS, 2 ** (failures - 1))
+                section["next_retry_at"] = self.stamp(now + timedelta(hours=hours))
+        else:
+            section["last_attempt_at"] = self.stamp(now)
+            section["last_success_at"] = self.stamp(now)
+            section["next_retry_at"] = None
+            section["consecutive_failures"] = 0
+            section["last_error_kind"] = None
+            if entries is not None:
+                previous, remembered_important = self.load_fingerprints()
+                changes = self.facts_changes(entries, previous, remembered_important)
+                section["fact_digest"] = changes.digest
+                if mode == "profile":
+                    self.write_fingerprints(changes.fingerprints, changes.important_ids)
+                    section["pending_changes"] = 0
+                    section["pending_important"] = False
+                else:
+                    section["pending"] = False
+        state["last_seen_facts_signature"] = self.engine._facts_signature()
+        self.save(state)
+
+    def overview(self, now: datetime | None = None) -> dict:
+        now = now or datetime.now().astimezone()
+        state = self.load()
+        config = self.service.config.chat
+        result = {}
+        for mode, interval, cooldown in (
+            ("profile", config.profile_auto_interval_hours, config.profile_min_cooldown_hours),
+            ("dream", config.dream_auto_interval_hours, 0.0),
+        ):
+            section = state[mode]
+            last = self.parse_time(section.get("last_attempt_at"))
+            next_at = last + timedelta(hours=max(0.1, interval)) if last else now
+            retry = self.parse_time(section.get("next_retry_at"))
+            if retry is not None and retry < next_at:
+                next_at = retry
+            count = int(section.get("pending_changes") or 0)
+            if mode == "profile" and last and (
+                section.get("pending_important") or count >= max(1, config.profile_min_changes)
+            ):
+                early = last + timedelta(hours=max(0.1, cooldown))
+                if early < next_at:
+                    next_at = early
+            result[mode] = {
+                "next_attempt_at": self.stamp(next_at),
+                "pending": count if mode == "profile" else bool(section.get("pending")),
+                "failures": int(section.get("consecutive_failures") or 0),
+            }
+        return result
