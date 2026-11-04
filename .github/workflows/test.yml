@@ -27,6 +27,7 @@ jobs:
       - run: uv run quietmemo --version
       - run: uv run python -c "import syvrio; import quiet_memo; from syvrio.app.cli import app"
       - name: Test packaged wheel
+        if: runner.os != 'Windows'
         run: |
           uv venv /tmp/syvrio-wheel
           uv pip install --python /tmp/syvrio-wheel/bin/python dist/*.whl
