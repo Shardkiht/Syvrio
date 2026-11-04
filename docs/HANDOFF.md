@@ -1,5 +1,13 @@
 # 开发交接
 
+## Syvrio 品牌迁移（2026-11-04）
+
+- 正式项目名称与发行包名 `Syvrio` / `syvrio`；源码包迁移至 `src/syvrio/`，CLI `syvrio` 为主，`qm`、`quietmemo` 保留兼容。
+- 旧配置文件 `quiet-memo.toml`、`.quiet-memo/` Vault 数据目录、`QUIET_MEMO_CONFIG`、`QUIET_MEMO_VAULT` 及 Keyring 服务名 `quiet-memo` 保持原有行为；新增 `SYVRIO_CONFIG`、`SYVRIO_VAULT` 可覆盖旧环境变量。不触碰用户记忆 ID 或历史记录。
+- 新 PyPI `syvrio` 尚未发布；旧 `quiet-memo` 历史 Release 和冻结 tag 原样保留。发布 workflow 改为手动触发，Trusted Publishing 需先手工绑定新包。
+- 本条仅为迁移方案与实现说明；具体测试通过情况以更名 PR 的 CI 及合并记录为准，不能把历史测试数字视为本次验证结果。
+
+
 ## 画像摘要、命令面板滚动与低频回顾调度（2026-11-04）
 
 - 分支 `evolution`（跟踪 `origin/feature-memory-evolution`），基线 `8c91143`；本轮改动仅在工作区，未 commit、未 push。
@@ -198,7 +206,7 @@
 
 ## 基础版本范围（444fe0f）
 
-本轮实现 [#10](https://github.com/Shardkiht/quiet-memo/issues/10)、[#11](https://github.com/Shardkiht/quiet-memo/issues/11) 的基础部分，并建立 [#14](https://github.com/Shardkiht/quiet-memo/issues/14) 的首批合成解析与裁决回归。未提高包版本，也未发布到 PyPI。
+本轮实现 [#10](https://github.com/Shardkiht/Syvrio/issues/10)、[#11](https://github.com/Shardkiht/Syvrio/issues/11) 的基础部分，并建立 [#14](https://github.com/Shardkiht/Syvrio/issues/14) 的首批合成解析与裁决回归。未提高包版本，也未发布到 PyPI。
 
 ## 已实现
 

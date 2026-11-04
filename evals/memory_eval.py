@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from quiet_memo.infra.config import Config, RetrievalConfig
-from quiet_memo.memory.extractor import StaticExtractor, parse_extraction
-from quiet_memo.memory.service import MemoryService
+from syvrio.infra.config import Config, RetrievalConfig
+from syvrio.memory.extractor import StaticExtractor, parse_extraction
+from syvrio.memory.service import MemoryService
 
 
 @dataclass(frozen=True)
@@ -100,7 +100,7 @@ def main() -> int:
 
 def run_contextual_eval(vault: Path) -> dict:
     """小型合成对照，比较不带上下文的关键词检索与明确时间/地点/情绪条件。"""
-    from quiet_memo.memory.models import MemoryContext
+    from syvrio.memory.models import MemoryContext
 
     service = MemoryService(Config(vault=vault, retrieval=RetrievalConfig(method="keyword")))
     old = service.store.append("preferences", "合成偏好早期状态", context=MemoryContext(valid_from="2020-01-01"))

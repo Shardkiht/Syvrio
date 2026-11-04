@@ -6,17 +6,17 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from quiet_memo.infra.config import SearchConfig, UsageLimit, load_config
-from quiet_memo.infra.search.anysearch import AnySearchProvider
-from quiet_memo.infra.search.base import (
+from syvrio.infra.config import SearchConfig, UsageLimit, load_config
+from syvrio.infra.search.anysearch import AnySearchProvider
+from syvrio.infra.search.base import (
     ProviderError,
     ProviderErrorKind,
     SearchQuery,
     SearchResult,
 )
-from quiet_memo.infra.search.parallel_mcp import MCP_URL, ParallelMcpProvider
-from quiet_memo.infra.search.router import SearchRouter, build_registry
-from quiet_memo.infra.search.usage import UsageLimiter
+from syvrio.infra.search.parallel_mcp import MCP_URL, ParallelMcpProvider
+from syvrio.infra.search.router import SearchRouter, build_registry
+from syvrio.infra.search.usage import UsageLimiter
 
 pytestmark = pytest.mark.search
 
@@ -309,7 +309,7 @@ def test_parallel_uses_real_fastmcp_protocol_in_memory():
 
 def test_optional_providers_register_without_keys(monkeypatch):
     monkeypatch.setattr(
-        "quiet_memo.infra.search.router.read_api_key", lambda env_name: ""
+        "syvrio.infra.search.router.read_api_key", lambda env_name: ""
     )
     registry = build_registry(
         SearchConfig(providers=["anysearch", "parallel_mcp", "open_websearch"])
@@ -326,7 +326,7 @@ def test_optional_providers_use_keys_when_present(monkeypatch):
         seen[env_name] = "configured"
         return ""
 
-    monkeypatch.setattr("quiet_memo.infra.search.router.read_api_key", fake_read)
+    monkeypatch.setattr("syvrio.infra.search.router.read_api_key", fake_read)
     registry = build_registry(SearchConfig(providers=["anysearch", "parallel_mcp"]))
     assert set(registry) == {"anysearch", "parallel_mcp"}
     assert set(seen) == {"ANYSEARCH_API_KEY", "PARALLEL_API_KEY"}

@@ -6,9 +6,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from quiet_memo.memory.models import Candidate, ExtractionResult, MemoryContext, ReflectionProposal
-from quiet_memo.memory.extractor import StaticExtractor
-from quiet_memo.memory.service import MemoryService
+from syvrio.memory.models import Candidate, ExtractionResult, MemoryContext, ReflectionProposal
+from syvrio.memory.extractor import StaticExtractor
+from syvrio.memory.service import MemoryService
 
 pytestmark = pytest.mark.memory
 
@@ -234,8 +234,8 @@ def test_historical_conflicts_do_not_hide_current_conflict(service):
 
 def test_reflection_model_disables_retries_and_limits_output(service, monkeypatch):
     from types import SimpleNamespace
-    from quiet_memo.infra.config import LLMConfig
-    from quiet_memo.memory import reflection as module
+    from syvrio.infra.config import LLMConfig
+    from syvrio.memory import reflection as module
 
     service.config.llm = LLMConfig(provider="local", num_retries=7, fallbacks=["unused"])
     source = service.note("合成事实")
@@ -252,9 +252,9 @@ def test_reflection_model_disables_retries_and_limits_output(service, monkeypatc
 @pytest.mark.cli
 def test_profile_cli_is_read_only_and_evolve_cli_preserves_history(service, monkeypatch):
     from typer.testing import CliRunner
-    from quiet_memo.app.cli import app
+    from syvrio.app.cli import app
 
-    monkeypatch.setattr("quiet_memo.app.cli._service", lambda *args: service)
+    monkeypatch.setattr("syvrio.app.cli._service", lambda *args: service)
     old = service.store.append("preferences", "合成早期偏好", context=MemoryContext(valid_from="2020-01-01"))
     result = CliRunner().invoke(app, ["evolve", old.id, "合成后期偏好", "--from", "2024-01-01"])
     assert result.exit_code == 0, result.output
@@ -268,7 +268,7 @@ def test_profile_cli_is_read_only_and_evolve_cli_preserves_history(service, monk
 @pytest.mark.mcp
 async def test_mcp_profile_and_temporal_evolution(service):
     from fastmcp import Client
-    from quiet_memo.app.server import build_server
+    from syvrio.app.server import build_server
 
     old = service.store.append("preferences", "合成早期偏好", context=MemoryContext(valid_from="2020-01-01"))
     service.config.search.enabled = False
@@ -283,7 +283,7 @@ async def test_mcp_profile_and_temporal_evolution(service):
 
 def test_missing_proposals_is_not_a_successful_empty_batch():
     from pydantic import ValidationError
-    from quiet_memo.memory.models import ReflectionResponse
+    from syvrio.memory.models import ReflectionResponse
     with pytest.raises(ValidationError):
         ReflectionResponse.model_validate({})
 
@@ -489,7 +489,7 @@ def test_inference_review_marks_summary_outdated(service):
 
 
 def test_profile_length_follows_unique_information_not_raw_count(service):
-    from quiet_memo.memory.reflection import profile_length_range
+    from syvrio.memory.reflection import profile_length_range
 
     assert profile_length_range(10, 2) == (100, 225)
     assert profile_length_range(50, 5) == (300, 700)
@@ -648,7 +648,7 @@ def test_important_change_can_refresh_after_cooldown(service):
 
 def test_dream_auto_daily_survives_restart_and_skips_unchanged(service):
     from datetime import datetime, timedelta
-    from quiet_memo.memory.service import MemoryService
+    from syvrio.memory.service import MemoryService
 
     service.note("合成普通事实", topic="uncategorized")
     service.reflection.run("profile", 1, refresh_summary=True,
@@ -807,7 +807,7 @@ def test_removed_ordinary_fact_is_not_important(service):
 
 def test_important_change_detection_survives_restart(service):
     from datetime import datetime
-    from quiet_memo.memory.service import MemoryService
+    from syvrio.memory.service import MemoryService
 
     service.note("合成长期目标", topic="goals")
     service.note("合成普通事实", topic="uncategorized")
@@ -1041,8 +1041,8 @@ def test_legacy_summary_cache_without_evidence_is_invalid(service):
 
 def test_summary_payload_fits_context_budget(service):
     import json as json_module
-    from quiet_memo.infra.tokens import estimate_tokens
-    from quiet_memo.memory.reflection import PROFILE_SUMMARY_MAX_TOKENS, PROFILE_SUMMARY_PROMPT
+    from syvrio.infra.tokens import estimate_tokens
+    from syvrio.memory.reflection import PROFILE_SUMMARY_MAX_TOKENS, PROFILE_SUMMARY_PROMPT
 
     service.config.chat.context_window = 4096
     source = service.note("合成普通事实", topic="uncategorized")

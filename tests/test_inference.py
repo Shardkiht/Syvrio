@@ -6,7 +6,7 @@ from datetime import datetime
 import pytest
 from pydantic import ValidationError
 
-from quiet_memo.memory.service import MemoryService
+from syvrio.memory.service import MemoryService
 
 pytestmark = pytest.mark.memory
 

@@ -22,17 +22,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from quiet_memo.infra.config import load_config, read_api_key  # noqa: E402
-from quiet_memo.infra.search.base import (  # noqa: E402
+from syvrio.infra.config import load_config, read_api_key  # noqa: E402
+from syvrio.infra.search.base import (  # noqa: E402
     FetchQuery,
     ProviderError,
     SearchQuery,
 )
-from quiet_memo.infra.search.fetch_router import (  # noqa: E402
+from syvrio.infra.search.fetch_router import (  # noqa: E402
     _EXTERNAL_FETCH_PROVIDERS,
     build_fetch_registry,
 )
-from quiet_memo.infra.search.router import (  # noqa: E402
+from syvrio.infra.search.router import (  # noqa: E402
     _EXTERNAL_PROVIDERS,
     _OPTIONAL_KEY_PROVIDERS,
     build_registry,

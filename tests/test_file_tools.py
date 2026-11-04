@@ -4,12 +4,12 @@ import json
 
 import pytest
 
-from quiet_memo.agent.file_tools import file_handlers
-from quiet_memo.agent.session import SessionStore
-from quiet_memo.agent.tools import build_tools
-from quiet_memo.infra.documents import document_paths
-from quiet_memo.infra.tokens import estimate_tokens
-from quiet_memo.memory.models import Candidate, ExtractionResult
+from syvrio.agent.file_tools import file_handlers
+from syvrio.agent.session import SessionStore
+from syvrio.agent.tools import build_tools
+from syvrio.infra.documents import document_paths
+from syvrio.infra.tokens import estimate_tokens
+from syvrio.memory.models import Candidate, ExtractionResult
 
 pytestmark = pytest.mark.agent
 

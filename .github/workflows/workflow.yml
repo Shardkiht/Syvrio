@@ -1,8 +1,6 @@
-name: publish
+name: publish-syvrio-manual
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -10,11 +8,12 @@ permissions:
 
 jobs:
   publish:
+    # PyPI trusted publisher for syvrio must be configured before manual dispatch.
     runs-on: ubuntu-latest
     container: debian:13-slim
     environment:
       name: pypi
-      url: https://pypi.org/p/quiet-memo
+      url: https://pypi.org/p/syvrio
     permissions:
       id-token: write
       contents: read

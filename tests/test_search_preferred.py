@@ -5,20 +5,20 @@ import pytest
 
 pytestmark = pytest.mark.search
 
-from quiet_memo.agent.session import SessionStore
-from quiet_memo.agent.tools import build_tools
-from quiet_memo.infra.config import ChatConfig, Config, LLMConfig, SearchConfig, UsageLimit
-from quiet_memo.infra.search.base import (
+from syvrio.agent.session import SessionStore
+from syvrio.agent.tools import build_tools
+from syvrio.infra.config import ChatConfig, Config, LLMConfig, SearchConfig, UsageLimit
+from syvrio.infra.search.base import (
     ProviderError,
     ProviderErrorKind,
     SearchFailure,
     SearchQuery,
     SearchResult,
 )
-from quiet_memo.infra.search.cache import SearchCache
-from quiet_memo.infra.search.router import SearchRouter, _dedupe_failures
-from quiet_memo.infra.search.usage import UsageLimiter
-from quiet_memo.memory.service import MemoryService
+from syvrio.infra.search.cache import SearchCache
+from syvrio.infra.search.router import SearchRouter, _dedupe_failures
+from syvrio.infra.search.usage import UsageLimiter
+from syvrio.memory.service import MemoryService
 
 
 class _Provider:
@@ -330,7 +330,7 @@ def test_cache_key_separates_compare_and_auto(tmp_path):
 
 
 def test_provider_selection_normalization_handles_json_strings_and_limits():
-    from quiet_memo.infra.search.base import normalize_search_providers
+    from syvrio.infra.search.base import normalize_search_providers
 
     assert normalize_search_providers(None) == ()
     assert normalize_search_providers("") == ()
@@ -508,7 +508,7 @@ def test_compare_cache_missing_verification_is_unknown(tmp_path):
     import json
     from dataclasses import asdict
 
-    from quiet_memo.infra.search.cache import CACHE_VERSION
+    from syvrio.infra.search.cache import CACHE_VERSION
 
     path = tmp_path / "cache.json"
     result = _strong("searxng", "https://example.com/s")

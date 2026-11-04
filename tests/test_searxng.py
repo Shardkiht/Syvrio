@@ -8,15 +8,15 @@ import pytest
 
 pytestmark = pytest.mark.search
 
-from quiet_memo.infra.config import SearchConfig, UsageLimit
-from quiet_memo.infra.search.base import (
+from syvrio.infra.config import SearchConfig, UsageLimit
+from syvrio.infra.search.base import (
     ProviderError,
     ProviderErrorKind,
     SearchQuery,
     SearchResult,
 )
-from quiet_memo.infra.search.router import SearchRouter, build_registry
-from quiet_memo.infra.search.searxng import (
+from syvrio.infra.search.router import SearchRouter, build_registry
+from syvrio.infra.search.searxng import (
     MAX_RESPONSE_BYTES,
     SearxngProvider,
     normalize_base_url,

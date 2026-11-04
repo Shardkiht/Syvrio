@@ -6,8 +6,8 @@ pytestmark = pytest.mark.agent
 
 from types import SimpleNamespace
 
-from quiet_memo.agent.recall import RecallQueryBuilder
-from quiet_memo.infra.config import LLMConfig
+from syvrio.agent.recall import RecallQueryBuilder
+from syvrio.infra.config import LLMConfig
 
 
 def response(text: str):
@@ -102,5 +102,5 @@ def test_rewrite_falls_back_to_combined_text(monkeypatch):
     ("那怎么用", ["解释 Python"], False),
 ])
 def test_automatic_recall_gate(text, recent, expected):
-    from quiet_memo.agent.recall import should_auto_recall
+    from syvrio.agent.recall import should_auto_recall
     assert should_auto_recall(text, recent) is expected

@@ -3,11 +3,11 @@ from __future__ import annotations
 import pytest
 from typer.testing import CliRunner
 
-from quiet_memo.agent.session import dated_message, now_iso
-from quiet_memo.app.cli import app
-from quiet_memo.memory.extractor import StaticExtractor
-from quiet_memo.memory.models import Candidate, ExtractionResult, MemoryContext
-from quiet_memo.memory.temporal import matches_context, resolve_relative, validate_range
+from syvrio.agent.session import dated_message, now_iso
+from syvrio.app.cli import app
+from syvrio.memory.extractor import StaticExtractor
+from syvrio.memory.models import Candidate, ExtractionResult, MemoryContext
+from syvrio.memory.temporal import matches_context, resolve_relative, validate_range
 
 pytestmark = pytest.mark.memory
 
@@ -85,7 +85,7 @@ def test_context_range_and_missing_metadata():
 
 
 def test_filtered_recall_filters_before_limit(service):
-    from quiet_memo.retrieval.base import SearchHit
+    from syvrio.retrieval.base import SearchHit
     first = service.note("合成展览旧记录")
     service.extractor = StaticExtractor(ExtractionResult(memories=[Candidate(
         text="合成展览新记录", confidence=1, context=MemoryContext(event_time="2024-06"))]))
@@ -113,7 +113,7 @@ def test_keyword_context_retrieval_keeps_old_memories_without_filters(service):
 
 
 def test_inference_cli(service, monkeypatch):
-    monkeypatch.setattr("quiet_memo.app.cli._service", lambda *args: service)
+    monkeypatch.setattr("syvrio.app.cli._service", lambda *args: service)
     source = service.note("合成事实")
     item = service.propose_inference("合成假设", [source.id])
     result = CliRunner().invoke(app, ["inferences", item.id, "--action", "confirm"])
@@ -194,8 +194,8 @@ def test_source_audit_survives_inference_append_failure(service, monkeypatch, ac
 
 @pytest.mark.agent
 def test_agent_recall_passes_context_filters(service):
-    from quiet_memo.agent.tools import build_tools
-    from quiet_memo.agent.session import SessionStore
+    from syvrio.agent.tools import build_tools
+    from syvrio.agent.session import SessionStore
     service.config.search.enabled = False
     captured = {}
     def recall(query, limit, **filters):
@@ -211,7 +211,7 @@ def test_agent_recall_passes_context_filters(service):
 @pytest.mark.mcp
 async def test_mcp_recall_passes_context_filters(service):
     from fastmcp import Client
-    from quiet_memo.app.server import build_server
+    from syvrio.app.server import build_server
     service.config.search.enabled = False
     captured = {}
     def recall(query, limit, **filters):

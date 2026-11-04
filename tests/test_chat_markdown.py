@@ -10,9 +10,9 @@ from textual.containers import VerticalScroll
 from textual.selection import SELECT_ALL
 from textual.widgets import Static
 
-from quiet_memo.app.chat_widgets import ChatReply, TranscriptView, _ReplyMarkdown
-from quiet_memo.app.chat_theme import MARKDOWN_THEME
-from quiet_memo.agent.session import SessionStore
+from syvrio.app.chat_widgets import ChatReply, TranscriptView, _ReplyMarkdown
+from syvrio.app.chat_theme import MARKDOWN_THEME
+from syvrio.agent.session import SessionStore
 
 pytestmark = pytest.mark.ui
 

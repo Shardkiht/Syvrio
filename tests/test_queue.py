@@ -4,8 +4,8 @@ import pytest
 
 pytestmark = pytest.mark.memory
 
-from quiet_memo.memory.models import PendingItem
-from quiet_memo.memory.queue import PendingQueue
+from syvrio.memory.models import PendingItem
+from syvrio.memory.queue import PendingQueue
 
 
 def make_item(item_id: str = "p-1") -> PendingItem:
@@ -47,7 +47,7 @@ def test_resolve_missing_returns_none(tmp_path):
 
 
 def test_save_failure_leaves_pending_queue_intact(tmp_path, monkeypatch):
-    from quiet_memo.memory import queue as queue_module
+    from syvrio.memory import queue as queue_module
 
     queue = PendingQueue(tmp_path)
     queue.add(make_item())
@@ -113,7 +113,7 @@ def test_resolve_write_failure_keeps_item_and_retry_logs_once(tmp_path, monkeypa
 
 
 def test_rollback_failure_remains_explicit(tmp_path, monkeypatch):
-    from quiet_memo.memory import queue as queue_module
+    from syvrio.memory import queue as queue_module
     path = tmp_path / "synthetic.txt"
     path.write_bytes(b"original")
     def fail_replace(*args):
