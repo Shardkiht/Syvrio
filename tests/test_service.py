@@ -6,10 +6,10 @@ import pytest
 
 pytestmark = pytest.mark.memory
 
-from quiet_memo.infra.config import Config, LLMConfig, RetrievalConfig
-from quiet_memo.memory.extractor import StaticExtractor
-from quiet_memo.memory.models import Candidate, ExtractionResult, MemoryContext, PendingItem
-from quiet_memo.memory.service import MemoryService
+from syvrio.infra.config import Config, LLMConfig, RetrievalConfig
+from syvrio.memory.extractor import StaticExtractor
+from syvrio.memory.models import Candidate, ExtractionResult, MemoryContext, PendingItem
+from syvrio.memory.service import MemoryService
 
 
 def make_service(tmp_path, candidates):
@@ -340,7 +340,7 @@ def test_read_topic_returns_only_active_entries_for_known_topic(tmp_path):
 
 
 def test_read_topic_truncates_to_token_budget(tmp_path):
-    from quiet_memo.infra.tokens import estimate_tokens
+    from syvrio.infra.tokens import estimate_tokens
 
     service = make_service(tmp_path, [])
     service.note("很长的主题内容" * 100, topic="documents")
@@ -369,7 +369,7 @@ def test_commit_push_failure_does_not_hide_commit(tmp_path):
 
 def test_load_persona_falls_back_to_gbk(tmp_path):
     # 记事本 ANSI（GBK）保存的 SOUL.md 不应炸掉整轮对话。
-    from quiet_memo.memory.service import load_persona
+    from syvrio.memory.service import load_persona
 
     vault = tmp_path / "vault"
     vault.mkdir()
@@ -379,7 +379,7 @@ def test_load_persona_falls_back_to_gbk(tmp_path):
 
 
 def test_load_persona_missing_or_empty(tmp_path):
-    from quiet_memo.memory.service import load_persona
+    from syvrio.memory.service import load_persona
 
     vault = tmp_path / "vault"
     vault.mkdir()

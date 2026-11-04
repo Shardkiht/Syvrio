@@ -7,17 +7,17 @@ import pytest
 
 pytestmark = pytest.mark.search
 
-from quiet_memo.infra.config import FetchConfig, SearchConfig, UsageLimit
-from quiet_memo.infra.search.base import (
+from syvrio.infra.config import FetchConfig, SearchConfig, UsageLimit
+from syvrio.infra.search.base import (
     FetchResult,
     ProviderError,
     ProviderErrorKind,
     SearchQuery,
     SearchResult,
 )
-from quiet_memo.infra.search.fetch_router import FetchRouter, build_fetch_router
-from quiet_memo.infra.search.router import SearchRouter
-from quiet_memo.infra.search.usage import UsageLimiter
+from syvrio.infra.search.fetch_router import FetchRouter, build_fetch_router
+from syvrio.infra.search.router import SearchRouter
+from syvrio.infra.search.usage import UsageLimiter
 
 
 class _SearchProvider:
@@ -223,7 +223,7 @@ def test_build_routers_wire_limiter_from_config(tmp_path):
     search_config = SearchConfig(
         usage_limits={"tavily": UsageLimit(period="daily", max_calls=5)}
     )
-    from quiet_memo.infra.config import load_config
+    from syvrio.infra.config import load_config
 
     router = build_fetch_router(
         FetchConfig(), search_config, tmp_path / "vault"
@@ -263,10 +263,10 @@ def test_legacy_fetch_keeps_usage_protection():
 
 @pytest.mark.parametrize("name", ["exa", "tavily"])
 def test_normal_agent_fetch_uses_independent_config(service, monkeypatch, name):
-    from quiet_memo.agent.tools import build_tools
-    from quiet_memo.agent.session import SessionStore
-    from quiet_memo.infra import config as config_module
-    from quiet_memo.infra.search import fetch_router as module
+    from syvrio.agent.tools import build_tools
+    from syvrio.agent.session import SessionStore
+    from syvrio.infra import config as config_module
+    from syvrio.infra.search import fetch_router as module
     provider = _FetchProvider(name)
     monkeypatch.setattr(config_module, "read_api_key", lambda _: "synthetic-key")
     seen = []
@@ -292,7 +292,7 @@ def test_normal_agent_fetch_uses_independent_config(service, monkeypatch, name):
     ("you", 0, 1500), ("volcengine", 0, 450), ("open_websearch", 0, 0),
 ])
 def test_runtime_defaults_without_setup(tmp_path, name, daily, monthly):
-    from quiet_memo.infra.config import load_config
+    from syvrio.infra.config import load_config
     path = tmp_path / "config.toml"
     path.write_text(f"[search]\nproviders = ['{name}']\n", encoding="utf-8")
     limit = load_config(path).search.usage_limits[name]
@@ -300,7 +300,7 @@ def test_runtime_defaults_without_setup(tmp_path, name, daily, monthly):
 
 
 def test_explicit_zero_and_legacy_override_defaults(tmp_path):
-    from quiet_memo.infra.config import load_config
+    from syvrio.infra.config import load_config
     path = tmp_path / "config.toml"
     path.write_text('[search.usage_limits.tavily]\ndaily=0\nmonthly=0\n'
                     '[search.usage_limits.exa]\nperiod="daily"\nmax_calls=7\n', encoding="utf-8")
@@ -368,11 +368,11 @@ def test_pause_restart_expiry_and_manual_resume(tmp_path):
 
 
 def test_build_tools_official_pause_shared_across_search_fetch(service, monkeypatch):
-    from quiet_memo.agent.tools import build_tools
-    from quiet_memo.agent.session import SessionStore
-    from quiet_memo.infra import config as config_module
-    from quiet_memo.infra.search import router as search_module, fetch_router as fetch_module
-    from quiet_memo.infra.search.base import FetchQuery
+    from syvrio.agent.tools import build_tools
+    from syvrio.agent.session import SessionStore
+    from syvrio.infra import config as config_module
+    from syvrio.infra.search import router as search_module, fetch_router as fetch_module
+    from syvrio.infra.search.base import FetchQuery
     search = _SearchProvider("exa", error=ProviderError("exa", "quota", "NO_MORE_CREDITS",
                             code="NO_MORE_CREDITS", pause_reason="NO_MORE_CREDITS"))
     fallback = _SearchProvider("fallback", [SearchResult("Synthetic entity", "https://example.com", "")])
@@ -387,7 +387,7 @@ def test_build_tools_official_pause_shared_across_search_fetch(service, monkeypa
     assert len(search.calls) == 1 and len(fallback.calls) == 1
     assert not tools.execute("fetch_web", {"url": "https://example.com"}).ok
     assert not fetch.calls
-    from quiet_memo.infra.search.router import build_search_router
+    from syvrio.infra.search.router import build_search_router
     rebuilt = build_search_router(service.config.search, service.config.vault)
     outcome = rebuilt.search(SearchQuery("Synthetic entity", engine="exa"))
     assert not outcome.results and outcome.failed[0].kind == "quota"
@@ -396,7 +396,7 @@ def test_build_tools_official_pause_shared_across_search_fetch(service, monkeypa
 
 
 def test_search_cache_does_not_charge_or_dispatch(tmp_path):
-    from quiet_memo.infra.search.cache import SearchCache
+    from syvrio.infra.search.cache import SearchCache
     provider = _SearchProvider("exa", [SearchResult("Synthetic entity", "https://example.com/a", "")])
     limiter = UsageLimiter({"exa": UsageLimit(daily=1, monthly=2)}, tmp_path / "usage.json")
     router = SearchRouter({"exa": provider}, cache=SearchCache(tmp_path / "cache.json", 60), usage_limiter=limiter)

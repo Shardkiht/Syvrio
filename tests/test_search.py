@@ -4,8 +4,8 @@ import pytest
 
 pytestmark = pytest.mark.retrieval
 
-from quiet_memo.memory.store import MemoryStore
-from quiet_memo.retrieval import KeywordRetriever, tokenize
+from syvrio.memory.store import MemoryStore
+from syvrio.retrieval import KeywordRetriever, tokenize
 
 
 def seed(tmp_path):
@@ -87,7 +87,7 @@ def test_tokenize_drops_punctuation():
 
 
 def test_bigram_coverage_distinguishes_hit_from_noise():
-    from quiet_memo.memory.detect import bigram_coverage
+    from syvrio.memory.detect import bigram_coverage
 
     assert bigram_coverage("法压壶", "咖啡器具包括法压壶、分享壶和电子秤") == 1.0
     # 虚匹配：查询与干扰项只有零星 bigram 重叠
@@ -97,8 +97,8 @@ def test_bigram_coverage_distinguishes_hit_from_noise():
 
 def test_hybrid_gates_literal_mismatch():
     # 回归（issue #3）：keyword 虚匹配（干扰项 BM25 高名次）不得拖累 RRF 融合。
-    from quiet_memo.retrieval import HybridRetriever
-    from quiet_memo.retrieval.base import SearchHit
+    from syvrio.retrieval import HybridRetriever
+    from syvrio.retrieval.base import SearchHit
 
     class Stub:
         def __init__(self, hits):
@@ -118,8 +118,8 @@ def test_hybrid_gates_literal_mismatch():
 
 def test_hybrid_keeps_keyword_hits_for_non_cjk_query():
     # 非 CJK 查询没有 bigram 信号，字面闸不应把精确命中过滤掉。
-    from quiet_memo.retrieval import HybridRetriever
-    from quiet_memo.retrieval.base import SearchHit
+    from syvrio.retrieval import HybridRetriever
+    from syvrio.retrieval.base import SearchHit
 
     class Stub:
         def __init__(self, hits):

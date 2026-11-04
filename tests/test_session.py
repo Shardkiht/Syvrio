@@ -4,7 +4,7 @@ import pytest
 
 pytestmark = pytest.mark.agent
 
-from quiet_memo.agent.session import SessionStore, new_message_id
+from syvrio.agent.session import SessionStore, new_message_id
 
 
 def make_store(tmp_path):
@@ -173,7 +173,7 @@ def test_delete_session_file(tmp_path):
 def test_create_retries_id_collision_without_overwrite(tmp_path, monkeypatch):
     from datetime import datetime
 
-    from quiet_memo.agent import session as session_module
+    from syvrio.agent import session as session_module
 
     class FixedDateTime:
         @staticmethod
