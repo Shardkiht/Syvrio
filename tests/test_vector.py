@@ -281,7 +281,7 @@ def test_init_vault_appends_gitignore_after_missing_newline(tmp_path):
 
     lines = (tmp_path / "vault" / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert "*.log" in lines
-    assert ".quiet-memo/vectors.npz" in lines
+    assert ".syvrio/vectors.npz" in lines
 
 
 def test_sync_dedupes_duplicate_entry_ids(tmp_path):

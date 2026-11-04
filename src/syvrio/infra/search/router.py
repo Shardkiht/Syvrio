@@ -189,10 +189,10 @@ def build_search_router(
     limiter = None
     if vault is not None:
         if config.cache_ttl > 0:
-            cache = SearchCache(vault / ".quiet-memo" / "search-cache.json", config.cache_ttl)
+            cache = SearchCache(vault / ".syvrio" / "search-cache.json", config.cache_ttl)
         from .usage import USAGE_FILENAME, UsageLimiter
 
-        limiter = UsageLimiter(config.usage_limits, vault / ".quiet-memo" / USAGE_FILENAME)
+        limiter = UsageLimiter(config.usage_limits, vault / ".syvrio" / USAGE_FILENAME)
     return SearchRouter(
         build_registry(config),
         order=config.providers,

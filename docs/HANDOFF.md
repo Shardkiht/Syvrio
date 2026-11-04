@@ -1,11 +1,15 @@
 # 开发交接
 
-## Syvrio 品牌迁移（2026-11-04）
+## Syvrio 品牌迁移完成（2026-11-04）
 
-- 正式项目名称与发行包名 `Syvrio` / `syvrio`；源码包迁移至 `src/syvrio/`，CLI `syvrio` 为主，`qm`、`quietmemo` 保留兼容。
-- 旧配置文件 `quiet-memo.toml`、`.quiet-memo/` Vault 数据目录、`QUIET_MEMO_CONFIG`、`QUIET_MEMO_VAULT` 及 Keyring 服务名 `quiet-memo` 保持原有行为；新增 `SYVRIO_CONFIG`、`SYVRIO_VAULT` 可覆盖旧环境变量。不触碰用户记忆 ID 或历史记录。
-- 新 PyPI `syvrio` 尚未发布；旧 `quiet-memo` 历史 Release 和冻结 tag 原样保留。发布 workflow 改为手动触发，Trusted Publishing 需先手工绑定新包。
-- 本条仅为迁移方案与实现说明；具体测试通过情况以更名 PR 的 CI 及合并记录为准，不能把历史测试数字视为本次验证结果。
+- 唯一 Python 包与 CLI 为 `syvrio`；`src/quiet_memo` 兼容包、`qm`/`quietmemo` 别名及旧导入适配器已删除。
+- 配置统一为 `syvrio.toml`；用户配置目录 `~/.config/syvrio/`（Windows `%APPDATA%\syvrio\`）；默认 Vault `~/.syvrio/vault/`；Vault 元数据目录 `.syvrio/`；环境变量仅 `SYVRIO_CONFIG`、`SYVRIO_VAULT`；Keyring 服务名 `syvrio`。
+- MCP Server、TUI 助手名、缓存/日志/临时目录前缀统一为 `syvrio`；转义标签前缀改为 `~syvrio-escaped~`，迁移工具负责旧标签转换。
+- 新增 `scripts/migrate_to_syvrio.py`：默认 dry-run，`--apply` 先备份再迁移，校验记忆 ID/条目、会话、JSONL 与元数据哈希；冲突停止，重复执行幂等，锁文件不搬运，可重建缓存不迁移。
+- PyPI `syvrio` `0.3.3` 已发布；本次只修复品牌与发布配置，不触发新的 PyPI 发布或版本升级。
+- 验证：main 全量 `pytest -q` 为 885 passed、6 skipped；品牌/迁移/UI 定向回归 127 passed；`uv build` 的 wheel/sdist 仅包含 `syvrio`。
+- 真实数据迁移已在共享开发环境执行：旧 Vault 元数据迁移到 `.syvrio`，1114 条条目与 ID、5 个会话及各类日志行数核对一致；Keyring 后端不可用，凭据仍由私有环境文件提供。
+- 历史章节中的旧名称/路径仅作当时证据，不代表当前有效路径。
 
 
 ## 当前开发分支与冻结约定（2026-11-01）
@@ -53,7 +57,7 @@
 - FetchRouter（卡 09）：抓取调度从 `SearchRouter.fetch` 抽到 `infra/search/fetch_router.py`，SearchRouter 保留兼容入口内部委托；新增 `[fetch]` 配置（`providers`，默认 `["open_websearch"]`，与 search.providers 独立，旧配置缺省即原行为）；agent 的 `fetch_web` 工具名/参数/返回结构不变，显式注入 search_router 的旧 DI 路径保留。
 - 四家 Fetch（卡 10）：`TavilyFetchProvider`（/extract，Bearer，单 URL Basic）、`ExaFetchProvider`（/contents，x-api-key，body 恰为 {urls, text:true}）、`YouFetchProvider`（/v1/contents，X-API-Key，{urls, formats:["markdown"]}，响应形状二手资料待冒烟）、`VolcengineFetchProvider`（/search_api/fetch，字段名按 Search 同族约定待冒烟）。正文经 `truncate_fetch_content`（base.py）截断；空正文/失败抛 ProviderError 由 FetchRouter 回退。注册表 `fetch_router._EXTERNAL_FETCH_PROVIDERS`，Key 环境变量与对应 Search 相同。
 - Key 读取（卡 11）：`config.read_api_key`（env 优先、Keyring 回退）统一供 search/fetch registry 与 setup 使用；`qm setup` 顶层分「模型与 LLM」/「搜索与网页抓取」两个向导（providers.py 的 run_setup/_run_llm_setup/run_search_setup），官方厂商不自动启用、无 Key 拒绝启用，TOML 不落 Key。测试用假 ask + 假 questionary + 假 keyring 脚本化交互。
-- 额度限制（卡 12）：`infra/search/usage.py` 的 `UsageLimiter`（`search.usage_limits.<provider>`：period daily/monthly + max_calls，max_calls<=0 视为不限制）；Search/Fetch 同厂商共用一个计数池，计数在实际发起请求前记账（失败保守计数），状态在 vault `.quiet-memo/usage.json` 原子落盘，读前按 mtime 重载以兼容两个路由实例；达上限的失败分类是 `quota`（detail 注明本地上限，与厂商配额语义一致但 detail 可区分）。setup 启用官方厂商时询问每日上限（默认 20）。本地计数不是服务商账单上限。
+- 额度限制（卡 12）：`infra/search/usage.py` 的 `UsageLimiter`（`search.usage_limits.<provider>`：period daily/monthly + max_calls，max_calls<=0 视为不限制）；Search/Fetch 同厂商共用一个计数池，计数在实际发起请求前记账（失败保守计数），状态在 vault `.syvrio/usage.json` 原子落盘，读前按 mtime 重载以兼容两个路由实例；达上限的失败分类是 `quota`（detail 注明本地上限，与厂商配额语义一致但 detail 可区分）。setup 启用官方厂商时询问每日上限（默认 20）。本地计数不是服务商账单上限。
 - 集成与冒烟（卡 13）：`tests/test_multi_provider.py` 覆盖五 Search + 四 Fetch 注册矩阵、Search/Fetch 顺序独立、无 Key 不注册不发请求、search/fetch_web 工具协议、冒烟脚本 dry/live（假件注入）；`scripts/smoke_search_apis.py` 默认 dry 零请求，`--live` 才对单一厂商发 ≤max-requests（默认 1）次真实请求，报告脱敏。真实网络冒烟仍未执行，待验证：百度鉴权头、You.com Contents 响应形状、火山 Fetch 字段名与 Custom NeedContent、各家 count 上限。
 
 ## 忙碌态解耦与会话一致性（2026-10-31，分支 base/chat-stability）
@@ -117,7 +121,7 @@
 - 普通抽取与导入使用同一上下文契约。缺少可靠时间锚点时只保留相对时间原话；语气推断不写入情绪事实。
 - 上下文写在 Markdown 行尾 `context` JSON 标签中，沿用标签转义，旧格式无需迁移。候选排队、普通确认和 resolved 记录保留上下文；改写后确认及手动更正清除旧上下文。
 - 正文和新增上下文共同经过凭据拦截。条目 ID、来源、软删除与替代关系保持现有语义。
-- `MemoryService.propose_inference()` 只把假设追加到 `.quiet-memo/inferences.jsonl`，新记录为 `hypothesis`，包含类型、来源 ID 和带时区的生成/更新时间。
+- `MemoryService.propose_inference()` 只把假设追加到 `.syvrio/inferences.jsonl`，新记录为 `hypothesis`，包含类型、来源 ID 和带时区的生成/更新时间。
 - 来源去重且必须是有效事实；同类型、同规范化文本、同证据集合重复登记返回原记录。推断不能支持另一推断，不进入 Markdown 事实库或普通召回。
 - `evals/memory_eval.py` 提供固定合成输出的解析、冲突和上下文回归，并通过 `tests/test_memory_eval.py` 接入 pytest/CI；推断边界由独立领域测试覆盖。
 - 离线验证发现并修复 token 截断在极小预算下超限的问题；字符估算分支按最终预算截断，tokenizer 分支避免截断产生无效 Unicode。

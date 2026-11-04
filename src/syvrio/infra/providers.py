@@ -365,15 +365,14 @@ providers = {toml_literal(config.fetch.providers)}
 def resolve_config_path(config_path: Path | None) -> Path:
     if config_path:
         return config_path.expanduser()
-    env_path = os.environ.get("SYVRIO_CONFIG") or os.environ.get("QUIET_MEMO_CONFIG")
+    env_path = os.environ.get("SYVRIO_CONFIG")
     if env_path:
         # 环境变量优先于 CWD：测试隔离与显式选择配置都不应被仓库里的本地配置抢走。
         return Path(env_path).expanduser()
     local = Path.cwd() / CONFIG_FILENAME
     if local.exists():
         return local
-    fallback = default_config_path()
-    return fallback if fallback.exists() else local
+    return default_config_path()
 
 
 def run_setup(config_path: Path | None = None, vault: Path | None = None) -> dict:
@@ -436,7 +435,7 @@ def _manage_usage(config: Config) -> None:
     from .search.usage import UsageLimiter, USAGE_FILENAME
 
     defaults = default_usage_limits()
-    limiter = UsageLimiter(config.search.usage_limits, config.vault / ".quiet-memo" / USAGE_FILENAME)
+    limiter = UsageLimiter(config.search.usage_limits, config.vault / ".syvrio" / USAGE_FILENAME)
     while True:
         for name, default in defaults.items():
             effective = config.search.usage_limits.get(name, default)

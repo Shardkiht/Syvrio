@@ -9,7 +9,7 @@ class InferenceStore:
     """仅追加的独立推断记录；状态确认及来源失效处理由后续流程实现。"""
 
     def __init__(self, vault: Path) -> None:
-        self.path = Path(vault) / ".quiet-memo" / "inferences.jsonl"
+        self.path = Path(vault) / ".syvrio" / "inferences.jsonl"
 
     def all(self) -> list[Inference]:
         if not self.path.exists():

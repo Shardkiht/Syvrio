@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import sys
 import tomllib
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -13,10 +14,10 @@ DEFAULT_MODEL = "deepseek-flash"
 DEFAULT_API_KEY_ENV = "DEEPSEEK_API_KEY"
 DEFAULT_EMBEDDING_MODEL = "BAAI/bge-small-zh-v1.5"
 DEFAULT_EMBEDDING_BASE_URL = "https://api.siliconflow.cn/v1"
-CONFIG_FILENAME = "quiet-memo.toml"
+CONFIG_FILENAME = "syvrio.toml"
 
 
-KEYRING_SERVICE = "quiet-memo"
+KEYRING_SERVICE = "syvrio"
 
 
 class ConfigError(ValueError):
@@ -178,21 +179,31 @@ class Config:
     auto_push: bool = False
 
 
+def _default_config_dir() -> Path:
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+    elif sys.platform == "darwin":
+        base = str(Path.home() / "Library" / "Application Support")
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "syvrio"
+
+
 def default_config_path() -> Path:
-    env_path = os.environ.get("SYVRIO_CONFIG") or os.environ.get("QUIET_MEMO_CONFIG")
+    env_path = os.environ.get("SYVRIO_CONFIG")
     if env_path:
         return Path(env_path).expanduser()
     local = Path.cwd() / CONFIG_FILENAME
     if local.exists():
         return local
-    return Path.home() / ".config" / "quiet-memo" / "config.toml"
+    return _default_config_dir() / CONFIG_FILENAME
 
 
 def default_vault_path() -> Path:
-    env_vault = os.environ.get("SYVRIO_VAULT") or os.environ.get("QUIET_MEMO_VAULT")
+    env_vault = os.environ.get("SYVRIO_VAULT")
     if env_vault:
         return Path(env_vault).expanduser()
-    return Path.home() / ".quiet-memo" / "vault"
+    return Path.home() / ".syvrio" / "vault"
 
 
 def infer_provider(base_url: str) -> str:
@@ -296,7 +307,7 @@ def load_config(path: Path | str | None = None) -> Config:
             raise ConfigError(f"无法读取配置文件 {config_path}：{exc}") from exc
     _validate_config(data)
 
-    # 配置里的 vault 优先；QUIET_MEMO_VAULT 只在未配置时提供默认（也是测试隔离闸）。
+    # 配置里的 vault 优先；SYVRIO_VAULT 只在未配置时提供默认（也是测试隔离闸）。
     vault_raw = data.get("vault") or str(default_vault_path())
     llm_raw = data.get("llm", {})
     base_url = llm_raw.get("base_url", DEFAULT_BASE_URL)

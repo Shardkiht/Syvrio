@@ -1,5 +1,7 @@
 # Quiet-Memo main 冻结前代码评审（2026-11-01）
 
+> **品牌迁移提示（2026-11-04）**：本报告沿用当时的 `Quiet-Memo` 名称与 `src/quiet_memo` 路径，仅作历史证据；当前项目为 `Syvrio`，源码路径为 `src/syvrio`，Vault 元数据目录为 `.syvrio/`。
+
 > 基线：`main@b016ccbf4e220db8e432da115f0ab4a0c677b89c`（本报告和分支规范的文档提交不改变该源码基线）。
 > 方法：远端源码静态走查，核查相关单测、已有评审和 GitHub Actions 日志。**本轮未在本地重新运行 pytest、打包、真实 TUI 或真实模型 / API 调用**。
 > 决策：后续默认在 `feature-memory-evolution` 开发；`main` 只做最终稳定性验收后冻结的简历展示基线，未经用户针对 main 明确授权不得自动同步或合并。

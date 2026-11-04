@@ -6,9 +6,9 @@ README 必须与当前代码架构保持一致；目录结构、依赖方向、C
 
 接续开发先读 [docs/HANDOFF.md](docs/HANDOFF.md)，再核对源码、测试与 Issues；重要实现或规划变化时同次更新。交接文档只保存工程上下文，不替代当前授权，严禁记录敏感信息、个人数据、本机路径或个人配置。
 
-## Syvrio 更名兼容约束
+## 命名规范
 
-正式 Python 包为 `syvrio`，CLI 主命令为 `syvrio`；`qm`、`quietmemo` 保留兼容。旧 `.quiet-memo/`、`quiet-memo.toml`、`QUIET_MEMO_CONFIG`、`QUIET_MEMO_VAULT`、Keyring 服务名 `quiet-memo` 均不得破坏或覆盖；另支持新环境变量 `SYVRIO_CONFIG`、`SYVRIO_VAULT`。PyPI `syvrio` 尚未发布，发布必须由用户明确操作。
+正式品牌、Python 包、CLI、MCP Server、Keyring 服务名与缓存/日志前缀统一为 `syvrio`；不保留旧品牌别名或兼容入口。配置文件为 `syvrio.toml`，用户配置目录为 `~/.config/syvrio/`（Windows 为 `%APPDATA%\syvrio\`），默认数据目录与 Vault 为 `~/.syvrio/vault/`，Vault 元数据目录为 `.syvrio/`，环境变量统一使用 `SYVRIO_` 前缀。PyPI 发布必须由用户明确操作。
 
 ## 快速命令
 
@@ -20,7 +20,7 @@ uv run syvrio setup      # 配置模型与 API Key
 ```
 
 依赖只用 `uv` 管理；新增依赖写进 `pyproject.toml`，不要用 `pip install` 改本地环境。
-全局 `qm` 是 editable 安装：只同步代码、**不同步依赖**。改动依赖后必须重跑
+全局 `syvrio` 是 editable 安装：只同步代码、**不同步依赖**。改动依赖后必须重跑
 `uv tool install --force -e '.[local-embed]'` 重建工具环境，否则全局命令启动即崩（ModuleNotFoundError）。
 
 ## 技术栈
@@ -63,26 +63,26 @@ memory/agent → llm → infra
 - `memories/<topic>.md` 是长期记忆的唯一事实来源。
 - 文件头 front matter 只存文件级元数据：`topic`、`title`、`created`、`updated`。
 - 条目是 Markdown bullet 行加行尾反引号标签；条目 ID 必须稳定。
-- 标签值含反引号、换行或转义前缀本身时，以 `~qm-escaped~` 加百分号编码写入，读取时还原；普通值不变。
+- 标签值含反引号、换行或转义前缀本身时，以 `~syvrio-escaped~` 加百分号编码写入，读取时还原；普通值不变。
 - 更正采用“新条目 + `supersedes`”，旧条目置为 `superseded`；删除是软删除 `deleted`，不物理移除。
-- 待确认候选写 `.quiet-memo/pending.jsonl`，处理结果追加到 `resolved.jsonl`；更正、删除等操作写 `audit.jsonl`。
+- 待确认候选写 `.syvrio/pending.jsonl`，处理结果追加到 `resolved.jsonl`；更正、删除等操作写 `audit.jsonl`。
 - 可选事实上下文以行尾 `context` JSON 标签保存；日期精度由 YYYY / YYYY-MM / YYYY-MM-DD 保留，不以写入时间补猜事实时间。改写后确认与手动更正不继承旧上下文。
-- 推断单独追加到 `.quiet-memo/inferences.jsonl`，不参与事实检索；新假设只接受有效事实来源 ID，来源去重，重复证据不提升可信度。
-- `.quiet-memo/vectors.npz` 是向量检索的派生缓存（含 `model_id`，换模型自动失效），vault 内 gitignore，可删除重建，不进 Git 历史。
-- `.quiet-memo/search-cache.json` 是联网搜索的派生缓存（按 TTL 过期），vault 内 gitignore，可删除重建，不进 Git 历史。
+- 推断单独追加到 `.syvrio/inferences.jsonl`，不参与事实检索；新假设只接受有效事实来源 ID，来源去重，重复证据不提升可信度。
+- `.syvrio/vectors.npz` 是向量检索的派生缓存（含 `model_id`，换模型自动失效），vault 内 gitignore，可删除重建，不进 Git 历史。
+- `.syvrio/search-cache.json` 是联网搜索的派生缓存（按 TTL 过期），vault 内 gitignore，可删除重建，不进 Git 历史。
 - `sessions/<id>.jsonl` 是追加写的事件流，不重写旧行；上下文压缩只追加 `summary` 记录，不删除原文。
 - 会话追加前递归隐藏已识别凭据；损坏尾行只读恢复，续写追加 `recovery` 标记记录 `ignored_line`（1 起始物理行号），保留原始字节；未标记的中间行损坏不能静默忽略。
 - `vault/SOUL.md` 是可选自定义人设：存在时替换系统提示词的人设段，机制规则固定拼接在后不可覆盖；它是指令不是记忆，不参与抽取与检索。
 - 密钥、验证码、API Key 在写入前拦截；不把密钥写入 vault、配置示例或测试。
 - 迁移 vault 存量数据用一次性脚本（放 `scripts/`，不随包发布）：**默认 dry-run** 出前后对照报告，`--apply` 才落盘；条目 ID 与行尾标签必须逐字节保留；落盘后自动验证（ID 集合一致、条数不变、无空正文）并提交 vault git 作为回滚点；向量缓存依赖哈希自动增量重建，不手动处理。
-- `quiet-memo.toml`、`vault/`、`sessions/`、`.env`、密钥文件都不提交。
+- `syvrio.toml`、`vault/`、`sessions/`、`.env`、密钥文件都不提交。
 
 ## 测试
 
 - 新行为必须带测试，放在 `tests/` 下对应的领域文件中。
 - 测试文件用 `pytestmark` 分为 `ui`、`agent`、`memory`、`retrieval`、`cli`、`config`、`mcp`、`search`；局部改动按影响范围运行相关用例或分类；跨模块核心改动按实际风险确定是否需要全量。
 - 测试禁止读取本机 keyring、真实 API Key 或调用付费模型；使用 `tests/conftest.py` 的 fixture、`StaticExtractor` 和假模型。
-- **测试环境隔离是夹具级红线**：conftest autouse 已把 `QUIET_MEMO_CONFIG`/`QUIET_MEMO_VAULT` 钉在每个测试的临时目录，任何测试和代码路径都不得绕过它直连本机配置/记忆库。把源码回退到旧版本再跑新测试是危险组合（旧路径可能绕过 mock 写真实文件），必须先确认隔离护栏在位。
+- **测试环境隔离是夹具级红线**：conftest autouse 已把 `SYVRIO_CONFIG`/`SYVRIO_VAULT` 钉在每个测试的临时目录，任何测试和代码路径都不得绕过它直连本机配置/记忆库。把源码回退到旧版本再跑新测试是危险组合（旧路径可能绕过 mock 写真实文件），必须先确认隔离护栏在位。
 - 未接真实 API Key 验证时，不声称“已完成线上验证”；真实调用只做冒烟（提前约定次数上限），解耦层的 mock 单测覆盖不了 service 接线的真实形状，关键链路补一次真实冒烟。
 - “真实测试”指通过实际 TUI 调用真实搜索 API、LLM 等服务。脚本测试完成后，先说明范围与调用上限，每轮必须获得用户明确同意再开始；不得把历史授权或普通脚本测试授权视为本轮同意。真实测试与用户本地测试环境共用会话库，使用可识别的测试会话并保留记录，确保可在 TUI `/sessions` 中查看；不要自动删除测试会话。
 - 按实际影响范围运行必要测试，相关测试通过后即可提交；不因提交或分支同步默认运行全量 `uv run pytest`。只有用户明确要求，或跨模块核心改动确有验证需要时才运行全量，避免对局部界面、样式或文档改动反复全量测试。

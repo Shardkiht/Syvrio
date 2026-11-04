@@ -37,7 +37,7 @@ class ChatCommandsMixin:
         elif command == "/context":
             self._pick_context()
         elif command == "/setup":
-            self.add_card("Use Ctrl+P in /model to manage providers. Run qm setup in a terminal for full configuration.")
+            self.add_card("Use Ctrl+P in /model to manage providers. Run syvrio setup in a terminal for full configuration.")
         elif command == "/new":
             self._new_session()
         elif command == "/sessions":

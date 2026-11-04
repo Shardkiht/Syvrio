@@ -23,7 +23,7 @@ TAG_AT_END_RE = re.compile(r"\s+`([A-Za-z_][\w-]*)=([^`]*)`$")
 KNOWN_TAG_KEYS = frozenset(
     {"id", "status", "supersedes", "source", "confidence", "note", "session", "message", "context"}
 )
-ESCAPED_TAG_PREFIX = "~qm-escaped~"
+ESCAPED_TAG_PREFIX = "~syvrio-escaped~"
 
 STATUS_ACTIVE = "active"
 STATUS_SUPERSEDED = "superseded"

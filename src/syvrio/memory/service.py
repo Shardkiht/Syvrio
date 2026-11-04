@@ -44,10 +44,10 @@ VAULT_README = """# Syvrio vault
 
 - `memories/`：按主题拆分的 Markdown 记忆，是唯一事实来源。
 - `sessions/`：会话 JSONL，保留原始对话与工具轨迹。
-- `.quiet-memo/pending.jsonl`：低置信、冲突或敏感候选，等待人工确认。
-- `.quiet-memo/resolved.jsonl`：已确认/已拒绝记录。
-- `.quiet-memo/audit.jsonl`：更正、删除等审计记录。
-- `.quiet-memo/inferences.jsonl`：独立假设与去重后的事实来源，不参与事实检索。
+- `.syvrio/pending.jsonl`：低置信、冲突或敏感候选，等待人工确认。
+- `.syvrio/resolved.jsonl`：已确认/已拒绝记录。
+- `.syvrio/audit.jsonl`：更正、删除等审计记录。
+- `.syvrio/inferences.jsonl`：独立假设与去重后的事实来源，不参与事实检索。
 - `SOUL.md`（可选）：自定义人设，替代系统提示词里的默认人设段。
 - 全部变更由 Git 跟踪，可回滚、可审计。
 """
@@ -56,8 +56,8 @@ VAULT_GITIGNORE = """__pycache__/
 *.pyc
 .DS_Store
 Thumbs.db
-.quiet-memo/vectors.npz
-.quiet-memo/search-cache.json
+.syvrio/vectors.npz
+.syvrio/search-cache.json
 """
 
 # 默认人设兼作 init 写入 SOUL.md 的模板；放 memory 层是因为 agent/prompts.py 可以引 memory，
@@ -189,7 +189,7 @@ class MemoryService:
             existing = gitignore.read_text(encoding="utf-8")
             missing = [
                 line
-                for line in (".quiet-memo/vectors.npz", ".quiet-memo/search-cache.json")
+                for line in (".syvrio/vectors.npz", ".syvrio/search-cache.json")
                 if line not in existing
             ]
             if missing:

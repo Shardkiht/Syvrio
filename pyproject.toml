@@ -45,8 +45,6 @@ documents = [
 
 [project.scripts]
 syvrio = "syvrio.app.cli:main"
-qm = "syvrio.app.cli:main"
-quietmemo = "syvrio.app.cli:main"
 
 [dependency-groups]
 dev = [
@@ -55,15 +53,15 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Shardkiht/Syvrio"
-Repository = "https://github.com/Shardkiht/Syvrio"
+Homepage = "https://github.com/Shardkiht/syvrio"
+Repository = "https://github.com/Shardkiht/syvrio"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/syvrio", "src/quiet_memo"]
+packages = ["src/syvrio"]
 
 [tool.hatch.build.targets.sdist]
 # Only distributable project content; local one-off scripts must never ship.

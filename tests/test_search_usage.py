@@ -231,7 +231,7 @@ def test_build_routers_wire_limiter_from_config(tmp_path):
     assert router.usage_limiter is not None
     assert router.usage_limiter.remaining("tavily") == 5
 
-    config_path = tmp_path / "quiet-memo.toml"
+    config_path = tmp_path / "syvrio.toml"
     config_path.write_text(
         '[search.usage_limits.exa]\nperiod = "daily"\nmax_calls = 7\n',
         encoding="utf-8",

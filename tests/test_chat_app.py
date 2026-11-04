@@ -610,7 +610,7 @@ async def test_model_picker_can_configure_provider_key(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "keyring", fake)
 
     app = build_app(tmp_path, [])
-    app.service.config_path = tmp_path / "quiet-memo.toml"
+    app.service.config_path = tmp_path / "syvrio.toml"
     async with app.run_test(size=(120, 40)) as pilot:
         widget = app.query_one("#input", Input)
         widget.value = "/model"
@@ -1607,8 +1607,8 @@ async def test_streaming_keeps_text_before_tool_calls(tmp_path):
         assert first < event < final
 
 
-async def test_tool_event_rows_use_single_border_and_assistant_is_qmo(tmp_path):
-    # 事件行由 CSS 左边框画一条竖线，正文里不再拼前缀；助手标签统一为 qmo。
+async def test_tool_event_rows_use_single_border_and_assistant_is_syvrio(tmp_path):
+    # 事件行由 CSS 左边框画一条竖线，正文里不再拼前缀；助手标签统一为 Syvrio。
     from syvrio.llm import ToolCall
 
     app = build_app(
@@ -1634,7 +1634,7 @@ async def test_tool_event_rows_use_single_border_and_assistant_is_qmo(tmp_path):
         assert events
         assert all("┃" not in str(event.render()) for event in events)
         labels = [str(label.render()) for label in app.query(".who-ai")]
-        assert labels and all(label.startswith("qmo") for label in labels)
+        assert labels and all(label.startswith("Syvrio") for label in labels)
 
 
 async def test_streaming_error_marks_interruption(tmp_path):

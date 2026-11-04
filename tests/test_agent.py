@@ -483,7 +483,7 @@ def test_apply_model_updates_config_and_runtime(tmp_path, monkeypatch):
     from syvrio.app import actions
 
     runtime, service = build_runtime(tmp_path, FakeChatModel([AssistantTurn(content="ok")]))
-    config_path = tmp_path / "quiet-memo.toml"
+    config_path = tmp_path / "syvrio.toml"
     service.config_path = config_path
 
     message = actions.apply_model(service, runtime, "deepseek", "deepseek-v4-pro")
@@ -531,7 +531,7 @@ def test_configure_provider_saves_key_and_switches_model(tmp_path, monkeypatch):
     from syvrio.app import actions
 
     runtime, service = build_runtime(tmp_path, FakeChatModel([AssistantTurn(content="ok")]))
-    config_path = tmp_path / "quiet-memo.toml"
+    config_path = tmp_path / "syvrio.toml"
     service.config_path = config_path
     keys: dict[str, str] = {}
     fake = types.ModuleType("keyring")
@@ -558,7 +558,7 @@ def test_configure_provider_keeps_state_when_keyring_fails(tmp_path, monkeypatch
     from syvrio.app import actions
 
     runtime, service = build_runtime(tmp_path, FakeChatModel([AssistantTurn(content="ok")]))
-    config_path = tmp_path / "quiet-memo.toml"
+    config_path = tmp_path / "syvrio.toml"
     service.config_path = config_path
     fake = types.ModuleType("keyring")
 
@@ -642,7 +642,7 @@ def test_remove_provider_defers_to_environment_key(monkeypatch, service):
 def test_apply_reasoning_updates_config_hot(tmp_path, monkeypatch, service):
     from syvrio.app import actions
 
-    config_path = tmp_path / "quiet-memo.toml"
+    config_path = tmp_path / "syvrio.toml"
     service.config_path = config_path
     monkeypatch.setattr(actions, "supported_params", lambda model: ("reasoning_effort",))
 
@@ -664,14 +664,14 @@ def test_reasoning_options_empty_when_unsupported(service, monkeypatch):
 def test_context_options_and_apply(tmp_path, monkeypatch, service):
     from syvrio.app import actions
 
-    config_path = tmp_path / "quiet-memo.toml"
+    config_path = tmp_path / "syvrio.toml"
     service.config_path = config_path
 
     options = actions.context_options(service)
     assert 16000 in options
     assert "16K" in actions.apply_context(service, 16000)
     assert service.config.chat.context_window == 16000
-    assert (tmp_path / "quiet-memo.toml").exists()
+    assert (tmp_path / "syvrio.toml").exists()
     assert "at least" in actions.apply_context(service, 1000)
 
 

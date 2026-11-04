@@ -114,7 +114,7 @@ def main() -> None:
             src_path.unlink()
 
     # ---- pending.jsonl 的 topic 同步映射 ----
-    pending_path = vault / ".quiet-memo" / "pending.jsonl"
+    pending_path = vault / ".syvrio" / "pending.jsonl"
     pending_remapped = 0
     if pending_path.exists() and TOPIC_MOVES:
         lines = []

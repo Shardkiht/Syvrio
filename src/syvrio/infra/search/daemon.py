@@ -15,7 +15,7 @@ from .open_websearch import NAME, npx_command
 
 START_TIMEOUT = 20.0
 HEALTH_TIMEOUT = 1.5
-DEFAULT_LOG = Path(tempfile.gettempdir()) / "quiet-memo-open-websearch.log"
+DEFAULT_LOG = Path(tempfile.gettempdir()) / "syvrio-open-websearch.log"
 
 
 def daemon_health(base_url: str, timeout: float = HEALTH_TIMEOUT) -> bool:
@@ -86,7 +86,7 @@ def _spawn_daemon(command: list[str], log_path: Path) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     kwargs: dict = {}
     if os.name == "nt":
-        # CREATE_NO_WINDOW 让 npx/cmd 不创建控制台窗口；qm 退出后进程仍独立常驻。
+        # CREATE_NO_WINDOW 让 npx/cmd 不创建控制台窗口；syvrio 退出后进程仍独立常驻。
         # 不用 DETACHED_PROCESS：它会让 CREATE_NO_WINDOW 失效，可能重新弹出窗口。
         kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
             subprocess, "CREATE_NEW_PROCESS_GROUP", 0

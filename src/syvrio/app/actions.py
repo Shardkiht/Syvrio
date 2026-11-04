@@ -179,7 +179,7 @@ def apply_model(
         api_key_env=preset.api_key_env if preset and provider != current.provider else current.api_key_env,
     )
     if new_llm.provider != current.provider and not new_llm.api_key():
-        return f"{provider} has no API key yet; run qm setup in a terminal to configure it."
+        return f"{provider} has no API key yet; run syvrio setup in a terminal to configure it."
 
     info = model_metadata(new_llm.litellm_model())
     if new_llm.reasoning_effort and "reasoning_effort" not in supported_params(

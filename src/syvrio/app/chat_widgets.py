@@ -129,7 +129,7 @@ class ChatReply(Static):
         return selection.extract(str(content)), "\n"
 
 
-ASSISTANT_NAME = "qmo"
+ASSISTANT_NAME = "Syvrio"
 
 
 class HistoryMore(Static):
@@ -196,7 +196,7 @@ class TranscriptView(VerticalScroll):
                 widgets.append(Vertical(Static(content, classes="bubble"), classes="user-turn"))
                 continue
             if content.strip():
-                widgets.append(Static(f"qmo · {stamp}" if stamp else "qmo", classes="who-ai"))
+                widgets.append(Static(f"{ASSISTANT_NAME} · {stamp}" if stamp else ASSISTANT_NAME, classes="who-ai"))
                 widgets.append(ChatReply(content, classes="reply"))
             for call in record.get("tool_calls") or []:
                 result = self._tools.get(str(call.get("id")))

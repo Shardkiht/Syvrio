@@ -46,7 +46,7 @@ def rollback_files(paths: list[Path]) -> Iterator[None]:
 class PendingQueue:
     def __init__(self, vault: Path):
         self.vault = Path(vault)
-        self.dir = self.vault / ".quiet-memo"
+        self.dir = self.vault / ".syvrio"
         self.pending_path = self.dir / "pending.jsonl"
         self.resolved_path = self.dir / "resolved.jsonl"
 

@@ -104,7 +104,7 @@ class LLMExtractor:
         if self.config.requires_api_key() and not self.config.api_key():
             raise ExtractorError(
                 f"未配置 LLM API Key，请设置环境变量 {self.config.api_key_env}，"
-                "或运行 qm setup 保存到系统凭据。"
+                "或运行 syvrio setup 保存到系统凭据。"
             )
         user_content = f"既有记忆：\n{context or '（暂无）'}\n\n对话内容：\n{text}"
         messages = [
@@ -199,7 +199,7 @@ class ImportExtractor:
         if self.config.requires_api_key() and not self.config.api_key():
             raise ExtractorError(
                 f"未配置 LLM API Key，请设置环境变量 {self.config.api_key_env}，"
-                "或运行 qm setup 保存到系统凭据。"
+                "或运行 syvrio setup 保存到系统凭据。"
             )
         topic_hint = (
             f"\n\nvault 已有主题（新条目优先归入这里的既有主题，确属新领域才新建）：\n{'、'.join(self.topics)}"

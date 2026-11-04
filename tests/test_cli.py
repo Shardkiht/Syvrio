@@ -59,7 +59,7 @@ def test_offline_token_truncation_respects_small_budgets(monkeypatch, budget, te
 def test_init_vault_updates_existing_config(tmp_path):
     import tomllib
 
-    config = tmp_path / "quiet-memo.toml"
+    config = tmp_path / "syvrio.toml"
     old_vault = tmp_path / "old-vault"
     new_vault = tmp_path / "new-vault"
     assert invoke(["init", "--vault", str(old_vault), "--config", str(config)]).exit_code == 0
@@ -118,7 +118,7 @@ def test_escape_cancels_questionary_prompt():
 
 
 def test_init_note_recall_commit(tmp_path):
-    config = tmp_path / "quiet-memo.toml"
+    config = tmp_path / "syvrio.toml"
     vault = tmp_path / "vault"
 
     result = invoke(["init", "--vault", str(vault), "--config", str(config)])
@@ -158,7 +158,7 @@ def test_init_note_recall_commit(tmp_path):
 
 
 def test_note_duplicate_fails(tmp_path):
-    config = tmp_path / "quiet-memo.toml"
+    config = tmp_path / "syvrio.toml"
     vault = tmp_path / "vault"
     invoke(["init", "--vault", str(vault), "--config", str(config)])
     first = invoke(["note", "同一条事实", "--config", str(config)])
@@ -170,7 +170,7 @@ def test_note_duplicate_fails(tmp_path):
 
 def test_memorize_without_api_key_reports_hint(tmp_path, monkeypatch):
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-    config = tmp_path / "quiet-memo.toml"
+    config = tmp_path / "syvrio.toml"
     vault = tmp_path / "vault"
     invoke(["init", "--vault", str(vault), "--config", str(config)])
 
@@ -181,7 +181,7 @@ def test_memorize_without_api_key_reports_hint(tmp_path, monkeypatch):
 
 def test_import_without_api_key_reports_hint(tmp_path, monkeypatch):
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-    config = tmp_path / "quiet-memo.toml"
+    config = tmp_path / "syvrio.toml"
     vault = tmp_path / "vault"
     invoke(["init", "--vault", str(vault), "--config", str(config)])
     source = tmp_path / "notes.md"
@@ -208,7 +208,7 @@ def test_import_dry_run_then_apply(tmp_path, monkeypatch, suffix):
             )
 
     monkeypatch.setattr(service_module, "ImportExtractor", FakeImportExtractor)
-    config = tmp_path / "quiet-memo.toml"
+    config = tmp_path / "syvrio.toml"
     vault = tmp_path / "vault"
     invoke(["init", "--vault", str(vault), "--config", str(config)])
     source = tmp_path / ("notes" + suffix)
