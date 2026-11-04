@@ -9,10 +9,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from quiet_memo.infra.config import Config, LLMConfig, RetrievalConfig
-from quiet_memo.memory.extractor import StaticExtractor
-from quiet_memo.memory.models import Candidate, ExtractionResult
-from quiet_memo.memory.service import MemoryService
+from syvrio.infra.config import Config, LLMConfig, RetrievalConfig
+from syvrio.memory.extractor import StaticExtractor
+from syvrio.memory.models import Candidate, ExtractionResult
+from syvrio.memory.service import MemoryService
 
 
 def _pipe_loop_factory() -> asyncio.AbstractEventLoop:

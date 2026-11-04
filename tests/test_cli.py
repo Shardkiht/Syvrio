@@ -7,7 +7,7 @@ pytestmark = pytest.mark.cli
 
 from typer.testing import CliRunner
 
-from quiet_memo.app.cli import app
+from syvrio.app.cli import app
 
 runner = CliRunner()
 
@@ -24,7 +24,7 @@ def test_bare_invocation_falls_back_to_help_without_tty():
 
 
 def test_format_tokens_uses_km_units():
-    from quiet_memo.infra.tokens import format_tokens
+    from syvrio.infra.tokens import format_tokens
 
     assert format_tokens(800) == "800"
     assert format_tokens(16000) == "16K"
@@ -34,7 +34,7 @@ def test_format_tokens_uses_km_units():
 
 
 def test_truncate_to_tokens_respects_limit():
-    from quiet_memo.infra.tokens import estimate_tokens, truncate_to_tokens
+    from syvrio.infra.tokens import estimate_tokens, truncate_to_tokens
 
     text = "清淡咖啡与手冲滤纸" * 50
     truncated = truncate_to_tokens(text, 20)
@@ -49,7 +49,7 @@ def test_truncate_to_tokens_respects_limit():
 @pytest.mark.parametrize("budget", [0, 1, 2, 5, 20])
 @pytest.mark.parametrize("text", ["清淡咖啡" * 30, "coffee and tea " * 30, "合成 coffee 茶 " * 30])
 def test_offline_token_truncation_respects_small_budgets(monkeypatch, budget, text):
-    from quiet_memo.infra import tokens
+    from syvrio.infra import tokens
 
     monkeypatch.setattr(tokens, "_ENCODING", False)
     truncated = tokens.truncate_to_tokens(text, budget)
@@ -72,7 +72,7 @@ def test_init_vault_updates_existing_config(tmp_path):
 
 
 def test_layout_widths_wide_left():
-    from quiet_memo.infra.layout import widths
+    from syvrio.infra.layout import widths
 
     for cols in (80, 120, 200):
         left, width, right = widths(cols)
@@ -88,7 +88,7 @@ def test_padded_leaves_right_slack():
     from rich.console import Console
     from rich.text import Text
 
-    from quiet_memo.app.ui import padded
+    from syvrio.app.ui import padded
 
     console = Console(width=100)
     with console.capture() as capture:
@@ -105,7 +105,7 @@ def test_escape_cancels_questionary_prompt():
     from prompt_toolkit.input import create_pipe_input
     from prompt_toolkit.output import DummyOutput
 
-    from quiet_memo.infra.dialogs import ask
+    from syvrio.infra.dialogs import ask
 
     with create_pipe_input() as inp:
         question = questionary.text("name", input=inp, output=DummyOutput())
@@ -195,8 +195,8 @@ def test_import_without_api_key_reports_hint(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("suffix", [".md", ".txt", ".jsonl"])
 def test_import_dry_run_then_apply(tmp_path, monkeypatch, suffix):
-    from quiet_memo.memory import service as service_module
-    from quiet_memo.memory.models import Candidate, ExtractionResult
+    from syvrio.memory import service as service_module
+    from syvrio.memory.models import Candidate, ExtractionResult
 
     class FakeImportExtractor:
         def __init__(self, config, topics=None):
@@ -227,10 +227,10 @@ def test_import_dry_run_then_apply(tmp_path, monkeypatch, suffix):
 
 
 def test_cli_correct_and_forget(tmp_path):
-    from quiet_memo.infra.config import Config, LLMConfig
-    from quiet_memo.memory.extractor import StaticExtractor
-    from quiet_memo.memory.models import ExtractionResult
-    from quiet_memo.memory.service import MemoryService
+    from syvrio.infra.config import Config, LLMConfig
+    from syvrio.memory.extractor import StaticExtractor
+    from syvrio.memory.models import ExtractionResult
+    from syvrio.memory.service import MemoryService
 
     vault = tmp_path / "vault"
     config = Config(vault=vault, llm=LLMConfig())
@@ -254,10 +254,10 @@ def test_cli_correct_and_forget(tmp_path):
 
 
 def test_cli_correct_rejects_inactive_entry(tmp_path):
-    from quiet_memo.infra.config import Config, LLMConfig
-    from quiet_memo.memory.extractor import StaticExtractor
-    from quiet_memo.memory.models import ExtractionResult
-    from quiet_memo.memory.service import MemoryService
+    from syvrio.infra.config import Config, LLMConfig
+    from syvrio.memory.extractor import StaticExtractor
+    from syvrio.memory.models import ExtractionResult
+    from syvrio.memory.service import MemoryService
 
     vault = tmp_path / "vault"
     config = Config(vault=vault, llm=LLMConfig())
@@ -278,7 +278,7 @@ def test_cli_help_with_western_pipe_encoding():
 
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "cp1252:strict"
-    result = subprocess.run([sys.executable, "-m", "quiet_memo.app.cli", "--help"],
+    result = subprocess.run([sys.executable, "-m", "syvrio.app.cli", "--help"],
                             capture_output=True, env=env, timeout=30)
     assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
     assert "Usage:" in result.stdout.decode("utf-8")
