@@ -78,7 +78,8 @@ def test_apply_migrates_metadata_tags_and_config(tmp_path):
     assert "`id=e1`" in text and "`id=e2`" in text
     assert json.loads((vault / ".syvrio" / "pending.jsonl").read_text())["id"] == "p1"
     assert new_config.exists()
-    assert (new_config.stat().st_mode & 0o777) == 0o600
+    if sys.platform != "win32":
+        assert (new_config.stat().st_mode & 0o777) == 0o600
     assert Path(report["backup"]).exists()
     assert (Path(report["backup"]) / ".quiet-memo" / "pending.jsonl").exists()
 
