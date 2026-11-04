@@ -6,10 +6,10 @@ pytestmark = pytest.mark.retrieval
 
 import numpy as np
 
-from quiet_memo.infra.config import Config, EmbeddingConfig, RetrievalConfig
-from quiet_memo.memory import service as service_module
-from quiet_memo.memory.store import MemoryStore
-from quiet_memo.retrieval import (
+from syvrio.infra.config import Config, EmbeddingConfig, RetrievalConfig
+from syvrio.memory import service as service_module
+from syvrio.memory.store import MemoryStore
+from syvrio.retrieval import (
     HybridRetriever,
     KeywordRetriever,
     SearchHit,
@@ -119,7 +119,7 @@ class FakeClock:
 
 
 def test_sync_retries_after_embedding_failure(tmp_path):
-    from quiet_memo.retrieval.vector import RETRY_COOLDOWN_SECONDS
+    from syvrio.retrieval.vector import RETRY_COOLDOWN_SECONDS
 
     clock = FakeClock()
     store = seeded_store(tmp_path)
@@ -142,7 +142,7 @@ def test_sync_retries_after_embedding_failure(tmp_path):
 
 
 def test_query_failure_enters_cooldown(tmp_path):
-    from quiet_memo.retrieval.vector import RETRY_COOLDOWN_SECONDS
+    from syvrio.retrieval.vector import RETRY_COOLDOWN_SECONDS
 
     clock = FakeClock()
     store = seeded_store(tmp_path)
@@ -260,7 +260,7 @@ def test_build_retriever_api_backend(tmp_path, monkeypatch):
 
 
 def test_init_vault_gitignores_vector_cache(tmp_path):
-    from quiet_memo.memory.service import MemoryService
+    from syvrio.memory.service import MemoryService
 
     config = Config(vault=tmp_path / "vault", retrieval=RetrievalConfig(method="keyword"))
     service = MemoryService(config)
@@ -270,7 +270,7 @@ def test_init_vault_gitignores_vector_cache(tmp_path):
 
 
 def test_init_vault_appends_gitignore_after_missing_newline(tmp_path):
-    from quiet_memo.memory.service import MemoryService
+    from syvrio.memory.service import MemoryService
 
     config = Config(vault=tmp_path / "vault", retrieval=RetrievalConfig(method="keyword"))
     service = MemoryService(config)

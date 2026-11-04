@@ -9,11 +9,11 @@ import pytest
 
 pytestmark = pytest.mark.search
 
-from quiet_memo.agent.session import SessionStore
-from quiet_memo.agent.tools import SEARCH_NOTICE, build_tools
-from quiet_memo.app.server import build_server
-from quiet_memo.infra.config import ChatConfig, Config, FetchConfig, LLMConfig, SearchConfig, load_config
-from quiet_memo.infra.search import (
+from syvrio.agent.session import SessionStore
+from syvrio.agent.tools import SEARCH_NOTICE, build_tools
+from syvrio.app.server import build_server
+from syvrio.infra.config import ChatConfig, Config, FetchConfig, LLMConfig, SearchConfig, load_config
+from syvrio.infra.search import (
     FetchQuery,
     FetchResult,
     FetchRouter,
@@ -25,13 +25,13 @@ from quiet_memo.infra.search import (
     build_fetch_router,
     build_search_router,
 )
-from quiet_memo.infra.search.base import assert_public_fetch_url
-from quiet_memo.infra.search import daemon as daemon_module
-from quiet_memo.infra.search.cache import SearchCache
-from quiet_memo.infra.search.daemon import ensure_daemon
-from quiet_memo.infra.search.open_websearch import OpenWebSearchProvider
-from quiet_memo.infra.search.router import normalize_url
-from quiet_memo.memory.service import MemoryService
+from syvrio.infra.search.base import assert_public_fetch_url
+from syvrio.infra.search import daemon as daemon_module
+from syvrio.infra.search.cache import SearchCache
+from syvrio.infra.search.daemon import ensure_daemon
+from syvrio.infra.search.open_websearch import OpenWebSearchProvider
+from syvrio.infra.search.router import normalize_url
+from syvrio.memory.service import MemoryService
 
 
 def envelope(results: list[dict]) -> dict:
@@ -101,7 +101,7 @@ def test_http_provider_maps_fetch_result():
 
 @pytest.fixture
 def public_dns(monkeypatch):
-    from quiet_memo.infra.search import base as search_base
+    from syvrio.infra.search import base as search_base
 
     monkeypatch.setattr(
         search_base.socket,
@@ -133,7 +133,7 @@ def test_fetch_url_rejects_non_public_targets(url):
 
 
 def test_fetch_url_rejects_private_dns_answer(monkeypatch):
-    from quiet_memo.infra.search import base as search_base
+    from syvrio.infra.search import base as search_base
 
     monkeypatch.setattr(
         search_base.socket,
@@ -147,7 +147,7 @@ def test_fetch_url_rejects_private_dns_answer(monkeypatch):
 
 
 def test_fetch_url_allows_configured_fake_ip(monkeypatch):
-    from quiet_memo.infra.search import base as search_base
+    from syvrio.infra.search import base as search_base
 
     monkeypatch.setenv("FAKE_IP_CIDRS", "198.18.0.0/15")
     monkeypatch.setattr(
@@ -163,7 +163,7 @@ def test_fetch_url_allows_configured_fake_ip(monkeypatch):
 
 @pytest.mark.parametrize("final_url", ["https://example.com/", "https://example.com/final"])
 def test_router_fetch_allows_default_dual_stack_fake_dns(monkeypatch, final_url):
-    from quiet_memo.infra.search import base as search_base
+    from syvrio.infra.search import base as search_base
 
     monkeypatch.delenv("FAKE_IP_CIDRS", raising=False)
     monkeypatch.setattr(
@@ -378,7 +378,7 @@ def test_search_router_fetch_delegates_to_fetch_router(public_dns):
 
 
 def test_build_fetch_router_from_config_defaults_to_open_websearch(tmp_path):
-    from quiet_memo.infra.config import FetchConfig
+    from syvrio.infra.config import FetchConfig
 
     router = build_fetch_router(FetchConfig(), SearchConfig(transport="http"))
     assert "open_websearch" in router.registry
@@ -710,7 +710,7 @@ def test_budget_exhausted_core_hits_are_not_cached(tmp_path):
 
 def test_global_timeout_truncated_results_are_not_cached(tmp_path, monkeypatch):
     """总超时截断的候选不能当成完整结果缓存；下次必须重新请求。"""
-    from quiet_memo.infra.search import router as router_module
+    from syvrio.infra.search import router as router_module
 
     clock = [0.0]
 
@@ -751,7 +751,7 @@ def test_global_timeout_truncated_results_are_not_cached(tmp_path, monkeypatch):
 
 def test_high_quality_result_returned_after_timeout_is_not_cached(tmp_path, monkeypatch):
     """Provider 超时返回高质量结果也不能走早停缓存：先判预算，再判质量。"""
-    from quiet_memo.infra.search import router as router_module
+    from syvrio.infra.search import router as router_module
 
     clock = [0.0]
 
@@ -794,7 +794,7 @@ def test_high_quality_result_returned_after_timeout_is_not_cached(tmp_path, monk
 
 def test_provider_timeout_after_partial_candidates_is_not_cached(tmp_path, monkeypatch):
     """后一家抛出超时并耗尽预算时，保留已有候选但按截断收尾，不写缓存。"""
-    from quiet_memo.infra.search import router as router_module
+    from syvrio.infra.search import router as router_module
 
     clock = [0.0]
 
@@ -873,7 +873,7 @@ def test_compare_timeout_keeps_actual_verification_and_skips_cache(
     tmp_path, monkeypatch
 ):
     """compare 第二家耗尽预算：验证状态按实际贡献来源，截断结果不缓存。"""
-    from quiet_memo.infra.search import router as router_module
+    from syvrio.infra.search import router as router_module
 
     clock = [0.0]
 
@@ -1082,7 +1082,7 @@ def test_spawn_daemon_hides_console_window(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("configured", [None, "", "203.0.113.0/24"])
 def test_spawn_daemon_shares_fake_dns_policy(tmp_path, monkeypatch, configured):
-    from quiet_memo.infra.search.base import DEFAULT_FAKE_IP_CIDRS
+    from syvrio.infra.search.base import DEFAULT_FAKE_IP_CIDRS
 
     captured = {}
     if configured is None:
@@ -1335,13 +1335,13 @@ async def test_mcp_omits_search_when_disabled(tmp_path):
     ('["baidu", "bing", "baidu"]', ("baidu", "bing")),
 ])
 def test_engine_argument_accepts_json_array_string(value, expected):
-    from quiet_memo.infra.search.base import normalize_search_engines
+    from syvrio.infra.search.base import normalize_search_engines
     assert normalize_search_engines(value, ["bing", "baidu"]) == expected
 
 
 @pytest.mark.parametrize("value", ['[1]', '["notreal"]', '["bing"'])
 def test_engine_argument_rejects_invalid_json_array_string(value):
-    from quiet_memo.infra.search.base import normalize_search_engines
+    from syvrio.infra.search.base import normalize_search_engines
     with pytest.raises(ValueError):
         normalize_search_engines(value, ["bing", "baidu"])
 
@@ -1353,13 +1353,13 @@ def test_engine_argument_rejects_invalid_json_array_string(value):
 ])
 def test_engine_argument_accepts_nested_json_array_items(value, expected):
     # 有的 provider 把数组参数双重序列化成元素级 JSON 字符串。
-    from quiet_memo.infra.search.base import normalize_search_engines
+    from syvrio.infra.search.base import normalize_search_engines
     assert normalize_search_engines(value, ["bing", "baidu"]) == expected
 
 
 @pytest.mark.parametrize("value", [['[1]'], ['["notreal"]'], ['["bing"'], ['[1]', 'bing']])
 def test_engine_argument_rejects_invalid_nested_json_array_items(value):
-    from quiet_memo.infra.search.base import normalize_search_engines
+    from syvrio.infra.search.base import normalize_search_engines
     with pytest.raises(ValueError):
         normalize_search_engines(value, ["bing", "baidu"])
 
@@ -1694,7 +1694,7 @@ def test_empty_results_use_short_ttl(tmp_path):
 
 
 def test_budget_exhaustion_preserves_collected_candidates(monkeypatch):
-    from quiet_memo.infra.search import router as router_module
+    from syvrio.infra.search import router as router_module
 
     clock = [0.0]
     calls = []
