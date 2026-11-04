@@ -13,8 +13,8 @@ import pytest
 
 pytestmark = pytest.mark.memory
 
-from quiet_memo.agent.session import SessionStore
-from quiet_memo.infra.config import (
+from syvrio.agent.session import SessionStore
+from syvrio.infra.config import (
     Config,
     ConfigError,
     GitConfig,
@@ -23,12 +23,12 @@ from quiet_memo.infra.config import (
     load_config,
     write_example_config,
 )
-from quiet_memo.infra.gitops import GitError, classify_git_error
-from quiet_memo.infra.gitsync import STAGE_CHECK, STAGE_COMMIT, STAGE_PUSH
-from quiet_memo.infra.locking import LockTimeout, git_operation_lock, vault_write_lock
-from quiet_memo.memory.extractor import StaticExtractor
-from quiet_memo.memory.models import ExtractionResult
-from quiet_memo.memory.service import MemoryService
+from syvrio.infra.gitops import GitError, classify_git_error
+from syvrio.infra.gitsync import STAGE_CHECK, STAGE_COMMIT, STAGE_PUSH
+from syvrio.infra.locking import LockTimeout, git_operation_lock, vault_write_lock
+from syvrio.memory.extractor import StaticExtractor
+from syvrio.memory.models import ExtractionResult
+from syvrio.memory.service import MemoryService
 
 TZ = timezone(timedelta(hours=8))
 
@@ -235,7 +235,7 @@ def test_sync_never_calls_llm(monkeypatch, tmp_path):
     add_remote(service, tmp_path)
     calls: list[object] = []
     monkeypatch.setattr(
-        "quiet_memo.memory.service.summarize_diff",
+        "syvrio.memory.service.summarize_diff",
         lambda *args, **kwargs: calls.append(args) or "should not be used",
     )
     service.note("自动同步不调用模型", topic="misc")
@@ -490,7 +490,7 @@ def test_vault_lock_is_cross_process(tmp_path):
     vault.mkdir()
     child = _lock_child(
         vault,
-        "import time\nfrom quiet_memo.infra.locking import vault_write_lock\n"
+        "import time\nfrom syvrio.infra.locking import vault_write_lock\n"
         "lock = vault_write_lock({vault!r})\nlock.acquire()\n"
         "print('locked', flush=True)\ntime.sleep(30)\n",
     )
@@ -510,7 +510,7 @@ def test_lock_released_after_process_crash(tmp_path):
     vault.mkdir()
     child = _lock_child(
         vault,
-        "import os\nfrom quiet_memo.infra.locking import vault_write_lock\n"
+        "import os\nfrom syvrio.infra.locking import vault_write_lock\n"
         "lock = vault_write_lock({vault!r})\nlock.acquire()\n"
         "print('locked', flush=True)\nos._exit(0)\n",
     )
@@ -525,7 +525,7 @@ def test_git_operation_lock_is_cross_process(tmp_path):
     vault.mkdir()
     child = _lock_child(
         vault,
-        "import time\nfrom quiet_memo.infra.locking import git_operation_lock\n"
+        "import time\nfrom syvrio.infra.locking import git_operation_lock\n"
         "lock = git_operation_lock({vault!r})\nlock.acquire()\n"
         "print('locked', flush=True)\ntime.sleep(30)\n",
     )
@@ -542,7 +542,7 @@ def test_sync_reports_busy_when_another_process_holds_git_lock(tmp_path):
     service = make_service(tmp_path)
     child = _lock_child(
         service.config.vault,
-        "import time\nfrom quiet_memo.infra.locking import git_operation_lock\n"
+        "import time\nfrom syvrio.infra.locking import git_operation_lock\n"
         "lock = git_operation_lock({vault!r})\nlock.acquire()\n"
         "print('locked', flush=True)\ntime.sleep(30)\n",
     )
@@ -697,7 +697,7 @@ def test_git_config_load_validate_and_example(tmp_path):
     assert "[git]" in text and "sync_time" in text
     assert load_config(example).git.auto_sync is True
 
-    from quiet_memo.infra.providers import write_config
+    from syvrio.infra.providers import write_config
 
     config = Config(
         vault=tmp_path / "vault",

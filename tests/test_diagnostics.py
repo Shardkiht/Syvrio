@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from quiet_memo.infra import diagnostics
+from syvrio.infra import diagnostics
 
 pytestmark = pytest.mark.config
 
@@ -103,7 +103,7 @@ def test_full_queue_does_not_block_producer(monkeypatch):
 
 
 def test_cli_entrypoint_logs_unhandled_error(monkeypatch):
-    from quiet_memo.app import cli
+    from syvrio.app import cli
 
     def fail():
         raise RuntimeError("synthetic command failure")

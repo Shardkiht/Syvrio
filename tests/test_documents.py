@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from quiet_memo.infra.documents import DocumentError, read_document
+from syvrio.infra.documents import DocumentError, read_document
 
 pytestmark = pytest.mark.cli
 

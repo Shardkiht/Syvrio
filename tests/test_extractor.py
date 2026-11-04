@@ -8,8 +8,8 @@ from pydantic import ValidationError
 
 pytestmark = pytest.mark.memory
 
-from quiet_memo.memory.extractor import ExtractorError, parse_extraction
-from quiet_memo.memory.models import MemoryContext
+from syvrio.memory.extractor import ExtractorError, parse_extraction
+from syvrio.memory.models import MemoryContext
 
 
 @pytest.mark.parametrize("value", ["2024", "2024-02", "2024-02-29"])
@@ -74,8 +74,8 @@ def test_emotion_defaults_to_present_expression():
 
 
 def test_llm_extractor_requests_optional_context_without_current_date(monkeypatch):
-    from quiet_memo.infra.config import LLMConfig
-    from quiet_memo.memory import extractor
+    from syvrio.infra.config import LLMConfig
+    from syvrio.memory import extractor
 
     captured = []
     monkeypatch.setattr(LLMConfig, "api_key", lambda self: "synthetic-key")
