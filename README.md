@@ -7,7 +7,7 @@
 将日常对话中的事实、偏好和计划沉淀为本地 Markdown 长期记忆，可审阅、可追溯、可回滚。支持终端对话与 MCP。
 
 [![test](https://github.com/Shardkiht/syvrio/actions/workflows/test.yml/badge.svg)](https://github.com/Shardkiht/syvrio/actions/workflows/test.yml)
-![PyPI status](https://img.shields.io/badge/PyPI-0.3.3-blue)
+![PyPI status](https://img.shields.io/pypi/v/syvrio)
 ![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
@@ -21,13 +21,13 @@
 
 演示操作实际 Textual 界面，使用合成数据与固定模型回复回放；记忆写入和跨会话检索走真实代码，不产生模型费用。[查看静态截图](docs/assets/syvrio-demo.png)。
 
-稳定展示：`main` 在最终验收后冻结，使用 `portfolio-2026-11-01` 标识本轮源码快照。稳定发行版本为 `0.3.3`（`v0.3.3`）；较早的 `v0.3.2` Release 属于其他快照。后续常规开发仅在 `feature-memory-evolution` 进行。
+稳定展示：`main` 在最终验收后冻结，使用 `portfolio-2026-11-01` 标识本轮源码快照。当前源码版本为 `0.3.4`；历史稳定发行标记 `v0.3.3`，较早的 `v0.3.2` Release 属于其他快照。后续常规开发仅在 `feature-memory-evolution` 进行。
 
 ## 快速开始
 
 需要 Python 3.12+、uv、git。
 
-**发布状态（2026-11-04）：** `syvrio` 已发布到 PyPI（`0.3.3`）。可直接安装；从源码开发见下文。
+**发布状态：** `syvrio` 的实际最新 PyPI 版本以 [项目页面](https://pypi.org/project/syvrio/) 为准；当前源码已准备 `0.3.4` 更名清理发行。可直接安装；从源码开发见下文。
 
 ```bash
 uv tool install syvrio

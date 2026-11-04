@@ -1,5 +1,12 @@
 # 开发交接
 
+## Syvrio 0.3.4 稳定发行准备（2026-11-04）
+
+- 本次经用户明确授权，仅在冻结的 `main` 上准备修复后的 PyPI 发行版本 `0.3.4`；不合并 evolution 功能。
+- 对齐 `pyproject.toml`、`uv.lock`、`src/syvrio/__init__.py` 和版本测试；发布工作流保持手动触发，经测试、构建、wheel/sdist 品牌及入口校验后才上传。
+- 旧 `syvrio 0.3.3` 为更名清理前构建，不可覆盖同版本。正式发布成功与否须以 GitHub Actions 和 PyPI 发行文件为准；准备 PR 与源码版本更新本身不代表已发布。
+- 不恢复 `qm`、`quietmemo` 或旧 Python 包入口；完整品牌清理和用户数据的迁移脚本维持既有行为。
+
 ## Syvrio 品牌迁移完成（2026-11-04）
 
 - 唯一 Python 包与 CLI 为 `syvrio`；`src/quiet_memo` 兼容包、`qm`/`quietmemo` 别名及旧导入适配器已删除。
