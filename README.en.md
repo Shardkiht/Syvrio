@@ -7,7 +7,7 @@
 Turn everyday conversations into long-term Markdown memories you can inspect, trace, and roll back. Use the terminal chat or connect an MCP client.
 
 [![test](https://github.com/Shardkiht/syvrio/actions/workflows/test.yml/badge.svg)](https://github.com/Shardkiht/syvrio/actions/workflows/test.yml)
-![PyPI status](https://img.shields.io/badge/PyPI-0.3.3-blue)
+![PyPI status](https://img.shields.io/pypi/v/syvrio)
 ![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
@@ -21,13 +21,13 @@ Stop repeating your preferences and plans every time you start a chat. Tell it â
 
 The demo operates the actual Textual UI with synthetic data and scripted model replies. Memory writes and cross-session retrieval run through the real implementation, with no paid model requests. [View the still screenshot](docs/assets/syvrio-demo.png).
 
-Stable showcase: `main` is frozen after final acceptance; use `portfolio-2026-11-01` to identify this source snapshot. The stable release is `0.3.3` (`v0.3.3`); the older `v0.3.2` release is a separate snapshot. Routine development continues only on `feature-memory-evolution`.
+Stable showcase: `main` is frozen after final acceptance; use `portfolio-2026-11-01` to identify this source snapshot. The current source version is `0.3.4`; `v0.3.3` is the previous stable release tag, and the older `v0.3.2` release is a separate snapshot. Routine development continues only on `feature-memory-evolution`.
 
 ## Quick start
 
 Requires Python 3.12+, uv, and git.
 
-**Publication status (2026-11-04):** `syvrio` is published on PyPI (`0.3.3`). Install it directly, or run from source as described below.
+**Publication status:** Check the [PyPI project page](https://pypi.org/project/syvrio/) for the latest published version. This source tree prepares the `0.3.4` clean-brand release. Install from PyPI, or run from source as described below.
 
 ```bash
 uv tool install syvrio

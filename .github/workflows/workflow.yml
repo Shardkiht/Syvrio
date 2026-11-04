@@ -32,5 +32,35 @@ jobs:
       - name: Build
         run: uv build
 
+      - name: Verify distribution contents
+        run: |
+          python - <<'PY'
+          import configparser
+          import tarfile
+          import tomllib
+          import zipfile
+          from pathlib import Path
+
+          version = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+          artifacts = list(Path("dist").iterdir())
+          wheels = [item for item in artifacts if item.name == f"syvrio-{version}-py3-none-any.whl"]
+          sdists = [item for item in artifacts if item.name == f"syvrio-{version}.tar.gz"]
+          assert len(artifacts) == 2 and len(wheels) == 1 and len(sdists) == 1, artifacts
+          with zipfile.ZipFile(wheels[0]) as archive:
+              names = archive.namelist()
+              assert "syvrio/__init__.py" in names
+              assert not any(name.startswith(("quiet_memo/", "quietmemo/")) for name in names)
+              entrypoints = [name for name in names if name.endswith(".dist-info/entry_points.txt")]
+              assert len(entrypoints) == 1
+              parser = configparser.ConfigParser()
+              parser.read_string(archive.read(entrypoints[0]).decode("utf-8"))
+              assert dict(parser.items("console_scripts")) == {"syvrio": "syvrio.app.cli:main"}
+          with tarfile.open(sdists[0], "r:gz") as archive:
+              names = archive.getnames()
+              assert f"syvrio-{version}/src/syvrio/__init__.py" in names
+              assert not any("/src/quiet_memo/" in name or "/src/quietmemo/" in name for name in names)
+          print(f"Validated syvrio {version} distributions: no legacy Python package or CLI entry points.")
+          PY
+
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
