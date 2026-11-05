@@ -137,11 +137,12 @@ APP_CSS = """
     #picker-input:focus, #pick-search:focus, #pick-input:focus { background: #222222; border: round #6cb6ff; }
     #picker-input, #pick-search { margin-bottom: 1; }
     #picker-list { height: auto; max-height: 16; }
-    /* 与侧栏一致：SessionItem 内层 Vertical 默认 1fr 会把整行撑满 */
+    /* 竖线只标记选中行：普通行保留透明占位，当前行用底色占位，选中行只换颜色；
+       三者盒模型一致，位置、宽度和高度不变。内层 Vertical 默认 1fr 会撑满列表，必须钉死 auto。 */
     #picker-list > ListItem { padding: 0 1; height: auto; border-left: heavy transparent; }
     #picker-list > ListItem > Vertical { height: auto; }
+    #picker-list > ListItem.current { background: #272727; border-left: heavy #272727; }
     #picker-list > ListItem.-highlight { background: #303030; border-left: heavy $accent; }
-    #picker-list > ListItem.current { background: #272727; border-left: heavy $muted; }
     #picker-list > ListItem.current.-highlight { background: #303030; border-left: heavy $accent; }
     .pick-title { color: $accent; text-style: bold; margin-bottom: 1; }
     #pick-list { height: auto; max-height: 18; }

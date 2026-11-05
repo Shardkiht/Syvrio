@@ -1562,17 +1562,58 @@ def test_slash_commands_cover_aliases():
     assert "quit" in commands and "model" in commands
 
 
+def _cell_style(strip, x):
+    offset = 0
+    for segment in strip._segments:
+        if offset <= x < offset + segment.cell_length:
+            return segment.style
+        offset += segment.cell_length
+    return None
+
+
+def _session_rail_cells(picker) -> dict[str, dict]:
+    """读取选择器最终渲染的字符网格：竖线字符、列、行高与标题列。"""
+    strips = picker._compositor.render_strips()
+    cells = {}
+    for item in picker.query("#picker-list SessionItem"):
+        if not item.visible:
+            continue
+        region = item.region
+        line = strips[region.y].text
+        cells[item.row["id"]] = {
+            "x": region.x,
+            "char": line[region.x],
+            "height": item.size.height,
+            "title_x": item.query_one(".session-title").region.x,
+            "inner": line[region.x + 1 : region.x + 8],
+        }
+    return cells
+
+
+def _session_visible_rails(picker) -> set[str]:
+    """竖线字符始终占位；前景与背景相同即这一行没有可见竖线。"""
+    strips = picker._compositor.render_strips()
+    visible = set()
+    for item in picker.query("#picker-list SessionItem"):
+        if not item.visible:
+            continue
+        style = _cell_style(strips[item.region.y], item.region.x)
+        if style.color != style.bgcolor:
+            visible.add(item.row["id"])
+    return visible
+
+
 async def test_session_picker_focus_bar_follows_selection(tmp_path):
-    # 回归：左侧竖线要跟着焦点走，同时所有行文字保持同一列。
+    # 回归：竖线只标记选中行；普通/当前行保留同宽占位但不显示，切换时位置和行高不变。
     from textual.color import Color
     from textual.widgets import ListView
 
-    from syvrio.app.chat_widgets import SessionPickerScreen
+    from syvrio.app.chat_widgets import SessionItem, SessionPickerScreen
 
     app = build_app(tmp_path, [])
     store = app.sessions
     ids = []
-    for title in ("当前会话", "另一条会话"):
+    for title in ("当前会话", "第二条会话", "第三条会话"):
         session = store.create()
         store.rename(session, title)
         store.append(
@@ -1588,19 +1629,136 @@ async def test_session_picker_focus_bar_follows_selection(tmp_path):
         await pilot.pause()
         picker = app.screen
         assert isinstance(picker, SessionPickerScreen)
-        rows = list(picker.query("#picker-list SessionItem"))
-        assert len(rows) == 2
-        current = next(row for row in rows if row.has_class("current"))
-        other = next(row for row in rows if not row.has_class("current"))
+        rows = {row.row["id"]: row for row in picker.query("#picker-list SessionItem")}
+        assert len(rows) == 3
 
         listing = picker.query_one("#picker-list", ListView)
-        listing.index = rows.index(other)
-        await pilot.pause()
+        current = rows[ids[0]]
+        assert current.has_class("current")
+        assert "← current" in str(current.query_one(".session-meta").content)
 
-        assert other.has_class("-highlight")
-        assert other.styles.border_left[1] == Color.parse("#6cb6ff")  # 焦点强调色
-        assert current.styles.border_left[1] == Color.parse("#a6a6a6")  # 当前会话弱色
-        assert len({row.query_one(".session-title").region.x for row in rows}) == 1
+        for selection in range(3):
+            listing.index = selection
+            await pilot.pause()
+            selected = listing.highlighted_child
+            assert isinstance(selected, SessionItem)
+            selected_id = selected.row["id"]
+
+            cells = _session_rail_cells(picker)
+            assert len(cells) == 3
+            # 三行始终共用同一列、同一字符、同一行高和同一标题列。
+            assert len({cell["x"] for cell in cells.values()}) == 1
+            assert {cell["char"] for cell in cells.values()} == {"┃"}
+            assert len({cell["height"] for cell in cells.values()}) == 1
+            assert len({cell["title_x"] for cell in cells.values()}) == 1
+            assert all("┃" not in cell["inner"] for cell in cells.values())  # 没有第二根线
+            # 普通行与当前行不显示竖线，只有选中行出现蓝色竖线。
+            assert _session_visible_rails(picker) == {selected_id}
+
+            for session_id, row in rows.items():
+                assert row.styles.border_left[0] == "heavy"
+                if session_id == selected_id:
+                    assert row.styles.border_left[1] == Color.parse("#6cb6ff")
+                    assert row.styles.background == Color.parse("#303030")
+                else:
+                    assert row.styles.background != Color.parse("#303030")
+                    if row.has_class("current"):
+                        assert row.styles.background == Color.parse("#272727")
+                        assert row.styles.border_left[1] == Color.parse("#272727")
+                    else:
+                        assert row.styles.border_left[1].a == 0
+
+
+@pytest.mark.parametrize("size", [(60, 24), (100, 30), (160, 40)])
+async def test_session_picker_rail_stays_aligned_for_long_titles_and_widths(tmp_path, size):
+    # 长标题只截断不换行；窄终端和宽终端下竖线列都不抖动、不溢出。
+    from textual.widgets import ListView
+
+    from syvrio.app.chat_widgets import SessionPickerScreen
+
+    app = build_app(tmp_path, [])
+    store = app.sessions
+    titles = ("超长会话标题" * 12 + " https://github.com/example/repository", "短标题", "第三条会话")
+    ids = []
+    for title in titles:
+        session = store.create()
+        store.rename(session, title)
+        store.append(
+            session,
+            {"type": "message", "id": new_message_id(), "role": "user", "content": title},
+        )
+        ids.append(session.id)
+
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+        app.runtime.resume(ids[0])
+        app.open_session_picker()
+        await pilot.pause()
+        picker = app.screen
+        assert isinstance(picker, SessionPickerScreen)
+        listing = picker.query_one("#picker-list", ListView)
+        footer = picker.query_one(".pick-hint", Static)
+
+        for selection in range(3):
+            listing.index = selection
+            await pilot.pause()
+            cells = _session_rail_cells(picker)
+            assert len(cells) == 3
+            assert len({cell["x"] for cell in cells.values()}) == 1
+            assert {cell["char"] for cell in cells.values()} == {"┃"}
+            assert len({cell["title_x"] for cell in cells.values()}) == 1
+            # 长标题保持单行截断，行高一致。
+            assert {cell["height"] for cell in cells.values()} == {2}
+            assert all(row.query_one(".session-title").size.height == 1 for row in picker.query("#picker-list SessionItem"))
+            # 列表不横向溢出，底部提示仍完整可见。
+            assert all(item.region.right <= listing.region.right for item in picker.query("#picker-list SessionItem"))
+            assert footer.region.bottom <= picker.query_one("#pick-card").region.bottom
+
+
+async def test_session_picker_escape_and_arrow_navigation_with_rail(tmp_path):
+    # 竖线改动不影响 ↓ 进入列表、继续 ↓ 切换选中和 ESC 取消。
+    from textual.widgets import ListView
+
+    from syvrio.app.chat_widgets import SessionItem, SessionPickerScreen
+
+    app = build_app(tmp_path, [])
+    store = app.sessions
+    for title in ("甲会话", "乙会话", "丙会话"):
+        session = store.create()
+        store.rename(session, title)
+        store.append(
+            session,
+            {"type": "message", "id": new_message_id(), "role": "user", "content": title},
+        )
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        app.open_session_picker()
+        await pilot.pause()
+        picker = app.screen
+        assert isinstance(picker, SessionPickerScreen)
+        listing = picker.query_one("#picker-list", ListView)
+        first = listing.highlighted_child
+        assert isinstance(first, SessionItem)
+        aligned = _session_rail_cells(picker)
+
+        await pilot.press("down")
+        await pilot.pause()
+        assert listing.has_focus
+        await pilot.press("down")
+        await pilot.pause()
+        second = listing.highlighted_child
+        assert isinstance(second, SessionItem) and second is not first
+        assert _session_rail_cells(picker) == aligned  # 只有颜色和底色变化，网格不变
+        assert _session_visible_rails(picker) == {second.row["id"]}
+
+        await pilot.press("escape")
+        for _ in range(50):
+            await pilot.pause()
+            if not isinstance(app.screen, SessionPickerScreen):
+                break
+        assert not isinstance(app.screen, SessionPickerScreen)
+        assert app.query_one("#input", Input).has_focus
 
 
 async def test_startup_commits_dirty_vault_without_crashed_sessions(tmp_path):
