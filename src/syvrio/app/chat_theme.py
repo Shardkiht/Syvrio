@@ -157,4 +157,35 @@ APP_CSS = """
     #pick-detail-text { height: auto; width: 1fr; color: #d5d5d5; }
     #pick-card.has-detail #pick-list { height: auto; max-height: 6; min-height: 3; }
     .pick-hint { color: $warm; margin-top: 1; }
+
+    /* 推断审查：作用域独立，列表与详情在同一卡片内，不影响其他选择器。 */
+    InferenceScreen { align: center middle; background: #0d0d0d 75%; }
+    #inference-card { width: 96; max-width: 94%; height: 85%; max-height: 90%; background: $panel; border: round #484848; padding: 1 2; }
+    #inference-title { color: $accent; text-style: bold; }
+    #inference-subtitle { color: $faint; margin-bottom: 1; }
+    #inference-filters { height: auto; margin-bottom: 1; color: #8e8e8e; }
+    #inference-empty { color: $muted; height: auto; padding: 1 0; display: none; }
+    #inference-body { height: 1fr; }
+    #inference-list { width: 38%; height: 1fr; background: #191919; border-right: solid #2a2a2a; }
+    #inference-list > ListItem { height: auto; padding: 0 1; margin-bottom: 1; border-left: heavy transparent; }
+    #inference-list > ListItem.-highlight { background: #303030; border-left: heavy $accent; }
+    .inference-item-meta { color: #8e8e8e; height: 1; }
+    .inference-item-meta.status-hypothesis { color: $accent; }
+    .inference-item-meta.status-rejected, .inference-item-meta.status-superseded { color: #6f6f6f; }
+    .inference-item-text { color: #d4d4d4; height: 1; width: 1fr; overflow-x: hidden; text-overflow: ellipsis; }
+    #inference-detail { width: 1fr; height: 1fr; padding-left: 2; }
+    #inference-detail-body { height: 1fr; }
+    #inference-detail-status { color: $accent; height: auto; margin-bottom: 1; }
+    .inference-detail-line { color: #8e8e8e; height: auto; margin-bottom: 1; }
+    #inference-detail-text { color: #dedede; height: auto; margin-bottom: 1; }
+    #inference-detail-sources { color: #9a9a9a; height: auto; }
+    #inference-editor { height: 1fr; display: none; background: #171717; border: round #414141; }
+    #inference-actions, #inference-edit-actions { height: 1; margin-top: 1; }
+    #inference-actions Button, #inference-edit-actions Button { height: 1; min-width: 0; border: none; background: #242424; color: #d4d4d4; margin-right: 1; padding: 0 2; }
+    #inference-actions Button:hover, #inference-edit-actions Button:hover { background: #303030; color: $accent; }
+    #inference-actions Button:disabled, #inference-edit-actions Button:disabled { color: #5f5f5f; background: #1c1c1c; }
+    #inference-confirm { color: $accent; }
+    #inference-message { height: auto; color: $muted; margin-top: 1; }
+    #inference-message.error { color: #d1a05a; }
+    #inference-hint { color: $warm; height: auto; margin-top: 1; }
     """

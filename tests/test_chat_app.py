@@ -10,7 +10,7 @@ import pytest
 pytestmark = pytest.mark.ui
 
 from textual.geometry import Offset
-from textual.widgets import Input, Static
+from textual.widgets import Button, Input, Static
 
 from syvrio.agent.runtime import AgentRuntime
 from syvrio.agent.session import SessionStore, new_message_id
@@ -48,7 +48,7 @@ class FakeSummarizer:
 
 async def test_inference_review_uses_worker_and_keeps_facts_separate(tmp_path):
     import asyncio
-    from syvrio.app.chat_widgets import PickScreen
+    from syvrio.app.inference_screen import InferenceScreen
 
     app = build_app(tmp_path, [])
     source = app.service.note("合成阅读偏好")
@@ -58,7 +58,7 @@ async def test_inference_review_uses_worker_and_keeps_facts_separate(tmp_path):
         app._command("/inferences")
         await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
         await pilot.pause()
-        assert isinstance(app.screen, PickScreen)
+        assert isinstance(app.screen, InferenceScreen)
         assert not app.busy
         await pilot.press("escape")
         app._run_inference_review(item.id, "confirm")
@@ -67,6 +67,280 @@ async def test_inference_review_uses_worker_and_keeps_facts_separate(tmp_path):
         assert app.service.list_inferences()[0].status == "confirmed"
         assert len(app.service.store.entries()) == 1
         assert not app.busy
+
+
+async def _open_inferences(app, pilot):
+    import asyncio
+    from syvrio.app.inference_screen import InferenceScreen
+
+    await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+    app._command("/inferences")
+    await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+    await pilot.pause()
+    assert isinstance(app.screen, InferenceScreen)
+    return app.screen
+
+
+async def _finish_inference_worker(app, pilot):
+    import asyncio
+
+    await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+    await pilot.pause()
+
+
+async def test_inference_screen_empty_state(tmp_path):
+    app = build_app(tmp_path, [])
+    async with app.run_test(size=(100, 30)) as pilot:
+        screen = await _open_inferences(app, pilot)
+        assert screen.query_one("#inference-empty").display
+        assert not screen.query_one("#inference-body").display
+        assert not screen.query_one("#inference-actions").display
+        assert not screen.query_one("#inference-filters").display
+        assert "No inferences yet" in str(screen.query_one("#inference-empty").render())
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, type(screen))
+
+
+async def test_inference_screen_single_pending_confirm_refreshes_in_place(tmp_path):
+    from syvrio.app.inference_screen import InferenceScreen
+
+    app = build_app(tmp_path, [])
+    source = app.service.note("合成事实：喜欢安静活动")
+    item = app.service.propose_inference("可能喜欢安静活动", [source.id])
+    async with app.run_test(size=(120, 36)) as pilot:
+        screen = await _open_inferences(app, pilot)
+        assert screen._filter == "hypothesis"
+        assert "Pending" in str(screen.query_one("#inference-detail-status").render())
+        assert "confirmation never writes facts" in str(screen.query_one("#inference-detail-sources").render())
+        assert str(screen.query_one("#inference-detail-text").render()) == item.text
+        assert "合成事实：喜欢安静活动" in str(screen.query_one("#inference-detail-sources").render())
+        assert not screen.query_one("#inference-confirm", Button).disabled
+
+        await pilot.press("c")
+        await _finish_inference_worker(app, pilot)
+        assert app.screen is screen  # 原界面内刷新，不叠加弹窗
+        assert not app.query(".card")  # 不再向聊天区插入详情卡片
+        assert app.service.list_inferences()[0].status == "confirmed"
+        assert len(app.service.store.entries()) == 1  # 确认不写入事实
+        assert not app.busy
+
+
+async def test_inference_screen_filters_and_readonly_states(tmp_path):
+    app = build_app(tmp_path, [])
+    source = app.service.note("合成事实：偏好简洁工具")
+    pending = app.service.propose_inference("待审查假设", [source.id])
+    confirmed = app.service.propose_inference("已确认假设", [source.id])
+    app.service.review_inference(confirmed.id, "confirm")
+    rejected = app.service.propose_inference("已拒绝假设", [source.id])
+    app.service.review_inference(rejected.id, "reject")
+    superseded_source = app.service.note("将被更正的事实")
+    superseded = app.service.propose_inference("将失效的假设", [superseded_source.id])
+    app.service.correct(superseded_source.id, "更正后的事实")
+
+    async with app.run_test(size=(120, 36)) as pilot:
+        screen = await _open_inferences(app, pilot)
+        filters = str(screen.query_one("#inference-filters").render())
+        for text in ("All 4", "Pending 1", "Confirmed 1", "Rejected 1", "Invalidated 1"):
+            assert text in filters
+
+        await pilot.press("right")  # Pending → Confirmed
+        await pilot.pause()
+        assert screen._filter == "confirmed"
+        assert screen._current().id == confirmed.id
+        assert screen.query_one("#inference-confirm", Button).disabled
+        assert not screen.query_one("#inference-reject", Button).disabled
+
+        await pilot.press("right")  # Confirmed → Rejected
+        await pilot.pause()
+        assert screen._current().id == rejected.id
+        assert all(button.disabled for button in screen.query("#inference-actions Button"))
+        assert "Read-only record" in str(screen.query_one("#inference-detail-sources").render())
+
+        await pilot.press("right")  # Rejected → Invalidated
+        await pilot.pause()
+        assert screen._current().id == superseded.id
+        assert all(button.disabled for button in screen.query("#inference-actions Button"))
+
+        await pilot.press("right")  # Invalidated → All
+        await pilot.pause()
+        assert screen._filter == "all"
+        assert len(list(screen.query("#inference-list InferenceItem"))) == 4
+        assert pending.id in {item.item.id for item in screen.query("#inference-list InferenceItem")}
+
+
+async def test_inference_screen_long_text_and_long_source_ids(tmp_path):
+    from syvrio.app.inference_screen import InferenceScreen
+    from syvrio.memory.models import Inference
+
+    app = build_app(tmp_path, [])
+    long_fact = "合成事实：" + "长期项目偏好先验证最小闭环。" * 20
+    source = app.service.note(long_fact)
+    long_text = "可能在做长期项目时偏好先搭建可验证的最小闭环，再逐步扩展功能；面对不确定需求时倾向先确认边界。" * 4
+    app.service.propose_inference(long_text, [source.id])
+    async with app.run_test(size=(120, 36)) as pilot:
+        screen = await _open_inferences(app, pilot)
+        assert str(screen.query_one("#inference-detail-text").render()) == long_text
+        sources = str(screen.query_one("#inference-detail-sources").render())
+        assert "Sources (1)" in sources
+        assert len(sources) < len(long_fact) + 40  # 来源只给摘录，不整段搬运
+        assert screen.query_one("#inference-detail-body").region.height <= screen.query_one("#inference-detail").region.height
+        assert screen.query_one("#inference-actions").region.bottom <= screen.query_one("#inference-card").region.bottom
+
+        # 长来源 ID 由组件级数据构造：业务接口不允许伪造来源，这里只验证展示规则。
+        stamp = "2026-11-05T18:00:00+08:00"
+        item = Inference(
+            id="inf-synthetic", text="可能偏好简洁界面", kind="profile",
+            source_ids=["mem-20990101-000000-abcdef123456"], created_at=stamp, updated_at=stamp,
+        )
+        app.push_screen(InferenceScreen([item], {}, lambda *args: None))
+        await pilot.pause()
+        detail = app.screen
+        assert isinstance(detail, InferenceScreen)
+        sources = str(detail.query_one("#inference-detail-sources").render())
+        assert "mem-20990101-000000-abcdef123456" not in sources
+        assert "mem-209901…23456" in sources
+        assert "Source unavailable" in sources
+
+
+async def test_inference_screen_reject_and_correct_full_text(tmp_path):
+    app = build_app(tmp_path, [])
+    source = app.service.note("合成事实：先确认边界")
+    item = app.service.propose_inference("可能偏好先确认需求边界", [source.id])
+    async with app.run_test(size=(120, 36)) as pilot:
+        screen = await _open_inferences(app, pilot)
+        await pilot.press("r")
+        await _finish_inference_worker(app, pilot)
+        assert app.service.list_inferences()[0].status == "rejected"
+
+        screen._set_filter("all")
+        await pilot.pause()
+        listing = screen.query_one("#inference-list")
+        listing.index = next(index for index, node in enumerate(screen.query("#inference-list InferenceItem")) if node.item.id == item.id)
+        await pilot.pause()
+        # 已拒绝不可再操作。
+        assert all(button.disabled for button in screen.query("#inference-actions Button"))
+
+        editable = app.service.propose_inference("可能偏好分阶段交付", [source.id])
+        app._run_inference_review()  # 新推断经 worker 重新加载，界面内刷新
+        await _finish_inference_worker(app, pilot)
+        screen._set_filter("hypothesis")
+        await pilot.pause()
+        assert screen._current().id == editable.id
+        await pilot.press("e")
+        await pilot.pause()
+        editor = screen.query_one("#inference-editor")
+        assert editor.display and editor.text == editable.text
+        revised = editable.text + "；先给最小验证版本，再补充细节。\n第二行保留完整原文，不静默截断。"
+        editor.load_text(revised)
+        await pilot.press("ctrl+s")
+        await _finish_inference_worker(app, pilot)
+        records = {record.id: record for record in app.service.list_inferences()}
+        assert records[editable.id].status == "superseded"
+        current = screen._current()
+        assert current is not None and current.id != editable.id
+        assert current.status == "hypothesis"
+        assert current.text == revised  # 完整多行原文保留
+        assert str(screen.query_one("#inference-detail-text").render()) == revised
+        assert not screen._editing
+
+
+async def test_inference_screen_correct_escape_cancels_then_closes(tmp_path):
+    from syvrio.app.inference_screen import InferenceScreen
+
+    app = build_app(tmp_path, [])
+    source = app.service.note("合成事实")
+    item = app.service.propose_inference("可能喜欢安静活动", [source.id])
+    async with app.run_test(size=(120, 36)) as pilot:
+        screen = await _open_inferences(app, pilot)
+        await pilot.press("e")
+        await pilot.pause()
+        assert screen._editing
+        await pilot.press("escape")
+        await pilot.pause()
+        assert isinstance(app.screen, InferenceScreen)  # 第一次 Esc 只退出编辑
+        assert not screen._editing
+        assert not screen.query_one("#inference-editor").display
+        assert app.service.list_inferences()[0].text == item.text
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, InferenceScreen)
+        assert app.query_one("#input", Input).has_focus
+
+
+async def test_inference_screen_action_failure_keeps_screen_usable(tmp_path, monkeypatch):
+    from syvrio.app.inference_screen import InferenceScreen
+
+    app = build_app(tmp_path, [])
+    source = app.service.note("合成事实")
+    app.service.propose_inference("可能喜欢安静活动", [source.id])
+
+    def fail(*args, **kwargs):
+        raise ValueError("合成推断写入失败")
+
+    monkeypatch.setattr(app.service, "review_inference", fail)
+    async with app.run_test(size=(120, 36)) as pilot:
+        screen = await _open_inferences(app, pilot)
+        await pilot.press("c")
+        await _finish_inference_worker(app, pilot)
+        assert isinstance(app.screen, InferenceScreen)
+        assert not app.busy and not screen._busy
+        assert "Inference action failed" in str(screen.query_one("#inference-message").render())
+        assert "合成推断写入失败" in str(screen.query_one("#inference-message").render())
+        assert screen.query_one("#inference-message").has_class("error")
+        assert not screen.query_one("#inference-confirm", Button).disabled
+        assert not app.query_one("#input", Input).disabled
+
+
+async def test_inference_screen_list_and_detail_scroll(tmp_path):
+    app = build_app(tmp_path, [])
+    source = app.service.note("合成事实")
+    for index in range(12):
+        app.service.propose_inference(f"第{index}条待审查推断。" + "补充说明" * 80, [source.id])
+    async with app.run_test(size=(100, 26)) as pilot:
+        screen = await _open_inferences(app, pilot)
+        listing = screen.query_one("#inference-list")
+        items = list(screen.query("#inference-list InferenceItem"))
+        assert len(items) == 12
+        listing.index = 11
+        await pilot.pause()
+        listing.scroll_end(animate=False)
+        await pilot.pause()
+        assert screen._current().text.startswith("第11条")
+        assert listing.scroll_y > 0  # 列表内部滚动，不撑破卡片
+        detail = screen.query_one("#inference-detail-body")
+        detail.scroll_end(animate=False)
+        await pilot.pause()
+        assert detail.scroll_y > 0  # 长详情独立滚动
+
+
+async def test_inference_screen_reopen_and_responsive_layout(tmp_path):
+    from syvrio.app.inference_screen import InferenceScreen
+
+    for size, layout in (((120, 36), "horizontal"), ((70, 30), "vertical")):
+        app = build_app(tmp_path / f"{size[0]}x{size[1]}", [])
+        source = app.service.note("合成事实")
+        app.service.propose_inference("可能喜欢安静活动", [source.id])
+        async with app.run_test(size=size) as pilot:
+            screen = await _open_inferences(app, pilot)
+            assert screen.query_one("#inference-body").styles.layout.name == layout
+            card = screen.query_one("#inference-card").region
+            assert screen.query_one("#inference-actions").region.bottom <= card.bottom
+            assert screen.query_one("#inference-hint").region.bottom <= card.bottom
+            listing = screen.query_one("#inference-list").region
+            detail = screen.query_one("#inference-detail").region
+            if layout == "horizontal":
+                assert listing.right <= detail.x  # 两列不重叠
+            else:
+                assert listing.bottom <= detail.y  # 上下布局不重叠
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not isinstance(app.screen, InferenceScreen)
+            # 连续再次打开仍可用。
+            screen = await _open_inferences(app, pilot)
+            assert isinstance(app.screen, InferenceScreen)
+            await pilot.press("escape")
+            await pilot.pause()
 
 
 async def test_inference_review_error_releases_input(tmp_path, monkeypatch):

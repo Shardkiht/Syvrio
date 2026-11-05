@@ -13,6 +13,7 @@ from ..memory.extractor import split_chunks
 from ..llm import cached_provider_models, fetch_provider_models
 from . import actions
 from .chat_widgets import ModelPickerScreen, PickScreen, SessionPickerScreen, TextInputScreen
+from .inference_screen import InferenceScreen
 from .command_catalog import SLASH_COMMANDS
 from .session_ui import visible_sessions
 
@@ -92,49 +93,43 @@ class ChatCommandsMixin:
 
     def _inference_work(self, item_id: str | None, action: str | None, text: str | None) -> None:
         try:
-            if action is not None:
-                self.service.review_inference(item_id or "", action, text)
+            updated = self.service.review_inference(item_id or "", action, text) if action is not None else None
             items = self.service.list_inferences()
+            sources: dict[str, str] = {}
+            for item in items:
+                for source_id in item.source_ids:
+                    if source_id not in sources:
+                        entry = self.service.store.find(source_id)
+                        sources[source_id] = entry.text if entry is not None else ""
         except Exception as exc:
             record_event("command.failed", exc)
-            self.call_from_thread(self._finish_error, f"Inference action failed: {exc}")
+            message = f"Inference action failed: {exc}" if action else f"Could not load inferences: {exc}"
+            self.call_from_thread(self._inference_failed, message)
             return
-        self.call_from_thread(self._show_inferences, items)
+        self.call_from_thread(self._show_inferences, items, sources, updated.id if updated else None)
 
-    def _show_inferences(self, items: list) -> None:
+    def _show_inferences(self, items: list, sources: dict, focus_id: str | None = None) -> None:
         self._end_navigation()
         if self._pending_new or self._pending_switch:
             self._drain_pending_intent()
             return
-        labels = {"hypothesis": "Pending", "confirmed": "Confirmed inference",
-                  "rejected": "Rejected", "superseded": "Invalidated"}
-        if not items:
-            self.add_card("No inferences.")
+        if isinstance(self.screen, InferenceScreen):
+            # 操作后在原界面内刷新，不再叠加选择器或向聊天区插入详情卡片。
+            self.screen.set_items(items, sources, focus_id)
         else:
-            self.push_screen(PickScreen("Inferences (separate from facts)", [
-                (escape(f"[{labels[item.status]}] {self._truncate(item.text, 50)}"), item)
-                for item in items
-            ], self._inference_picked))
+            self.push_screen(
+                InferenceScreen(items, sources, self._run_inference_review),
+                lambda _: self.query_one("#input", Input).focus(),
+            )
         self._drain_pending_intent()
 
-    def _inference_picked(self, item) -> None:
-        if item is None:
-            return
-        self.add_card(escape(f"Inference: {item.text}\nStatus: {item.status}\nSources: {', '.join(item.source_ids)}"))
-        if item.status not in ("hypothesis", "confirmed"):
-            return
-        self.push_screen(PickScreen("Review inference (confirmation does not create a fact)", [
-            ("Confirm", "confirm"), ("Reject", "reject"), ("Correct as a new hypothesis", "correct")
-        ], lambda action: self._inference_action(item, action)))
-
-    def _inference_action(self, item, action: str | None) -> None:
-        if action is None:
-            return
-        if action == "correct":
-            self.push_screen(TextInputScreen("Corrected hypothesis", default=item.text,
-                on_result=lambda text: self._run_inference_review(item.id, action, text) if text else None))
+    def _inference_failed(self, message: str) -> None:
+        self._end_navigation()
+        if isinstance(self.screen, InferenceScreen):
+            self.screen.show_error(message)
         else:
-            self._run_inference_review(item.id, action)
+            self.add_card(message)
+        self._drain_pending_intent()
 
     @staticmethod
     def _truncate(text: str, width: int) -> str:
