@@ -64,7 +64,7 @@ class InferenceScreen(ModalScreen):
         Binding("right", "next_filter", "Next filter", show=False),
         Binding("c", "review('confirm')", "Confirm", show=False),
         Binding("r", "review('reject')", "Reject", show=False),
-        Binding("e", "start_correct", "Correct", show=False),
+        Binding("e", "start_correct", "Edit", show=False),
         Binding("ctrl+s", "save_correction", "Save correction", show=False),
     ]
 
@@ -103,15 +103,12 @@ class InferenceScreen(ModalScreen):
             with Horizontal(id="inference-actions"):
                 yield Button("Confirm", id="inference-confirm")
                 yield Button("Reject", id="inference-reject")
-                yield Button("Correct", id="inference-correct")
+                yield Button("Edit", id="inference-correct")
             with Horizontal(id="inference-edit-actions"):
-                yield Button("Save correction", id="inference-save")
+                yield Button("Save edit", id="inference-save")
                 yield Button("Cancel", id="inference-cancel")
             yield Static("", id="inference-message")
-            yield Static(
-                "↑↓ select · ←→ filter · Enter review · C confirm · R reject · E correct · Esc close",
-                id="inference-hint",
-            )
+            yield Static("C Confirm · R Reject · E Edit · Esc Close", id="inference-hint")
 
     def on_mount(self) -> None:
         self.query_one("#inference-editor").display = False
@@ -137,7 +134,13 @@ class InferenceScreen(ModalScreen):
         detail.styles.margin_top = 1 if narrow else 0
 
     # ---------- 数据与刷新 ----------
-    def set_items(self, items: list[Inference], sources: dict[str, str], focus_id: str | None = None) -> None:
+    def set_items(
+        self,
+        items: list[Inference],
+        sources: dict[str, str],
+        focus_id: str | None = None,
+        feedback: str | None = None,
+    ) -> None:
         self._items = list(items)
         self._sources = dict(sources)
         self._busy = False
@@ -149,6 +152,10 @@ class InferenceScreen(ModalScreen):
         self._set_message("")
         self._refresh_filters()
         self._rebuild_list()
+        if feedback:
+            if self._filter == "hypothesis":
+                feedback += f" {len(self._filtered())} pending remaining."
+            self._set_message(feedback)
         self._apply_layout()
 
     def _refresh_filters(self) -> None:
@@ -228,6 +235,8 @@ class InferenceScreen(ModalScreen):
         self.query_one("#inference-edit-actions").display = self._editing
         self.query_one("#inference-save", Button).disabled = self._busy
         self.query_one("#inference-cancel", Button).disabled = self._busy
+        hint = "Ctrl+S Save · Esc Cancel" if self._editing else "C Confirm · R Reject · E Edit · Esc Close"
+        self.query_one("#inference-hint", Static).update(hint)
 
     # ---------- 筛选与选择 ----------
     def _set_filter(self, key: str) -> None:
@@ -279,7 +288,7 @@ class InferenceScreen(ModalScreen):
 
     def action_start_correct(self) -> None:
         item = self._current()
-        if self._busy or item is None or item.status not in REVIEWABLE:
+        if self._busy or self._editing or item is None or item.status not in REVIEWABLE:
             return
         self._editing = True
         editor = self.query_one("#inference-editor", TextArea)
@@ -307,11 +316,13 @@ class InferenceScreen(ModalScreen):
 
     def show_error(self, message: str) -> None:
         self._busy = False
-        self._editing = False
         self._set_message(message, error=True)
-        self.query_one("#inference-editor").display = False
-        self.query_one("#inference-detail-body").display = True
+        self.query_one("#inference-editor").display = self._editing
+        self.query_one("#inference-detail-body").display = not self._editing
         self._sync_actions()
+        if self._editing:
+            # 保存失败只反馈错误，不重载或隐藏编辑器中的未保存草稿。
+            self.query_one("#inference-editor", TextArea).focus()
 
     def _set_message(self, message: str, error: bool = False) -> None:
         node = self.query_one("#inference-message", Static)

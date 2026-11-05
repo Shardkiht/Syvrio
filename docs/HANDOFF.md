@@ -1,5 +1,16 @@
 # 开发交接
 
+## 二级界面统一与高风险操作保护（2026-11-05）
+
+- 分支 `evolution`（跟踪 `origin/feature-memory-evolution`），基线 `dfec0a2`；本轮改动与本记录在同一提交中，推送目标由用户明确授权。
+- `/profile` 改为固定标题、真实缓存状态/元信息、单控件正文滚动与固定操作提示；短内容保持紧凑，长内容和窄终端独立滚动。查看仍只读摘要缓存，不调用模型或扫描完整画像。
+- `/inferences` 统一为 C Confirm / R Reject / E Edit；来源摘要改为 Worker 内一次事实库读取并建索引，审查后显示结果和剩余 Pending 数，编辑保存失败保留草稿并可直接重试。
+- Git 同步继续使用界面内 `Ctrl+S`，确认展示提交/Push 影响和可用数量，默认 Cancel，显式选择 Synchronize 才启动既有 Worker；自动调度和锁逻辑未改。会话永久删除改为 `Ctrl+D` 或 Delete 按钮，默认 Cancel、Esc 取消、当前/生成中会话限制不变，文件删除失败保留界面与数据。Provider 移除默认 Cancel，失败不宣称成功。
+- TUI `/import <path> --apply` 在文档解析和模型调用前进行一次批次确认，说明费用与部分完成保留语义；Preview 和正式导入写入/错误处理逻辑未改。Sessions 补标题与鼠标删除入口，详情弹窗在窄屏缩短提示，未重写其它正常界面。
+- 验证：完整 `tests/test_chat_app.py` 185 passed；Agent/CLI/会话/文档组 281 passed，记忆/推断/Git 组 356 passed、1 skipped（Windows 符号链接权限），检索/搜索/Markdown 组 449 passed，合计 1271 passed、1 skipped、1 个既有 Pydantic 警告。`git diff --check` 通过。20 张合成 SVG 与 6 张代表 PNG 保存在本地忽略的 `logs/ui-preview-release/`。自动化测试未读取真实 Vault/Keyring，未调用真实模型、搜索或远端 Git 服务。
+- 真实 TUI 冒烟：使用独立测试 Vault 与 Spark，共 5 次模型调用，真实对话、Profile 摘要、正式 Import、推断编辑/确认及 Git/Session 取消均通过，可识别测试会话保留。实测发现搜索框聚焦时 `Ctrl+D` 被 Input 消费，已改为该界面内的 priority binding 并补回归；未执行真实远端同步或 Provider 删除。真实 LLM 规则已改为开始或追加使用时说明用途，不再逐轮申请次数确认。
+- 已知边界：Headless Pilot 与 SVG/PNG 已覆盖 120×36、100×30、80×24、60×20；真实模型验证仅覆盖当前 Spark 配置，原生终端字体、IME 和鼠标拖选仍未人工验证。
+
 ## Evolution Review 收尾补强（2026-11-05）
 
 - 分支 `evolution`（跟踪 `origin/feature-memory-evolution`），基线 `2444491`；本轮改动仅在工作区，未 commit、未 push。

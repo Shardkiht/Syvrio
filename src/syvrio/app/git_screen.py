@@ -10,9 +10,9 @@ from datetime import datetime
 from rich.markup import escape
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Static
+from textual.widgets import Button, Static
 
 from ..infra.gitsync import SyncResult, SyncStage
 
@@ -232,10 +232,7 @@ class GitScreen(ModalScreen):
 
 
 class GitConfirmScreen(ModalScreen):
-    BINDINGS = [
-        ("enter", "confirm", "Confirm"),
-        ("escape", "cancel", "Cancel"),
-    ]
+    BINDINGS = [("escape", "cancel", "Cancel")]
 
     def __init__(self, status: dict | None, on_result) -> None:
         super().__init__()
@@ -247,26 +244,35 @@ class GitConfirmScreen(ModalScreen):
         unpushed = self._status.get("unpushed")
         unpushed_text = "Unknown (no upstream)" if unpushed is None else _plural(int(unpushed), "commit")
         upstream = self._status.get("upstream")
-        push_note = (
-            ""
-            if upstream
-            else "\n- Push will be skipped until an upstream is configured"
-        )
+        push_note = "" if upstream else "\n- Push will be skipped until an upstream is configured"
         body = (
+            f"Branch: {self._status.get('branch') or 'Unknown'}\n"
+            f"Upstream: {upstream or 'Not configured'}\n"
             f"Uncommitted files: {modified}\n"
             f"Unpushed commits: {unpushed_text}\n\n"
             "This operation will:\n"
-            "- Create a Git commit if needed\n"
-            f"- Push local commits to remote{push_note}\n\n"
-            "Enter   Confirm\n"
-            "Esc     Cancel"
+            "- Create a local commit from eligible Vault changes if needed\n"
+            f"- Push local commits to the configured upstream{push_note}\n"
+            "- Keep the local commit if pushing fails"
         )
         with Vertical(id="git-card"):
             yield Static("Confirm Git Synchronization", classes="pick-title")
-            yield Static(body, id="git-confirm")
+            with VerticalScroll(id="git-confirm-body", classes="thin-scroll"):
+                yield Static(body, id="git-confirm", markup=False)
+            with Horizontal(id="git-confirm-actions"):
+                yield Button("Cancel", id="git-cancel")
+                yield Button("Synchronize", id="git-synchronize")
+            yield Static("Enter Select · Esc Cancel", classes="pick-hint")
 
-    def action_confirm(self) -> None:
-        self._finish(True)
+    def on_mount(self) -> None:
+        self.query_one("#git-cancel", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        if event.button.id == "git-synchronize":
+            self._finish(True)
+        elif event.button.id == "git-cancel":
+            self._finish(False)
 
     def action_cancel(self) -> None:
         self._finish(False)

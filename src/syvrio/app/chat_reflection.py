@@ -5,6 +5,7 @@ import time
 from functools import partial
 
 from rich.markup import escape
+from textual.widgets import Input
 
 from ..infra.diagnostics import record_event
 from .chat_widgets import ProfileScreen
@@ -127,34 +128,52 @@ class ChatReflectionMixin:
 
     def _profile_work(self) -> None:
         """只读缓存摘要；事实/推断的完整遍历和模型调用都留给 /profile refresh。"""
+        generated_at = None
+        fact_count = None
+        unique_count = None
         try:
             summary = self.service.reflection.profile_summary()
             if summary is None:
                 body = ("No profile summary yet. Save preferences, goals or habits, then run "
-                        "/profile refresh to generate a cross-topic summary.")
-                status = "The summary is a derived view over valid facts; source facts stay unchanged."
+                        "/profile refresh to generate a cross-topic summary.\n\n"
+                        "The summary is a derived view over valid facts; source facts stay unchanged.")
+                status = "Not generated"
                 stale = False
             else:
                 body = summary.text
                 stale = summary.stale
-                state = ("Outdated — source facts changed; run /profile refresh."
-                         if stale else "Up to date")
-                status = (f"{state}  ·  {summary.fact_count} valid facts, {summary.unique_count} unique  ·  "
-                          f"generated {summary.generated_at[:16].replace('T', ' ')}")
+                status = "Outdated · Source facts changed; run /profile refresh." if stale else "Up to date"
+                generated_at = summary.generated_at
+                fact_count = summary.fact_count
+                unique_count = summary.unique_count
         except Exception as exc:
             record_event("reflection.failed", exc)
-            body = "Could not read the profile summary cache."
-            status = "The cache is derived data; retry or run /profile refresh to rebuild it."
+            body = ("Could not read the profile summary cache.\n\n"
+                    "The cache is derived data; retry or run /profile refresh to rebuild it.")
+            status = "Cache unavailable"
             stale = False
         try:
-            self.call_from_thread(self._show_profile, body, status, stale)
+            self.call_from_thread(
+                self._show_profile, body, status, stale, generated_at, fact_count, unique_count,
+            )
         except RuntimeError:
             pass  # 界面已退出，不再投递结果。
 
-    def _show_profile(self, body: str, status: str, stale: bool) -> None:
+    def _show_profile(
+        self,
+        body: str,
+        status: str,
+        stale: bool,
+        generated_at: str | None,
+        fact_count: int | None,
+        unique_count: int | None,
+    ) -> None:
         if len(self.screen_stack) > 1:
             return
-        self.push_screen(ProfileScreen(body, status, stale=stale))
+        self.push_screen(
+            ProfileScreen(body, status, stale, generated_at, fact_count, unique_count),
+            lambda _: self.query_one("#input", Input).focus(),
+        )
 
     def _reflection_work(self, mode: str, budget: int, token: threading.Event) -> None:
         try:

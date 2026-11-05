@@ -95,27 +95,39 @@ class ChatCommandsMixin:
         try:
             updated = self.service.review_inference(item_id or "", action, text) if action is not None else None
             items = self.service.list_inferences()
-            sources: dict[str, str] = {}
-            for item in items:
-                for source_id in item.source_ids:
-                    if source_id not in sources:
-                        entry = self.service.store.find(source_id)
-                        sources[source_id] = entry.text if entry is not None else ""
+            source_ids = {source_id for item in items for source_id in item.source_ids}
+            # 来源摘要共用一次事实库读取，避免每个来源 ID 都重复解析全部主题文件。
+            sources = {
+                entry.id: entry.text
+                for entry in self.service.store.entries(include_inactive=True)
+                if entry.id in source_ids
+            }
         except Exception as exc:
             record_event("command.failed", exc)
             message = f"Inference action failed: {exc}" if action else f"Could not load inferences: {exc}"
             self.call_from_thread(self._inference_failed, message)
             return
-        self.call_from_thread(self._show_inferences, items, sources, updated.id if updated else None)
+        feedback = None
+        if updated is not None:
+            feedback = {
+                "confirm": "Confirmed.",
+                "reject": "Rejected.",
+                "correct": "Edit saved as a new pending hypothesis.",
+            }[action]
+        self.call_from_thread(
+            self._show_inferences, items, sources, updated.id if updated else None, feedback,
+        )
 
-    def _show_inferences(self, items: list, sources: dict, focus_id: str | None = None) -> None:
+    def _show_inferences(
+        self, items: list, sources: dict, focus_id: str | None = None, feedback: str | None = None,
+    ) -> None:
         self._end_navigation()
         if self._pending_new or self._pending_switch:
             self._drain_pending_intent()
             return
         if isinstance(self.screen, InferenceScreen):
             # 操作后在原界面内刷新，不再叠加选择器或向聊天区插入详情卡片。
-            self.screen.set_items(items, sources, focus_id)
+            self.screen.set_items(items, sources, focus_id, feedback)
         else:
             self.push_screen(
                 InferenceScreen(items, sources, self._run_inference_review),
@@ -371,9 +383,34 @@ class ChatCommandsMixin:
         if not filename:
             self.add_card("Usage: /import <file-or-directory> [--apply]")
             return
+        path = Path(filename).expanduser()
+        if apply:
+            self.push_screen(PickScreen(
+                "Confirm Memory Import",
+                [("Cancel", False), ("Import and save", True)],
+                partial(self._import_confirmed, path),
+                detail=(
+                    f"Source: {path}\n\n"
+                    "This batch will write admitted memories directly to the Vault. "
+                    "The configured model may be called and may incur charges.\n\n"
+                    "If a later file or chunk fails, completed writes are retained. "
+                    "Cancel starts neither document parsing nor model calls."
+                ),
+            ))
+            return
+        self._start_import(path, False)
+
+    def _import_confirmed(self, path: Path, confirmed) -> None:
+        if confirmed is not True:
+            self.add_card("Import cancelled; no files were analyzed and no memories were written.")
+            self.query_one("#input", Input).focus()
+            return
+        self._start_import(path, True)
+
+    def _start_import(self, path: Path, apply: bool) -> None:
         self._begin_navigation()
         self.add_card("Starting import: parsing is local; extraction calls the configured model and may incur charges. " + ("Memories will be saved." if apply else "Preview only; memories will not be saved."))
-        self.run_worker(partial(self._import_work, Path(filename).expanduser(), apply),
+        self.run_worker(partial(self._import_work, path, apply),
                         group="ask", thread=True, exclusive=True, exit_on_error=False)
 
     def _import_work(self, path: Path, apply: bool) -> None:
@@ -549,8 +586,8 @@ class ChatCommandsMixin:
         if action == "remove":
             self.push_screen(
                 PickScreen(
-                    f"Remove {label} provider?",
-                    [("Remove provider", True), ("Cancel", False)],
+                    f"Remove {label} provider?\nSaved provider credentials and its API key may be removed.",
+                    [("Cancel", False), ("Remove provider", True)],
                     partial(self._remove_provider_result, provider_key),
                 )
             )

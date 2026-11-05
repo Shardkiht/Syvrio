@@ -205,19 +205,19 @@ In-session commands:
 | Command | Action |
 | --- | --- |
 | `/new` | End the current session and start a new one (created after the first message) |
-| `/sessions` | Open the centered session picker: type to filter, Enter to resume, Ctrl+R to rename, Del to delete (with confirmation), ESC to cancel |
+| `/sessions` | Open the centered session picker: type to filter, Enter to resume, Ctrl+R to rename, Ctrl+D to permanently delete (confirmation defaults to Cancel), ESC to cancel |
 | `/compact` | Compact the context immediately |
 | `/undo` | Withdraw the latest turn and restore its user message for editing; during generation, cancel immediately and withdraw only the active turn |
 | `/summary` | View the current session summary |
 | `/status` | Session, model, retrieval mode, context, and pending status |
-| `/git` | Open Git management: repository, Remote/Upstream, working tree and unpushed commits; `Ctrl+S` starts a manual sync (requires `Enter` confirmation) |
+| `/git` | Open Git management: repository, Remote/Upstream, working tree and unpushed commits; `Ctrl+S` opens sync confirmation (defaults to Cancel and runs only after explicitly selecting Synchronize) |
 | `/model` | Search and switch models; `Ctrl+P` opens separate provider management, `Ctrl+R` refreshes, and `Ctrl+N` enters a custom model name. Opens from cache or presets, then refreshes in the background; `/model refresh` skips the old cache |
 | `/think` | Switch reasoning effort: default / low / medium / high, only when the model supports it; applies immediately and persists to the config |
 | `/context` | Switch the context window: presets generated from the current model's limit, custom value allowed; effective on the next turn |
 | `/setup` | Reminds you that the full setup wizard runs `syvrio setup` in a terminal (manage built-in provider keys with `Ctrl+P` in `/model`) |
 | `/rename <title>` | Rename the session |
-| `/import <path> [--apply]` | Import a file or the current directory; preview by default, reanalyze and write with `--apply`. Without a path, opens an input dialog |
-| `/inferences` | Inspect, confirm, reject or correct separate inferences |
+| `/import <path> [--apply]` | Import a file or the current directory; preview by default. `--apply` asks for one batch confirmation before parsing or model calls, then reanalyzes and writes. Without a path, opens an input dialog |
+| `/inferences` | Inspect, confirm, reject or edit separate inferences; C Confirm, R Reject, E Edit, with no extra confirmation for routine review |
 | `/profile [refresh [requests]]` | View the generated profile summary (cached, no model call); refresh builds the summary and proposes inferences |
 | `/dream [requests\|status\|cancel\|resume]` | Start, inspect or cancel background reflection; one request by default |
 | `/pending` | Work through pending candidates one by one: approve / reject / edit then write; automatically advances to the next until the queue is empty |
@@ -230,7 +230,7 @@ In-session commands:
 
 `/git` opens a dedicated Git management screen backed by the real repository: initialization state, Remote and Upstream, current branch, modified files, unpushed commits, the latest commit and latest successful push, auto-sync state, daily time, next run, last result, and the latest failure reason. Missing or unverifiable values are shown as `Not configured` or `Unknown`; a configured Remote is never reported as a verified connection.
 
-`Ctrl+S` only works inside the Git screen and never commits immediately: it opens a confirmation screen, `Enter` runs the background Worker, and `Esc` cancels. Stages are reported as Checking working tree / Creating commit / Pushing to remote / Refreshing status. Stages that did not run are marked `Skipped`; no fake percentage is shown. Closing the screen does not cancel a running operation or release its locks early, and repeated `Ctrl+S` during a run is rejected. If the terminal intercepts `Ctrl+S` as XON/XOFF flow control, click the Synchronize row or adjust the terminal yourself; Syvrio does not modify terminal settings.
+`Ctrl+S` only works inside the Git screen and never commits immediately: it opens a confirmation screen describing local commits, remote push and available change counts. Cancel is focused by default; only explicitly selecting Synchronize starts the background Worker, and `Esc` cancels. Stages are reported as Checking working tree / Creating commit / Pushing to remote / Refreshing status. Stages that did not run are marked `Skipped`; no fake percentage is shown. Closing the screen does not cancel a running operation or release its locks early, and repeated `Ctrl+S` during a run is rejected. If the terminal intercepts `Ctrl+S` as XON/XOFF flow control, click the Synchronize row or adjust the terminal yourself; Syvrio does not modify terminal settings.
 
 Sync rules:
 

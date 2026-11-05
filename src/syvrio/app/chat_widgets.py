@@ -19,13 +19,13 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.events import MouseScrollUp, MouseScrollDown
 from textual.content import Content
-from textual.containers import Center, Vertical, VerticalScroll
+from textual.containers import Center, Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.selection import Selection
 from textual.style import Style
 from textual.strip import Strip
 from textual.visual import RenderOptions, RichVisual
-from textual.widgets import Input, Label, ListView, ListItem, Static
+from textual.widgets import Button, Input, Label, ListView, ListItem, Static
 
 from ..agent.session import Session
 from ..infra.diagnostics import record_event
@@ -427,6 +427,12 @@ class PickScreen(ModalScreen):
     def on_mount(self) -> None:
         target = "#pick-search" if self._searchable else "#pick-list"
         self.query_one(target).focus()
+        self.on_resize()
+
+    def on_resize(self) -> None:
+        if self._detail is not None:
+            hint = "PgUp/PgDn Read · Enter Confirm · Esc Cancel" if self.size.width < 72 else "PgUp/PgDn read · ↑↓ select · Enter confirm · ESC cancel"
+            self.query_one(".pick-hint", Static).update(hint)
 
     def update_options(self, options: list[tuple]) -> None:
         self._options = list(options)
@@ -599,12 +605,13 @@ class CommandPalette(Vertical):
 
 
 class SessionPickerScreen(ModalScreen):
-    """居中会话选择器：搜索过滤、Enter 恢复、Ctrl+R 重命名、Del 删除（带确认）、ESC 取消。"""
+    """居中会话选择器：搜索过滤、Enter 恢复、Ctrl+R 重命名、Ctrl+D 删除。"""
 
     BINDINGS = [
         ("escape", "cancel", "Cancel"),
         ("down", "focus_list", "Select"),
         ("ctrl+r", "rename_session", "Rename"),
+        Binding("ctrl+d", "delete_session", "Delete", priority=True),
     ]
 
     def __init__(self, rows: list[dict], current_id: str | None, on_result) -> None:
@@ -616,13 +623,25 @@ class SessionPickerScreen(ModalScreen):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="pick-card"):
+            yield Static("Sessions", classes="pick-title")
             yield Input(placeholder="Search session title or ID…", id="picker-input")
             yield ListView(id="picker-list", classes="thin-scroll")
-            yield Static("↓ list · Enter resume · Ctrl+R rename · Del delete · ESC", classes="pick-hint")
+            with Horizontal(id="session-actions"):
+                yield Button("Delete", id="session-delete")
+            yield Static("Ctrl+R Rename · Ctrl+D Delete · Esc Close", classes="pick-hint")
 
     def on_mount(self) -> None:
         self._rebuild()
+        self._apply_layout()
         self.query_one("#picker-input", Input).focus()
+
+    def on_resize(self) -> None:
+        self._apply_layout()
+
+    def _apply_layout(self) -> None:
+        # 标题、搜索、操作和提示固定，列表只分配剩余高度，窄窗口也不挤压底部操作。
+        max_rows = max(1, min(16, int(self.size.height * 0.85) - 14))
+        self.query_one("#picker-list").styles.max_height = max_rows
 
     def set_rows(self, rows: list[dict]) -> None:
         self._rows = rows
@@ -685,15 +704,15 @@ class SessionPickerScreen(ModalScreen):
         if row is not None:
             self._finish(row["id"])
 
-    def on_key(self, event) -> None:
-        if event.key != "delete":
-            return
-        view = self.query_one("#picker-list", ListView)
-        item = view.highlighted_child
+    def action_delete_session(self) -> None:
+        item = self.query_one("#picker-list", ListView).highlighted_child
         if isinstance(item, SessionItem):
-            event.stop()
-            event.prevent_default()
             self.app.confirm_delete_session(item.row)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "session-delete":
+            event.stop()
+            self.action_delete_session()
 
     def action_cancel(self) -> None:
         self._finish(None)
@@ -705,25 +724,38 @@ class SessionPickerScreen(ModalScreen):
 
 
 class ProfileScreen(ModalScreen):
-    """画像摘要独立弹窗：内容在限高区域内滚动，不向聊天流追加长卡片。"""
+    """画像摘要独立弹窗：固定元信息与操作提示，正文单控件滚动。"""
 
     BINDINGS = [("escape", "close", "Close")]
 
-    def __init__(self, body: str, status: str, stale: bool = False) -> None:
+    def __init__(self, body: str, status: str, stale: bool = False,
+                 generated_at: str | None = None, fact_count: int | None = None,
+                 unique_count: int | None = None) -> None:
         super().__init__()
         self._body = body
         self._status = status
         self._stale = stale
+        self._metadata = ""
+        if generated_at is not None:
+            generated = generated_at[:16].replace("T", " ")
+            self._metadata = f"Generated {generated} · Facts {fact_count} · Unique {unique_count}"
 
     def compose(self) -> ComposeResult:
         with Vertical(id="profile-card"):
-            yield Static("User Profile", classes="pick-title")
-            with VerticalScroll(id="profile-body", classes="thin-scroll"):
-                yield Static(self._body, id="profile-text", markup=False)
+            yield Static("User Profile", id="profile-title")
+            yield Static("Personal memory overview", id="profile-subtitle")
             yield Static(self._status, id="profile-status",
                          classes="profile-status stale" if self._stale else "profile-status")
+            yield Static(self._metadata, id="profile-meta")
+            with VerticalScroll(id="profile-body", classes="thin-scroll"):
+                yield Static(self._body, id="profile-text", markup=False)
+            yield Static("↑↓ Scroll · PgUp/PgDn Page · Esc Close", id="profile-hint")
 
     def on_mount(self) -> None:
+        self.query_one("#profile-meta").display = bool(self._metadata)
+        # 短摘要保持紧凑；长正文改用固定弹窗高度，让滚动区分配剩余空间。
+        long_body = len(self._body) > 240 or self._body.count("\n") > 8
+        self.query_one("#profile-card").set_class(long_body, "long")
         body = self.query_one("#profile-body", VerticalScroll)
         body.can_focus = True
         body.focus()

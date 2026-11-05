@@ -11,6 +11,7 @@ from datetime import date
 from functools import partial
 from urllib.parse import urlsplit
 
+from rich.markup import escape
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.events import MouseDown, MouseUp
@@ -448,11 +449,18 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
             return
         self.push_screen(
             PickScreen(
-                f"Delete session \"{row['title']}\"? This cannot be undone",
-                [("Delete", True), ("Cancel", False)],
+                f"Delete session \"{escape(row['title'])}\" permanently?\nThis cannot be undone.",
+                [("Cancel", False), ("Delete permanently", True)],
                 partial(self._delete_session_result, row),
             )
         )
+
+    def _focus_session_picker_or_input(self) -> None:
+        for screen in reversed(self.screen_stack):
+            if isinstance(screen, SessionPickerScreen):
+                screen.query_one("#picker-list", ListView).focus()
+                return
+        self.query_one("#input", Input).focus()
 
     def _session_deletable(self, session_id: str) -> bool:
         """删除守卫：当前会话、正在生成回复的会话、队列引用的会话都不可删。
@@ -461,7 +469,7 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
         """
         if self.runtime.has_session and session_id == self.runtime.current.id:
             self.notify("Cannot delete the current session; use /new first.")
-            self.query_one("#input", Input).focus()
+            self._focus_session_picker_or_input()
             return False
         if (
             (self._pending_command and self._pending_command.session_id == session_id)
@@ -469,20 +477,26 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
             or any(item.session_id == session_id for item in self._queue)
         ):
             self.notify("Session is generating or has queued tasks; try again later.")
-            self.query_one("#input", Input).focus()
+            self._focus_session_picker_or_input()
             return False
         return True
 
     def _delete_session_result(self, row: dict, confirmed) -> None:
         if confirmed is not True:
-            self.query_one("#input", Input).focus()
+            self._focus_session_picker_or_input()
             return
         # 弹窗期间可能已排队切换/生成：确认时复查，不能删掉受保护的会话。
         if not self._session_deletable(row["id"]):
             return
         # 用弹窗打开前捕获的 row，不读列表当前高亮：模态期间列表可能被刷新重建。
         if self.sessions.exists(row["id"]):
-            self.sessions.delete(row["id"])
+            try:
+                self.sessions.delete(row["id"])
+            except OSError as exc:
+                record_event("session.delete_failed", exc)
+                self.notify("Session could not be deleted; the file was kept.", severity="warning")
+                self._focus_session_picker_or_input()
+                return
             self.refresh_sessions()
             self.notify("Session deleted.")
         else:
@@ -491,7 +505,7 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
         for screen in self.screen_stack:
             if isinstance(screen, SessionPickerScreen):
                 screen.set_rows(visible_sessions(self.sessions.list(100, with_tokens=False)))
-        self.query_one("#input", Input).focus()
+        self._focus_session_picker_or_input()
 
     # ---------- 对话流 ----------
 

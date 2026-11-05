@@ -22,7 +22,7 @@ _EVENTS = frozenset({
     "app.start", "app.stop", "cli.failed", "tui.failed", "chat.failed",
     "search.failed", "catchup.failed", "session.failed", "session.reload_failed",
     "queue.failed", "usage.failed", "reflection.failed", "reading.changed",
-    "generation.started", "generation.finished", "session.scan_failed",
+    "generation.started", "generation.finished", "session.scan_failed", "session.delete_failed",
     "command.failed", "cursor.changed", "undo.failed",
     "git_sync.failed", "git_sync.scheduler_failed", "git_sync.status_failed",
     "reflection.schedule_failed", "reflection.state_failed", "reflection.summary_failed",

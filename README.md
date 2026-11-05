@@ -206,19 +206,19 @@ Spark 使用 MaaS 的 Bearer API Key；适配层保留服务端采样默认值�
 | 命令 | 作用 |
 | --- | --- |
 | `/new` | 结束当前会话，进入新会话（发送首条消息后创建） |
-| `/sessions` | 打开居中会话选择器：输入即过滤、Enter 恢复、Ctrl+R 重命名、Del 删除（带确认）、ESC 取消 |
+| `/sessions` | 打开居中会话选择器：输入即过滤、Enter 恢复、Ctrl+R 重命名、Ctrl+D 永久删除（默认 Cancel 的二次确认）、ESC 取消 |
 | `/compact` | 立即压缩上下文 |
 | `/undo` | 撤销最后一轮提问及后续回复，回填原消息重新编辑；生成期间立即取消并只撤销当前回合 |
 | `/summary` | 查看当前会话摘要 |
 | `/status` | 会话、模型、检索模式、上下文和待确认状态 |
-| `/git` | 打开 Git 管理界面：查看仓库、Remote/Upstream、工作区与未推送提交，`Ctrl+S` 手动同步（需 `Enter` 二次确认） |
+| `/git` | 打开 Git 管理界面：查看仓库、Remote/Upstream、工作区与未推送提交，`Ctrl+S` 打开同步确认（默认 Cancel，显式选择 Synchronize 才执行） |
 | `/model` | 搜索切换模型；`Ctrl+P` 打开独立供应商管理，`Ctrl+R` 刷新，`Ctrl+N` 输入自定义模型名。列表先用缓存或预设打开，再后台刷新；`/model refresh` 跳过旧缓存 |
 | `/think` | 切换思考强度：默认 / low / medium / high，仅模型支持时可选，实时生效并写回配置 |
 | `/context` | 切换上下文长度：档位按当前模型上限生成，也可自定义，下一轮即生效 |
 | `/setup` | 提示完整配置向导需在终端运行 `syvrio setup`（内置厂商的 Key 增删在 `/model` 按 `Ctrl+P` 管理） |
 | `/rename <title>` | 重命名会话 |
-| `/import <path> [--apply]` | 导入文件或当前层目录；默认预览，`--apply` 重新分析并写入。不带路径时弹出输入框 |
-| `/inferences` | 查看、确认、拒绝或纠正独立推断 |
+| `/import <path> [--apply]` | 导入文件或当前层目录；默认预览，`--apply` 在解析和模型调用前进行一次批次确认，确认后重新分析并写入。不带路径时弹出输入框 |
+| `/inferences` | 查看、确认、拒绝或编辑独立推断；C Confirm、R Reject、E Edit，日常审查不额外弹确认 |
 | `/profile [refresh [次数]]` | 查看已生成的画像摘要（只读缓存，不调用模型）；refresh 生成摘要并提炼推断 |
 | `/dream [次数\|status\|cancel\|resume]` | 启动、查看或取消后台增量回顾，默认最多一次请求 |
 | `/pending` | 逐条处理待确认候选：确认写入 / 拒绝 / 改写后写入，队列清空前自动进入下一条 |
@@ -231,7 +231,7 @@ Spark 使用 MaaS 的 Bearer API Key；适配层保留服务端采样默认值�
 
 `/git` 打开独立的 Git 管理界面，展示真实仓库状态：仓库是否初始化、Remote 与 Upstream、当前分支、工作区变更数、未推送提交数、最近 Commit 与最近成功 Push 时间、自动同步开关、每日时间、下次执行时间、最近结果与失败原因。尚未配置 Remote/Upstream 或无法确认的数量显示 `Not configured` / `Unknown`，不会因为配置了 Remote 就声称远程已连通。
 
-`Ctrl+S` 只在 Git 管理界面内有效，且不会直接提交：先弹出确认界面，`Enter` 确认后由后台 Worker 执行，`Esc` 取消。执行阶段逐项显示 Checking working tree / Creating commit / Pushing to remote / Refreshing status；没有实际执行的阶段标记 `Skipped`，不显示虚构进度百分比。同步过程中可以关闭界面，Git 操作与锁会继续完成；任务执行中重复按 `Ctrl+S` 会被拒绝。若终端把 `Ctrl+S` 当作 XON/XOFF 流控拦截，可点击界面中的 Synchronize 行，或自行调整终端设置（Syvrio 不修改系统终端配置）。
+`Ctrl+S` 只在 Git 管理界面内有效，且不会直接提交：先弹出确认界面，说明本地提交、远端 Push 及可获取的变更数量；默认聚焦 Cancel，显式选择 Synchronize 后才由后台 Worker 执行，`Esc` 取消。执行阶段逐项显示 Checking working tree / Creating commit / Pushing to remote / Refreshing status；没有实际执行的阶段标记 `Skipped`，不显示虚构进度百分比。同步过程中可以关闭界面，Git 操作与锁会继续完成；任务执行中重复按 `Ctrl+S` 会被拒绝。若终端把 `Ctrl+S` 当作 XON/XOFF 流控拦截，可点击界面中的 Synchronize 行，或自行调整终端设置（Syvrio 不修改系统终端配置）。
 
 同步规则：
 

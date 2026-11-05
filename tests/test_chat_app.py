@@ -124,6 +124,88 @@ async def test_inference_screen_single_pending_confirm_refreshes_in_place(tmp_pa
         assert app.service.list_inferences()[0].status == "confirmed"
         assert len(app.service.store.entries()) == 1  # 确认不写入事实
         assert not app.busy
+        assert screen._filter == "hypothesis"
+        assert screen._current() is None
+        assert "Pending 0" in str(screen.query_one("#inference-filters").render())
+        assert "Confirmed 1" in str(screen.query_one("#inference-filters").render())
+        assert "Confirmed. 0 pending remaining." in str(screen.query_one("#inference-message").render())
+
+
+async def test_inference_screen_edit_labels_and_shortcut_letters_in_editor(tmp_path):
+    app = build_app(tmp_path, [])
+    source = app.service.note("合成事实")
+    app.service.propose_inference("可能喜欢安静活动", [source.id])
+    async with app.run_test(size=(100, 30)) as pilot:
+        screen = await _open_inferences(app, pilot)
+        assert str(screen.query_one("#inference-correct", Button).label) == "Edit"
+        assert str(screen.query_one("#inference-hint").render()) == "C Confirm · R Reject · E Edit · Esc Close"
+        await pilot.press("e")
+        await pilot.pause()
+        editor = screen.query_one("#inference-editor")
+        editor.load_text("")
+        await pilot.press("c", "r", "e")
+        assert editor.text == "cre"
+        assert screen._editing
+        assert str(screen.query_one("#inference-hint").render()) == "Ctrl+S Save · Esc Cancel"
+
+
+async def test_inference_sources_use_one_fact_scan(tmp_path, monkeypatch):
+    app = build_app(tmp_path, [])
+    sources = [app.service.note(f"合成来源 {index}") for index in range(3)]
+    for index in range(6):
+        app.service.propose_inference(f"合成推断 {index}", [sources[index % 3].id])
+    items = app.service.list_inferences()
+    monkeypatch.setattr(app.service, "list_inferences", lambda: items)
+    calls = []
+    entries = app.service.store.entries
+
+    def counted_entries(*args, **kwargs):
+        calls.append(kwargs)
+        return entries(*args, **kwargs)
+
+    monkeypatch.setattr(app.service.store, "entries", counted_entries)
+    monkeypatch.setattr(app.service.store, "find", lambda *_: pytest.fail("来源不得逐个 find 全库扫描"))
+    async with app.run_test(size=(100, 30)) as pilot:
+        await app.workers.wait_for_complete()
+        before = len(calls)
+        screen = await _open_inferences(app, pilot)
+        assert len(calls) - before == 1
+        assert calls[-1] == {"include_inactive": True}
+        assert "合成来源 0" in str(screen.query_one("#inference-detail-sources").render())
+
+
+async def test_inference_edit_failure_preserves_draft_and_retries(tmp_path, monkeypatch):
+    app = build_app(tmp_path, [])
+    source = app.service.note("合成事实")
+    item = app.service.propose_inference("原始假设", [source.id])
+    original_review = app.service.review_inference
+
+    def fail(*args, **kwargs):
+        raise ValueError("合成保存失败")
+
+    monkeypatch.setattr(app.service, "review_inference", fail)
+    async with app.run_test(size=(100, 30)) as pilot:
+        screen = await _open_inferences(app, pilot)
+        await pilot.press("e")
+        await pilot.pause()
+        revised = "修改后的完整草稿\nSecond line with C R E letters."
+        editor = screen.query_one("#inference-editor")
+        editor.load_text(revised)
+        await pilot.press("ctrl+s")
+        await _finish_inference_worker(app, pilot)
+        assert screen._editing and editor.display
+        assert editor.text == revised
+        assert editor.has_focus
+        assert "合成保存失败" in str(screen.query_one("#inference-message").render())
+        assert not screen.query_one("#inference-save", Button).disabled
+
+        monkeypatch.setattr(app.service, "review_inference", original_review)
+        await pilot.press("ctrl+s")
+        await _finish_inference_worker(app, pilot)
+        assert not screen._editing
+        assert screen._current().id != item.id
+        assert screen._current().text == revised
+        assert "Edit saved as a new pending hypothesis." in str(screen.query_one("#inference-message").render())
 
 
 async def test_inference_screen_filters_and_readonly_states(tmp_path):
@@ -317,7 +399,12 @@ async def test_inference_screen_list_and_detail_scroll(tmp_path):
 async def test_inference_screen_reopen_and_responsive_layout(tmp_path):
     from syvrio.app.inference_screen import InferenceScreen
 
-    for size, layout in (((120, 36), "horizontal"), ((70, 30), "vertical")):
+    for size, layout in (
+        ((120, 36), "horizontal"),
+        ((100, 30), "horizontal"),
+        ((80, 24), "vertical"),
+        ((60, 20), "vertical"),
+    ):
         app = build_app(tmp_path / f"{size[0]}x{size[1]}", [])
         source = app.service.note("合成事实")
         app.service.propose_inference("可能喜欢安静活动", [source.id])
@@ -408,9 +495,16 @@ async def test_profile_view_does_not_invoke_model(tmp_path, monkeypatch):
         assert not app.busy
         assert isinstance(app.screen, ProfileScreen)
         assert "缓存中的画像正文" in str(app.screen.query_one("#profile-text", Static).content)
+        assert str(app.screen.query_one("#profile-title").render()) == "User Profile"
+        assert str(app.screen.query_one("#profile-subtitle").render()) == "Personal memory overview"
+        assert str(app.screen.query_one("#profile-status").render()) == "Up to date"
+        metadata = str(app.screen.query_one("#profile-meta").render())
+        assert "Generated " in metadata and "Facts 1" in metadata and "Unique 1" in metadata
+        assert str(app.screen.query_one("#profile-hint").render()) == "↑↓ Scroll · PgUp/PgDn Page · Esc Close"
         await pilot.press("escape")
         await pilot.pause()
         assert not isinstance(app.screen, ProfileScreen)
+        assert app.query_one("#input", Input).has_focus
 
 
 async def test_profile_view_shows_empty_state_without_cache(tmp_path):
@@ -424,6 +518,8 @@ async def test_profile_view_shows_empty_state_without_cache(tmp_path):
         await pilot.pause()
         assert isinstance(app.screen, ProfileScreen)
         assert "No profile summary yet" in str(app.screen.query_one("#profile-text", Static).content)
+        assert str(app.screen.query_one("#profile-status").render()) == "Not generated"
+        assert not app.screen.query_one("#profile-meta").display
         await pilot.press("escape")
         await pilot.pause()
 
@@ -448,6 +544,79 @@ async def test_profile_view_marks_outdated_summary(tmp_path):
         assert "Outdated" in str(app.screen.query_one("#profile-status", Static).content)
         await pilot.press("escape")
         await pilot.pause()
+
+
+async def test_profile_view_reports_cache_read_failure(tmp_path, monkeypatch):
+    import asyncio
+    from syvrio.app.chat_widgets import ProfileScreen
+
+    app = build_app(tmp_path, [])
+    monkeypatch.setattr(app.service.reflection, "profile_summary", lambda: (_ for _ in ()).throw(OSError("合成缓存故障")))
+    async with app.run_test(size=(80, 24)) as pilot:
+        app._command("/profile")
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        await pilot.pause()
+        assert isinstance(app.screen, ProfileScreen)
+        assert str(app.screen.query_one("#profile-status").render()) == "Cache unavailable"
+        assert "Could not read" in str(app.screen.query_one("#profile-text").content)
+        assert not app.screen.query_one("#profile-meta").display
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.query_one("#input", Input).has_focus
+
+
+async def test_profile_long_mixed_text_scrolls_and_resizes(tmp_path):
+    import asyncio
+    from syvrio.app.chat_widgets import ProfileScreen
+
+    app = build_app(tmp_path, [])
+    app.service.note("合成偏好", topic="preferences")
+    paragraphs = [
+        "日常阅读偏好清淡、简洁且可验证的信息组织方式，保留自然段落与适当留白。" * 12,
+        "For technical work, prefer small iterations, explicit evidence, Python 3.12 and Textual interfaces." * 8,
+        "中英文与数字混排时保持完整语义，例如 120×36、80×24，以及 API、JSON、Markdown 等术语。" * 12,
+        "最后一段用于验证滚动到底部后正文仍然完整，标题与底部快捷键提示不会随正文移动。" * 12,
+    ]
+    summary_text = "\n\n".join(paragraphs)
+    app.service.reflection.run("profile", 1, refresh_summary=True, summary_model=lambda payload: "短摘要")
+    cache_path = app.service.reflection.summary_path
+    cached = json.loads(cache_path.read_text(encoding="utf-8"))
+    cached["text"] = summary_text
+    cache_path.write_text(json.dumps(cached, ensure_ascii=False), encoding="utf-8")
+    async with app.run_test(size=(120, 36)) as pilot:
+        app._command("/profile")
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, ProfileScreen)
+        assert str(screen.query_one("#profile-text").content) == summary_text
+        body = screen.query_one("#profile-body")
+        for width, height in ((120, 36), (100, 30), (80, 24), (60, 20)):
+            await pilot.resize_terminal(width, height)
+            await pilot.pause()
+            card = screen.query_one("#profile-card").region
+            assert card.width <= width and card.height <= height
+            assert card.x >= 0 and card.y >= 0 and card.bottom <= height
+            assert screen.query_one("#profile-title").region.bottom <= body.region.y
+            hint = screen.query_one("#profile-hint").region
+            assert body.region.bottom <= hint.y
+            assert hint.bottom <= card.bottom
+            body.scroll_end(animate=False)
+            await pilot.pause()
+            assert body.scroll_y > 0
+            assert screen.query_one("#profile-hint").region == hint
+            await pilot.press("pageup")
+            await pilot.pause()
+            assert body.scroll_y >= 0
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.query_one("#input", Input).has_focus
+        app._command("/profile")
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        await pilot.pause()
+        assert isinstance(app.screen, ProfileScreen)
+        assert str(app.screen.query_one("#profile-text").content) == summary_text
 
 
 async def test_profile_refresh_updates_cache_in_background(tmp_path, monkeypatch):
@@ -517,6 +686,13 @@ async def test_import_command_uses_worker_and_releases_busy(tmp_path, monkeypatc
     app = build_app(tmp_path, [])
     async with app.run_test() as pilot:
         app._command(f'/import "{path}"' + (" --apply" if apply else ""))
+        if apply:
+            await pilot.pause()
+            assert "Confirm Memory Import" in str(app.screen.query_one(".pick-title").render())
+            assert app.screen.query_one("#pick-list").highlighted_child.value is False
+            assert not app.busy and not app.service.store.entries()
+            app.screen.query_one("#pick-list").index = 1
+            await pilot.press("enter")
         for _ in range(100):
             await pilot.pause()
             if not app.busy:
@@ -536,6 +712,79 @@ async def test_import_error_releases_busy(tmp_path):
                 break
         assert not app.busy
         assert any("import failed" in str(card.render()).lower() for card in app.query(".card"))
+
+
+async def test_import_apply_cancel_starts_no_parsing_or_writes(tmp_path, monkeypatch):
+    app = build_app(tmp_path, [])
+    path = tmp_path / "synthetic.txt"
+    path.write_text("合成导入内容", encoding="utf-8")
+    monkeypatch.setattr(
+        "syvrio.app.chat_commands.read_document",
+        lambda *_: pytest.fail("取消前不得解析文档"),
+    )
+    async with app.run_test(size=(80, 24)) as pilot:
+        app._command(f'/import "{path}" --apply')
+        await pilot.pause()
+        assert "Confirm Memory Import" in str(app.screen.query_one(".pick-title").render())
+        assert str(path) in str(app.screen.query_one("#pick-detail-text").content)
+        assert app.screen.query_one("#pick-list").highlighted_child.value is False
+        for width, height in ((120, 36), (100, 30), (80, 24), (60, 20)):
+            await pilot.resize_terminal(width, height)
+            await pilot.pause()
+            card = app.screen.query_one("#pick-card").region
+            assert card.width <= width and card.height <= height
+            assert app.screen.query_one("#pick-list").region.bottom <= card.bottom
+            hint_widget = app.screen.query_one(".pick-hint")
+            assert hint_widget.region.height >= 1 and hint_widget.region.bottom <= card.bottom
+            if width == 60:
+                assert str(hint_widget.render()) == "PgUp/PgDn Read · Enter Confirm · Esc Cancel"
+                assert hint_widget.region.height == 1
+        await pilot.press("enter")
+        await pilot.pause()
+        assert not app.busy and not app.service.store.entries()
+        assert app.query_one("#input", Input).has_focus
+        assert any("Import cancelled" in str(card.render()) for card in app.query(".card"))
+
+        app._command(f'/import "{path}" --apply')
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not app.busy and not app.service.store.entries()
+
+
+async def test_import_apply_confirms_once_for_multiple_files(tmp_path, monkeypatch):
+    import asyncio
+    from syvrio.memory import service as module
+    from syvrio.memory.models import Candidate
+
+    extracted = []
+
+    class Extractor:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def extract(self, text):
+            extracted.append(text)
+            return ExtractionResult(memories=[Candidate(text=text, confidence=0.95)])
+
+    monkeypatch.setattr(module, "ImportExtractor", Extractor)
+    source = tmp_path / "batch"
+    source.mkdir()
+    (source / "one.txt").write_text("合成第一条记忆", encoding="utf-8")
+    (source / "two.txt").write_text("合成第二条记忆", encoding="utf-8")
+    app = build_app(tmp_path, [])
+    async with app.run_test(size=(100, 30)) as pilot:
+        app._command(f'/import "{source}" --apply')
+        await pilot.pause()
+        assert "Confirm Memory Import" in str(app.screen.query_one(".pick-title").render())
+        app.screen.query_one("#pick-list").index = 1
+        await pilot.press("enter")
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        await pilot.pause()
+        assert len(extracted) == 2
+        assert {entry.text for entry in app.service.store.entries()} == {"合成第一条记忆", "合成第二条记忆"}
+        assert not app.busy
+        assert "PickScreen" not in type(app.screen).__name__
 
 
 def build_app(tmp_path, turns, extract_on_exit=False, search=None, git=None):
@@ -1269,7 +1518,15 @@ async def test_model_picker_can_remove_provider_key(tmp_path, monkeypatch):
                 break
 
         confirm = app.screen.query_one("#pick-list", ListView)
-        confirm.index = 0
+        assert confirm.highlighted_child.value is False  # 默认 Cancel，Enter 不会误删凭据
+        await pilot.press("escape")
+        await pilot.pause()
+        assert keys["SILICONFLOW_API_KEY"] == "sk-test"
+
+        app._provider_selected("remove", ("siliconflow", "SiliconFlow", True))
+        await pilot.pause()
+        confirm = app.screen.query_one("#pick-list", ListView)
+        confirm.index = 1
         confirm.focus()
         await pilot.press("enter")
         for _ in range(50):
@@ -1279,6 +1536,29 @@ async def test_model_picker_can_remove_provider_key(tmp_path, monkeypatch):
 
         assert "SILICONFLOW_API_KEY" not in keys
         assert "provider removed" in str(app.query(".card")[-1].render())
+
+
+async def test_provider_removal_failure_keeps_key_and_ui_usable(tmp_path, monkeypatch):
+    import sys
+    import types
+
+    keys = {"SILICONFLOW_API_KEY": "sk-test"}
+    fake = types.ModuleType("keyring")
+    fake.get_password = lambda service_name, name: keys.get(name)
+
+    def fail_delete(service_name, name):
+        raise OSError("synthetic keyring failure")
+
+    fake.delete_password = fail_delete
+    monkeypatch.setitem(sys.modules, "keyring", fake)
+    app = build_app(tmp_path, [])
+    async with app.run_test(size=(80, 24)) as pilot:
+        app._remove_provider_result("siliconflow", True)
+        await pilot.pause()
+        assert keys["SILICONFLOW_API_KEY"] == "sk-test"
+        assert "Could not remove SiliconFlow" in str(app.query(".card")[-1].render())
+        assert not app.query_one("#input", Input).disabled
+        assert app.query_one("#input", Input).has_focus
 
 
 async def test_model_picker_provider_menu_returns_to_models(tmp_path, monkeypatch):
@@ -1722,8 +2002,9 @@ async def test_delete_session_uses_captured_row(tmp_path):
         await pilot.pause()
         # 模态打开期间模拟列表刷新（如后台回复完成后的 refresh_sessions）。
         app.refresh_sessions()
-        # 走真实模态交互：高亮默认在第一项"确认删除"上，Enter 触发回调。
+        # 默认第一项是 Cancel；显式选择 Delete permanently 才执行。
         assert "cannot be undone" in str(app.screen.query_one(".pick-title").render())
+        app.screen.query_one("#pick-list").index = 1
         await pilot.press("enter")
         for _ in range(100):
             await pilot.pause()
@@ -1765,6 +2046,22 @@ async def test_delete_confirmation_rechecks_current_session(tmp_path):
         await pilot.pause()
 
         assert store.exists(session.id)
+
+
+async def test_session_delete_failure_keeps_file_and_ui_usable(tmp_path, monkeypatch):
+    app = build_app(tmp_path, [])
+    session = app.sessions.create()
+    row = {"id": session.id, "title": "Synthetic session"}
+    notifications = []
+    monkeypatch.setattr(app, "notify", lambda message, **kwargs: notifications.append(message))
+    monkeypatch.setattr(app.sessions, "delete", lambda *_: (_ for _ in ()).throw(OSError("synthetic delete failure")))
+    async with app.run_test(size=(80, 24)) as pilot:
+        app._delete_session_result(row, True)
+        await pilot.pause()
+        assert app.sessions.exists(session.id)
+        assert any("Session could not be deleted" in message for message in notifications)
+        assert "Session deleted." not in notifications
+        assert not app.query_one("#input", Input).disabled
 
 
 async def test_model_picker_drains_pending_session_intent(tmp_path):
@@ -2510,6 +2807,16 @@ async def test_session_picker_search_resume_and_delete(tmp_path):
         assert all(item.size.height <= 3 for item in picker.query("#picker-list ListItem"))
         hint = picker.query_one(".pick-hint", Static)
         assert hint.region.bottom <= picker.query_one("#pick-card").region.bottom
+        assert str(picker.query_one(".pick-title").render()) == "Sessions"
+        for width, height in ((120, 36), (100, 30), (80, 24), (60, 20)):
+            await pilot.resize_terminal(width, height)
+            await pilot.pause()
+            card = picker.query_one("#pick-card").region
+            assert card.width <= width and card.height <= height
+            assert picker.query_one("#session-delete", Button).region.bottom <= card.bottom
+            assert picker.query_one(".pick-hint", Static).region.bottom <= card.bottom
+        await pilot.resize_terminal(120, 40)
+        await pilot.pause()
 
         picker.query_one("#picker-input", Input).value = "java"
         await pilot.pause()
@@ -2524,7 +2831,7 @@ async def test_session_picker_search_resume_and_delete(tmp_path):
                 break
         assert app.runtime.current.id == s1.id
 
-        # 再次打开：过滤锁定另一条会话，Del 删除，确认后列表同步刷新
+        # 再次打开：Delete 单键不触发永久删除，Ctrl+D 打开默认 Cancel 的确认。
         widget.value = "/sessions"
         await pilot.press("enter")
         for _ in range(50):
@@ -2535,11 +2842,29 @@ async def test_session_picker_search_resume_and_delete(tmp_path):
         picker.query_one("#picker-input", Input).value = "租房"
         picker.on_input_changed(Input.Changed(picker.query_one("#picker-input", Input), "租房"))
         await pilot.pause()
-        await pilot.press("down")  # 焦点从搜索框移交列表（搜索框的 Del 是编辑按键）
         await pilot.press("delete")
         await pilot.pause()
-        assert "PickScreen" in type(app.screen).__name__  # 删除确认弹窗已弹出
-        await pilot.press("enter")  # 确认删除
+        assert app.screen is picker and store.exists(s2.id)
+        assert picker.query_one("#picker-input", Input).has_focus
+
+        await pilot.press("ctrl+d")
+        await pilot.pause()
+        assert "PickScreen" in type(app.screen).__name__
+        confirmation = app.screen.query_one("#pick-list")
+        assert confirmation.highlighted_child.value is False
+        await pilot.press("enter")  # 默认 Cancel
+        await pilot.pause()
+        assert app.screen is picker and store.exists(s2.id)
+        await pilot.press("ctrl+d")
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.screen is picker and store.exists(s2.id)
+
+        await pilot.click("#session-delete")  # 鼠标入口使用同一确认流程
+        await pilot.pause()
+        app.screen.query_one("#pick-list").index = 1
+        await pilot.press("enter")
         for _ in range(100):
             await pilot.pause()
             if not store.exists(s2.id):
@@ -4317,6 +4642,28 @@ def _remote_log(remote) -> list[str]:
     return [line for line in completed.stdout.splitlines() if line]
 
 
+async def test_git_confirmation_responsive_layout(tmp_path):
+    app = build_app(tmp_path, [])
+    status = {
+        "branch": "evolution[review]",
+        "upstream": "origin/feature-memory-evolution",
+        "modified": 3,
+        "unpushed": 2,
+    }
+    async with app.run_test(size=(120, 36)) as pilot:
+        app.push_screen(GitConfirmScreen(status, lambda value: None))
+        await pilot.pause()
+        assert "evolution[review]" in str(app.screen.query_one("#git-confirm").content)
+        for width, height in ((120, 36), (100, 30), (80, 24), (60, 20)):
+            await pilot.resize_terminal(width, height)
+            await pilot.pause()
+            card = app.screen.query_one("#git-card").region
+            assert card.width <= width and card.height <= height
+            assert app.screen.query_one("#git-confirm-actions").region.bottom <= card.bottom
+            assert app.screen.query_one(".pick-hint").region.bottom <= card.bottom
+            assert app.screen.query_one("#git-cancel", Button).has_focus
+
+
 async def test_git_screen_requires_explicit_confirmation(tmp_path):
     import asyncio
 
@@ -4338,8 +4685,16 @@ async def test_git_screen_requires_explicit_confirmation(tmp_path):
         await pilot.press("ctrl+s")
         await pilot.pause()
         assert isinstance(app.screen, GitConfirmScreen)
-        assert _remote_log(remote) == before  # 未按 Enter 不执行
+        assert app.screen.query_one("#git-cancel", Button).has_focus
+        assert _remote_log(remote) == before
 
+        await pilot.press("enter")  # 默认 Cancel，Enter 不得直接同步
+        await pilot.pause()
+        assert isinstance(app.screen, GitScreen)
+        assert _remote_log(remote) == before
+
+        await pilot.press("ctrl+s")
+        await pilot.pause()
         await pilot.press("escape")
         await pilot.pause()
         assert isinstance(app.screen, GitScreen)
@@ -4348,7 +4703,11 @@ async def test_git_screen_requires_explicit_confirmation(tmp_path):
         await pilot.press("ctrl+s")
         await pilot.pause()
         assert isinstance(app.screen, GitConfirmScreen)
-        await pilot.press("enter")
+        await pilot.click("#git-synchronize")
+        for _ in range(100):
+            await pilot.pause()
+            if app._git_sync_running:
+                break
         await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
         await pilot.pause()
 
@@ -4388,7 +4747,7 @@ async def test_git_sync_failure_shows_reason(tmp_path):
         await pilot.pause()
         await pilot.press("ctrl+s")
         await pilot.pause()
-        await pilot.press("enter")
+        await pilot.click("#git-synchronize")
         await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
         await pilot.pause()
 
@@ -4422,7 +4781,7 @@ async def test_closing_git_screen_does_not_cancel_sync(tmp_path):
         await pilot.pause()
         await pilot.press("ctrl+s")
         await pilot.pause()
-        await pilot.press("enter")
+        await pilot.click("#git-synchronize")
         try:
             assert await asyncio.to_thread(started.wait, 5)
             await pilot.pause()

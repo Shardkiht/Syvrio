@@ -68,6 +68,9 @@ APP_CSS = """
     #sessions > ListItem > Vertical { height: auto; }
     .session-title { color: #d4d4d4; width: 1fr; overflow-x: hidden; text-overflow: ellipsis; }
     .session-meta { color: #8e8e8e; }
+    #session-actions { height: 1; margin-top: 1; }
+    #session-actions Button { height: 1; min-width: 0; border: none; background: #242424; color: #d4d4d4; padding: 0 2; }
+    #session-actions Button:hover, #session-actions Button:focus { background: #303030; color: $accent; }
     /* 当前会话保留左线作为非颜色标识，低饱和底色区分焦点。 */
     #sessions > ListItem.-highlight { background: #272727; }
     #sessions > ListItem.current { background: #272727; border-left: heavy $accent; }
@@ -121,18 +124,30 @@ APP_CSS = """
     .cmd-desc { color: #a3a3a3; }
 
     PickScreen, SessionPickerScreen, TextInputScreen, ProfileScreen { align: center middle; background: #0d0d0d 75%; }
-    #profile-card { width: 72; max-width: 92%; height: auto; max-height: 80%; background: $panel; border: round #484848; padding: 1 2; }
-    #profile-body { height: auto; max-height: 58vh; min-height: 6; padding: 0 1; background: $bg; }
+    #profile-card { width: 78; max-width: 92%; height: auto; max-height: 85%; background: $panel; border: round #484848; padding: 1 2; }
+    #profile-title { color: $accent; text-style: bold; }
+    #profile-subtitle { color: $faint; margin-bottom: 1; }
+    #profile-card.long { height: 85%; }
+    #profile-body { height: auto; max-height: 55vh; min-height: 3; margin-top: 1; padding: 1 2; background: $bg; }
+    #profile-card.long #profile-body { height: 1fr; }
     #profile-text { height: auto; width: 1fr; color: #d5d5d5; }
-    .profile-status { height: auto; color: #858585; margin-top: 1; }
+    .profile-status { height: auto; color: $accent; }
     .profile-status.stale { color: #d1a05a; }
+    #profile-meta { height: auto; color: #858585; }
+    #profile-hint { height: auto; color: $warm; margin-top: 1; }
     GitScreen, GitConfirmScreen { align: center middle; background: #0d0d0d 75%; }
     #git-card { width: 72; max-width: 92%; height: auto; max-height: 85%; background: $panel; border: round #484848; padding: 1 2; }
     #git-body { height: auto; max-height: 55vh; min-height: 8; padding: 0 1; background: $bg; }
     #git-content { height: auto; width: 1fr; color: #d5d5d5; }
     #git-action { height: 1; color: $accent; margin-top: 1; }
     #git-confirm { height: auto; color: #d5d5d5; }
+    GitConfirmScreen #git-card { width: 68; height: auto; max-height: 85%; }
+    #git-confirm-body { height: auto; max-height: 35vh; min-height: 3; }
+    #git-confirm-actions { height: 1; margin-top: 1; }
+    #git-confirm-actions Button { height: 1; min-width: 0; border: none; background: #242424; color: #d4d4d4; margin-right: 1; padding: 0 2; }
+    #git-confirm-actions Button:hover, #git-confirm-actions Button:focus { background: #303030; color: $accent; }
     #pick-card { width: 64; height: auto; max-height: 70%; background: $panel; border: round #484848; padding: 1 2; }
+    SessionPickerScreen #pick-card { max-width: 92%; max-height: 85%; }
     #picker-input, #pick-search, #pick-input { width: 1fr; background: #171717; color: #dedede; border: round #414141; }
     #picker-input:focus, #pick-search:focus, #pick-input:focus { background: #222222; border: round #6cb6ff; }
     #picker-input, #pick-search { margin-bottom: 1; }
@@ -153,7 +168,7 @@ APP_CSS = """
     ModelPickerScreen #pick-list { height: 1fr; min-height: 1; }
     /* Full pending text scrolls independently; decision actions stay visible. */
     #pick-card.has-detail { width: 76; max-width: 90%; height: auto; max-height: 85%; }
-    #pick-detail { height: auto; max-height: 30vh; min-height: 1; margin-bottom: 1; padding: 0 1; background: $bg; }
+    #pick-detail { height: auto; max-height: 25vh; min-height: 1; margin-bottom: 1; padding: 0 1; background: $bg; }
     #pick-detail-text { height: auto; width: 1fr; color: #d5d5d5; }
     #pick-card.has-detail #pick-list { height: auto; max-height: 6; min-height: 3; }
     .pick-hint { color: $warm; margin-top: 1; }
