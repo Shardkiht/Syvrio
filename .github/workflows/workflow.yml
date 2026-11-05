@@ -42,7 +42,10 @@ jobs:
           from pathlib import Path
 
           version = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
-          artifacts = list(Path("dist").iterdir())
+          artifacts = [
+              item for item in Path("dist").iterdir()
+              if item.is_file() and item.name.endswith((".whl", ".tar.gz"))
+          ]
           wheels = [item for item in artifacts if item.name == f"syvrio-{version}-py3-none-any.whl"]
           sdists = [item for item in artifacts if item.name == f"syvrio-{version}.tar.gz"]
           assert len(artifacts) == 2 and len(wheels) == 1 and len(sdists) == 1, artifacts
