@@ -23,7 +23,9 @@ _EVENTS = frozenset({
     "search.failed", "catchup.failed", "session.failed", "session.reload_failed",
     "queue.failed", "usage.failed", "reflection.failed", "reading.changed",
     "generation.started", "generation.finished", "session.scan_failed",
-    "command.failed", "cursor.changed",
+    "command.failed", "cursor.changed", "undo.failed",
+    "git_sync.failed", "git_sync.scheduler_failed", "git_sync.status_failed",
+    "reflection.schedule_failed", "reflection.state_failed", "reflection.summary_failed",
 })
 _FIELDS = frozenset({
     "follow", "selecting", "selected", "grabbed", "scroll_y", "scroll_max",

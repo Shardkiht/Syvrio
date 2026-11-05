@@ -87,6 +87,18 @@ def test_unknown_events_and_unconfigured_logging_are_ignored():
     assert len(read_events(path)) == 2
 
 
+def test_every_source_event_is_allowlisted():
+    # 事件名不在白名单会被静默丢弃，曾让画像摘要失败原因无法排查。
+    import re
+
+    source_root = Path(diagnostics.__file__).resolve().parents[1]
+    used = set()
+    for path in source_root.rglob("*.py"):
+        used.update(re.findall(r'record_event\("([a-z._]+)"', path.read_text(encoding="utf-8")))
+    assert used
+    assert used <= diagnostics._EVENTS, f"未登记的事件: {sorted(used - diagnostics._EVENTS)}"
+
+
 def test_full_queue_does_not_block_producer(monkeypatch):
     from queue import Full
 
