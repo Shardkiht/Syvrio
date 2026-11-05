@@ -234,6 +234,8 @@ In-session commands:
 
 Sync rules:
 
+- The vault must itself be the Git worktree root. If it sits inside another repository without its own `.git`, initialization, commits, sync and pushes are refused so parent-repository files are never included.
+- First-time initialization and regular sync both inspect the files about to be committed, including already staged entries. `.env`, `keys.env`, key and credential files block the commit; existing files and the index are left untouched.
 - Stage and commit only when the working tree has changes; never create empty commits. Push is checked independently, so existing unpushed commits are pushed even when nothing new was committed.
 - A failed push preserves the local commit. Later manual or scheduled runs push the existing commit without creating another one.
 - Never force-push, pull, merge, rebase, or reset. A diverged remote stops automatic pushing and requires manual handling; missing Remote/Upstream produces setup guidance.

@@ -190,6 +190,8 @@ class MemoryService:
     def init_vault(self) -> dict:
         with self._git_lock:
             with self.write_lock:
+                # 先确认仓库归属，避免在父仓库子目录里写出 Vault 文件后再失败。
+                created = self.repo.ensure_init()
                 self.store.ensure()
                 self.queue.dir.mkdir(parents=True, exist_ok=True)
                 (self.config.vault / "sessions").mkdir(parents=True, exist_ok=True)
@@ -204,8 +206,7 @@ class MemoryService:
                     gitignore.write_text(VAULT_GITIGNORE, encoding="utf-8")
                 # 老记忆库补齐派生缓存和同步状态的忽略规则；旧文件可能没有末尾换行。
                 ensure_runtime_gitignore(self.config.vault)
-                created = self.repo.ensure_init()
-                self.repo.stage_all()
+                self._stage_all_checked()
                 commit_hash = self.repo.commit("memory: 初始化记忆库")
         return {"vault": str(self.config.vault), "git_created": created, "commit": commit_hash}
 
@@ -584,12 +585,18 @@ class MemoryService:
                 raise ValueError("变化日期必须晚于原状态的开始日期。")
             if any(entry.text == text.strip() for entry in self.current_facts()):
                 raise ValueError("相同内容已存在。")
-            entry = self.store.append(old.topic, text.strip(), source="user-evolution",
-                supersedes=old.id, extra={"change_kind": "evolution"},
-                context=MemoryContext(valid_from=effective_from))
-            self.store.set_status(old.id, "superseded")
-            self.audit.write("evolve", old_entry=old.id, new_entry=entry.id, effective_from=effective_from)
-            self._invalidate_inferences()
+            # 事实文件、审计日志与推断日志必须同进同退；任何一步失败都按字节恢复。
+            with rollback_files([
+                self.store.topic_path(old.topic),
+                self.audit.path,
+                self.inferences.path,
+            ]):
+                entry = self.store.append(old.topic, text.strip(), source="user-evolution",
+                    supersedes=old.id, extra={"change_kind": "evolution"},
+                    context=MemoryContext(valid_from=effective_from))
+                self.store.set_status(old.id, "superseded")
+                self.audit.write("evolve", old_entry=old.id, new_entry=entry.id, effective_from=effective_from)
+                self._invalidate_inferences()
             return entry
 
     def read_topic(self, topic: str, max_tokens: int = 2000) -> dict:
@@ -720,14 +727,19 @@ class MemoryService:
             paths = "、".join(sensitive[:5])
             raise GitError(f"拒绝提交疑似敏感文件：{paths}。请移出 vault 或加入 .gitignore。", kind="sensitive")
 
+    def _stage_all_checked(self) -> None:
+        """首次初始化与后续提交共用：暂存前后都检查，覆盖索引里已有的文件。"""
+        self._refuse_sensitive()
+        self.repo.stage_all()
+        self._refuse_sensitive()
+
     def commit_pending_changes(self) -> str | None:
         """启动检查用：自动提交 vault 未保存变更（不 push、不调 LLM 生成总结）。"""
         with self._git_lock:
             with self.write_lock:
                 ensure_runtime_gitignore(self.config.vault)
                 self.repo.ensure_init()
-                self._refuse_sensitive()
-                self.repo.stage_all()
+                self._stage_all_checked()
                 if not self.repo.has_staged():
                     return None
                 return self.repo.commit("memory: 自动提交未保存变更（启动检查）")
@@ -740,8 +752,7 @@ class MemoryService:
         with self.write_lock:
             ensure_runtime_gitignore(self.config.vault)
             self.repo.ensure_init()
-            self._refuse_sensitive()
-            self.repo.stage_all()
+            self._stage_all_checked()
             staged = self.repo.has_staged()
             if staged:
                 stat = self.repo.staged_stat()

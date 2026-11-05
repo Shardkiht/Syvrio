@@ -235,6 +235,8 @@ Spark 使用 MaaS 的 Bearer API Key；适配层保留服务端采样默认值�
 
 同步规则：
 
+- Vault 必须自身就是 Git 工作树根：Vault 位于另一个 Git 仓库的子目录且没有自己的 `.git` 时，初始化、提交、同步和 Push 一律拒绝，避免把父仓库文件纳入提交或推送。
+- 首次初始化与日常同步都会检查即将提交的文件（含已暂存内容）；发现 `.env`、`keys.env`、密钥或凭据文件时拒绝提交，并保留原有文件与暂存区。
 - 有未提交变化时 Stage + Commit，无变化时跳过，不产生空 Commit；即使本次没有新 Commit，也会独立补推历史未推送提交。
 - Push 失败不回滚本地 Commit；下次手动或自动同步只补推已有提交，不会重复生成 Commit。
 - 不执行 Force Push、自动 Pull、Merge、Rebase 或 Reset；远程分叉时停止自动推送并提示人工处理；未配置 Remote/Upstream 时给出设置提示。

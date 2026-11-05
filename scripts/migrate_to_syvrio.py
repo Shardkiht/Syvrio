@@ -19,6 +19,7 @@ import re
 import shutil
 import sys
 import tomllib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -219,10 +220,34 @@ def _copy_metadata(source: Path, target: Path) -> list[str]:
     return skipped
 
 
-def _atomic_write(path: Path, text: str) -> None:
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
     tmp = path.with_name(f".{path.name}.migrating")
-    tmp.write_bytes(text.encode("utf-8"))
+    tmp.write_bytes(data)
     os.replace(tmp, path)
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    _atomic_write_bytes(path, text.encode("utf-8"))
+
+
+def _restore_file(path: Path, original: bytes | None) -> None:
+    """恢复到迁移前的状态；原文件不存在时删除本次新建的文件。"""
+    if original is None:
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _atomic_write_bytes(path, original)
+
+
+def resolve_vault(cli_path: Path | None, environ: Mapping[str, str] | None = None) -> Path:
+    """--vault > 非空 SYVRIO_VAULT > ~/.syvrio/vault；空字符串视为未设置。"""
+    if cli_path is not None:
+        return Path(cli_path).expanduser()
+    values = os.environ if environ is None else environ
+    configured = values.get("SYVRIO_VAULT", "")
+    if configured:
+        return Path(configured).expanduser()
+    return Path.home() / ".syvrio" / "vault"
 
 
 def _backup(vault: Path, source: Path, config: Path | None, backup_root: Path) -> Path:
@@ -265,12 +290,26 @@ def _migrate_config(old: Path, new: Path, apply: bool) -> str:
         return f"将复制配置：{old} -> {new}"
     new.parent.mkdir(parents=True, exist_ok=True)
     tmp = new.with_name(f".{new.name}.migrating")
-    shutil.copy2(old, tmp)
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, new)
-    if tomllib.loads(new.read_text(encoding="utf-8")) != tomllib.loads(old.read_text(encoding="utf-8")):
-        raise MigrationError("配置迁移后内容不一致")
+    try:
+        shutil.copy2(old, tmp)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, new)
+        if tomllib.loads(new.read_text(encoding="utf-8")) != tomllib.loads(old.read_text(encoding="utf-8")):
+            raise MigrationError("配置迁移后内容不一致")
+    finally:
+        tmp.unlink(missing_ok=True)
     return f"已迁移配置：{old} -> {new}"
+
+
+def _keyring_failure(exc: Exception, migrated: list[str], deleted: list[str]) -> str:
+    detail = type(exc).__name__
+    if deleted:
+        detail += f"；已删除旧条目 {len(deleted)} 个，其余保留"
+    elif migrated:
+        detail += f"；新条目已写入 {len(migrated)} 个，旧条目未删除"
+    if isinstance(exc, MigrationError) and str(exc):
+        detail += f"：{exc}"
+    return f"Keyring 迁移失败，{detail}"
 
 
 def _migrate_keyring(apply: bool) -> str:
@@ -278,6 +317,8 @@ def _migrate_keyring(apply: bool) -> str:
         import keyring
     except Exception as exc:
         return f"Keyring 不可用，跳过：{type(exc).__name__}"
+    migrated: list[str] = []
+    deleted: list[str] = []
     try:
         backend = keyring.get_keyring()
         if type(backend).__module__.startswith("keyring.backends.fail"):
@@ -307,13 +348,35 @@ def _migrate_keyring(apply: bool) -> str:
                                  keyring.get_password(OLD_KEYRING_SERVICE, name))
             if keyring.get_password(NEW_KEYRING_SERVICE, name) != keyring.get_password(OLD_KEYRING_SERVICE, name):
                 raise MigrationError(f"Keyring 校验失败：{name}")
+            migrated.append(name)
         for name in planned:
             keyring.delete_password(OLD_KEYRING_SERVICE, name)
+            deleted.append(name)
         return f"已迁移 {len(planned)} 个 Keyring 条目：{', '.join(planned)}"
-    except MigrationError:
-        raise
+    except MigrationError as exc:
+        if not apply:
+            raise
+        return _keyring_failure(exc, migrated, deleted)
     except Exception as exc:
-        return f"Keyring 迁移失败，未删除旧条目：{type(exc).__name__}"
+        return _keyring_failure(exc, migrated, deleted)
+
+
+def _run_keyring(apply: bool, enabled: bool) -> tuple[str, bool]:
+    """Keyring 无法像文件一样回滚，故在文件迁移完成后执行并只报告结果。"""
+    if not enabled:
+        return "已跳过 Keyring", True
+    try:
+        message = _migrate_keyring(apply)
+    except Exception as exc:
+        if not apply:
+            # dry-run 阶段的冲突/读取失败必须在写入前暴露。
+            raise
+        return (
+            f"Keyring 迁移未完成（{type(exc).__name__}）；文件迁移已保留，请人工核对。",
+            False,
+        )
+    complete = not message.startswith(("Keyring 迁移失败", "Keyring 读取失败"))
+    return message, complete
 
 
 def migrate(vault: Path, old_config: Path, new_config: Path, *,
@@ -340,12 +403,18 @@ def migrate(vault: Path, old_config: Path, new_config: Path, *,
         "metadata_files": 0,
         "skipped_files": [],
         "keyring": None,
+        "keyring_complete": True,
         "validation": {},
     }
+    new_config_before = new_config.read_bytes() if new_config.exists() else None
 
     if already:
-        report["config"] = _migrate_config(old_config, new_config, apply)
-        report["keyring"] = _migrate_keyring(apply) if keyring else "已跳过 Keyring"
+        try:
+            report["config"] = _migrate_config(old_config, new_config, apply)
+        except Exception:
+            _restore_file(new_config, new_config_before)
+            raise
+        report["keyring"], report["keyring_complete"] = _run_keyring(apply, keyring)
         report["validation"] = {
             "memory": {k: (sorted(v) if isinstance(v, set) else v)
                        for k, v in _memory_fingerprint(vault).items()},
@@ -377,16 +446,8 @@ def migrate(vault: Path, old_config: Path, new_config: Path, *,
     try:
         report["skipped_files"] = _copy_metadata(source, staging)
         os.replace(staging, target)
-        written: list[Path] = []
-        try:
-            for plan in tags:
-                _atomic_write(plan.path, plan.new_text)
-                written.append(plan.path)
-        except Exception:
-            for path in written:
-                backup_path = backup / "memories" / path.relative_to(vault / "memories")
-                shutil.copy2(backup_path, path)
-            raise
+        for plan in tags:
+            _atomic_write(plan.path, plan.new_text)
         after_memory = _memory_fingerprint(vault)
         after_sessions = _session_fingerprint(vault)
         after_meta = _metadata_fingerprint(target)
@@ -401,21 +462,44 @@ def migrate(vault: Path, old_config: Path, new_config: Path, *,
             raise MigrationError("元数据文件校验失败，旧元数据已保留")
         shutil.rmtree(source)
         report["config"] = _migrate_config(old_config, new_config, True)
-        report["keyring"] = _migrate_keyring(True) if keyring else "已跳过 Keyring"
-        report["validation"] = {
-            "memory": {k: (sorted(v) if isinstance(v, set) else v)
-                       for k, v in after_memory.items()},
-            "sessions": after_sessions,
-            "metadata": after_meta,
-        }
-        return report
-    except Exception:
-        if target.exists() and not source.exists():
-            shutil.rmtree(target)
-            os.replace(backup / OLD_META, source)
-        if staging.exists():
-            shutil.rmtree(staging)
+    except Exception as exc:
+        restore_errors: list[Exception] = []
+        # 记忆文件按迁移前字节恢复；不使用备份目录内容做移动，保证备份可独立回滚。
+        for plan in tags:
+            try:
+                _atomic_write(plan.path, plan.old_text)
+            except Exception as error:
+                restore_errors.append(error)
+        try:
+            _restore_file(new_config, new_config_before)
+        except Exception as error:
+            restore_errors.append(error)
+        try:
+            if target.exists():
+                shutil.rmtree(target)
+            if (backup / OLD_META).exists():
+                shutil.copytree(backup / OLD_META, source, dirs_exist_ok=True)
+        except Exception as error:
+            restore_errors.append(error)
+        try:
+            if staging.exists():
+                shutil.rmtree(staging)
+        except Exception as error:
+            restore_errors.append(error)
+        if restore_errors:
+            detail = ", ".join(type(error).__name__ for error in restore_errors)
+            raise MigrationError(
+                f"迁移失败且恢复不完整（{type(exc).__name__}）；需人工检查：{detail}"
+            ) from exc
         raise
+    report["keyring"], report["keyring_complete"] = _run_keyring(True, keyring)
+    report["validation"] = {
+        "memory": {k: (sorted(v) if isinstance(v, set) else v)
+                   for k, v in after_memory.items()},
+        "sessions": after_sessions,
+        "metadata": after_meta,
+    }
+    return report
 
 
 def _print_report(report: dict[str, object], apply: bool) -> None:
@@ -453,8 +537,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--skip-keyring", action="store_true", help="do not inspect Keyring")
     args = parser.parse_args(argv)
     apply = args.apply and not args.dry_run
-    vault = (args.vault or Path(os.environ.get("SYVRIO_VAULT", "")) or
-             Path.home() / ".syvrio" / "vault").expanduser()
+    vault = resolve_vault(args.vault)
     old_config = (args.config or default_old_config_path()).expanduser()
     new_config = (args.new_config or _config_dir() / NEW_CONFIG_NAME).expanduser()
     if args.backup_dir:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import posixpath
 import re
 import subprocess
 from pathlib import Path
@@ -11,7 +12,9 @@ PUSH_TIMEOUT = 120.0
 
 SENSITIVE_PATTERNS = (
     ".env",
+    "*.env",
     ".env.*",
+    "*.env.*",
     "*.pem",
     "*.key",
     "*.p12",
@@ -53,6 +56,25 @@ _DIVERGED_MARKERS = (
 )
 _NO_UPSTREAM_MARKERS = ("no upstream branch", "has no upstream branch", "no upstream configured")
 _URL_CREDENTIALS = re.compile(r"(https?://)[^/\s@]+@", re.IGNORECASE)
+
+
+def _physical_path(path: Path) -> str:
+    """比较用路径：展开符号链接、绝对化，并在 Windows 上忽略大小写。"""
+    return os.path.normcase(os.path.realpath(os.path.abspath(os.fspath(path))))
+
+
+def _normalized_relative(path: str) -> str:
+    candidate = posixpath.normpath(path.replace("\\", "/"))
+    if candidate.startswith("./"):
+        candidate = candidate[2:]
+    return candidate.casefold()
+
+
+def _foreign_repo_message(root: Path) -> str:
+    return (
+        f"Vault 位于另一个 Git 仓库（{root}）内部；为避免把父仓库文件纳入提交，"
+        "已拒绝 Git 操作。请为 Vault 单独执行 git init，或将 Vault 移出该仓库。"
+    )
 
 
 def redact_git_message(text: str) -> str:
@@ -110,19 +132,49 @@ class GitRepo:
             raise GitError(detail, kind=classify_git_error(detail))
         return completed
 
+    def repo_root(self) -> Path | None:
+        """Git 工作树根目录；Vault 位于父仓库子目录时可能是父目录。"""
+        if not self.path.exists():
+            return None
+        try:
+            completed = self._run(["rev-parse", "--show-toplevel"])
+        except GitError:
+            return None
+        raw = completed.stdout.strip()
+        if completed.returncode != 0 or not raw:
+            return None
+        return Path(raw)
+
+    def foreign_repo_root(self) -> Path | None:
+        """Vault 本身不是仓库、但被某个父 Git 仓库包含时返回该父仓库根。"""
+        root = self.repo_root()
+        if root is None or _physical_path(root) == _physical_path(self.path):
+            return None
+        return root
+
     @property
     def is_repo(self) -> bool:
-        if not self.path.exists():
-            return False
-        try:
-            return self._run(["rev-parse", "--git-dir"]).returncode == 0
-        except GitError:
-            return False
+        """仅当 Vault 根目录本身就是 Git 工作树根时才算已初始化。"""
+        root = self.repo_root()
+        return root is not None and _physical_path(root) == _physical_path(self.path)
+
+    def _require_own_repo(self) -> None:
+        if self.is_repo:
+            return
+        foreign = self.foreign_repo_root()
+        if foreign is not None:
+            raise GitError(_foreign_repo_message(foreign), kind="foreign_repo")
+        raise GitError("Vault 尚未初始化 Git 仓库。", kind="not_repo")
 
     def ensure_init(self) -> bool:
         self.path.mkdir(parents=True, exist_ok=True)
         if self.is_repo:
             return False
+        foreign = self.foreign_repo_root()
+        if foreign is not None:
+            # 旧逻辑会把父仓库当成“已初始化”，随后 add/commit 到父仓库；
+            # 这里不自动 git init，也不接管父仓库，由用户显式决定归属。
+            raise GitError(_foreign_repo_message(foreign), kind="foreign_repo")
         completed = self._run(["init"], check=True)
         if completed.returncode != 0:
             raise GitError(completed.stderr.strip())
@@ -157,11 +209,21 @@ class GitRepo:
     def modified_count(self) -> int:
         return len(self.status_paths())
 
+    def staged_paths(self) -> list[str]:
+        """已进入索引的路径；`-z` 避免 Git 对空格/非 ASCII 路径加引号或转义。"""
+        completed = self._run(["diff", "--cached", "--name-only", "-z"])
+        return [item for item in completed.stdout.split("\x00") if item]
+
     def sensitive_paths(self) -> list[str]:
+        """工作区与暂存区中疑似凭据文件；返回 Git 原始相对路径供提示。"""
         found: list[str] = []
-        for path in self.status_paths():
-            name = Path(path).name.casefold()
-            relative = path.casefold()
+        seen: set[str] = set()
+        for path in (*self.status_paths(), *self.staged_paths()):
+            relative = _normalized_relative(path)
+            if relative in seen:
+                continue
+            seen.add(relative)
+            name = posixpath.basename(relative)
             if any(
                 fnmatch.fnmatch(name, pattern) or fnmatch.fnmatch(relative, pattern)
                 for pattern in SENSITIVE_PATTERNS
@@ -177,6 +239,7 @@ class GitRepo:
         return bool(self.status_short().strip())
 
     def stage_all(self) -> None:
+        self._require_own_repo()
         self._run(["add", "-A"], check=True)
 
     def staged_stat(self) -> str:
@@ -187,6 +250,7 @@ class GitRepo:
         return diff[:max_chars]
 
     def commit(self, message: str) -> str | None:
+        self._require_own_repo()
         if not self.has_staged():
             return None
         completed = self._run([*self._identity_args(), "commit", "-m", message])
@@ -265,6 +329,7 @@ class GitRepo:
         return counts[0] if counts is not None else None
 
     def push(self) -> str:
+        self._require_own_repo()
         if not self.has_remote():
             raise GitError("未配置 git remote，无法 push。", kind="no_remote")
         upstream = self.upstream()

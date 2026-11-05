@@ -91,8 +91,11 @@ class ChatReflectionMixin:
                 dream = overview["dream"]
                 profile_next = profile["next_attempt_at"][:16].replace("T", " ")
                 dream_next = dream["next_attempt_at"][:16].replace("T", " ")
+                profile_pending = f"{profile['pending']} pending changes"
+                if profile.get("pending_inferences"):
+                    profile_pending += ", inference batch pending"
                 schedule = (
-                    f"next profile ~{profile_next} ({profile['pending']} pending changes), "
+                    f"next profile ~{profile_next} ({profile_pending}), "
                     f"next dream ~{dream_next} ({'pending' if dream['pending'] else 'no pending changes'})"
                 )
             except Exception:

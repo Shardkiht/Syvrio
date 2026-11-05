@@ -451,6 +451,7 @@ class ReflectionSchedule:
             result[mode] = {
                 "next_attempt_at": self.stamp(next_at),
                 "pending": count if mode == "profile" else bool(section.get("pending")),
+                "pending_inferences": bool(section.get("pending_inferences")),
                 "remaining_batches": int(section.get("remaining_batches") or 0),
                 "failures": int(section.get("consecutive_failures") or 0),
             }

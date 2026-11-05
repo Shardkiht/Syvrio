@@ -39,17 +39,21 @@ def _git(*args: str, cwd: Path | None = None, check: bool = True) -> subprocess.
     )
 
 
-def make_service(tmp_path: Path, *, auto_sync: bool = True) -> MemoryService:
+def make_uninitialized_service(vault: Path, *, auto_sync: bool = True) -> MemoryService:
     config = Config(
-        vault=tmp_path / "vault",
+        vault=vault,
         llm=LLMConfig(),
         retrieval=RetrievalConfig(method="keyword"),
         git=GitConfig(auto_sync=auto_sync),
         auto_push=False,
     )
-    service = MemoryService(
+    return MemoryService(
         config, extractor=StaticExtractor(ExtractionResult(memories=[]))
     )
+
+
+def make_service(tmp_path: Path, *, auto_sync: bool = True) -> MemoryService:
+    service = make_uninitialized_service(tmp_path / "vault", auto_sync=auto_sync)
     service.init_vault()
     return service
 
@@ -228,6 +232,228 @@ def test_sensitive_file_blocks_commit(tmp_path):
     assert service.repo.has_changes()
     after = _git("rev-list", "--count", "HEAD", cwd=service.config.vault).stdout.strip()
     assert before == after
+
+
+# ---------- Git 工作树根目录约束 ----------
+
+
+def test_standalone_vault_initializes_its_own_repository(tmp_path):
+    service = make_service(tmp_path)
+
+    assert service.repo.is_repo
+    assert service.repo.foreign_repo_root() is None
+    assert service.repo.repo_root().resolve() == service.config.vault.resolve()
+
+
+def test_relative_vault_path_is_recognized(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    service = make_uninitialized_service(Path("vault"))
+
+    service.init_vault()
+
+    assert service.repo.is_repo
+    assert service.repo.repo_root().resolve() == (tmp_path / "vault").resolve()
+
+
+def test_symlinked_vault_path_is_recognized(tmp_path):
+    real = tmp_path / "real-vault"
+    real.mkdir()
+    link = tmp_path / "linked-vault"
+    try:
+        link.symlink_to(real, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlink unavailable")
+    service = make_uninitialized_service(link)
+
+    service.init_vault()
+
+    assert service.repo.is_repo
+    assert (real / ".git").exists()
+
+
+def test_vault_inside_parent_repository_is_not_reused(tmp_path):
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    _git("init", cwd=parent)
+    vault = parent / "vault"
+    vault.mkdir()
+    service = make_uninitialized_service(vault)
+
+    assert not service.repo.is_repo
+    assert service.repo.foreign_repo_root().resolve() == parent.resolve()
+    with pytest.raises(GitError) as caught:
+        service.init_vault()
+    assert caught.value.kind == "foreign_repo"
+    assert not (vault / ".git").exists()
+    assert not (vault / "README.md").exists()
+    assert not (vault / "SOUL.md").exists()
+    assert not (vault / ".gitignore").exists()
+    assert not (vault / "memories").exists()
+
+
+def test_pre_staged_parent_files_are_never_committed(tmp_path):
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    _git("init", cwd=parent)
+    external = parent / "external.txt"
+    external.write_text("synthetic\n", encoding="utf-8")
+    _git("add", "external.txt", cwd=parent)
+    vault = parent / "vault"
+    vault.mkdir()
+    service = make_uninitialized_service(vault)
+
+    with pytest.raises(GitError, match="另一个 Git 仓库"):
+        service.init_vault()
+
+    assert _git("rev-list", "--count", "HEAD", cwd=parent, check=False).returncode != 0
+    staged = [item for item in _git("diff", "--cached", "--name-only", "-z", cwd=parent).stdout.split("\x00") if item]
+    assert "external.txt" in staged
+    assert not any(item.startswith("vault/") for item in staged)
+
+
+def test_sync_refuses_parent_repository_and_never_pushes(tmp_path):
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    _git("init", cwd=parent)
+    remote = tmp_path / "remote.git"
+    _git("init", "--bare", str(remote))
+    _git("remote", "add", "origin", str(remote), cwd=parent)
+    vault = parent / "vault"
+    vault.mkdir()
+    service = make_uninitialized_service(vault)
+
+    result = service.git_sync.sync("manual")
+
+    assert result.status == "failed"
+    assert result.error_kind == "foreign_repo"
+    assert "another Git repository" in result.error
+    assert remote_log(remote) == []
+    with pytest.raises(GitError) as caught:
+        service.commit(push=True)
+    assert caught.value.kind == "foreign_repo"
+
+
+def test_own_vault_commit_and_push_still_work(tmp_path):
+    service = make_service(tmp_path)
+    remote = add_remote(service, tmp_path)
+    service.note("合法仓库记录", topic="misc")
+
+    result = service.commit(push=True)
+
+    assert result["committed"] and result["pushed"]
+    assert any(result["hash"] in line for line in remote_log(remote))
+    assert service.repo.foreign_repo_root() is None
+
+
+# ---------- 敏感路径 ----------
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        ".env",
+        ".env.local",
+        "keys.env",
+        "secrets.env",
+        "credentials.env",
+        "nested/Keys.ENV",
+        "my keys.env",
+        "敏感.env",
+        "config.toml",
+        "syvrio.toml",
+    ],
+)
+def test_sensitive_name_variants_are_detected(tmp_path, relative):
+    service = make_service(tmp_path)
+    path = service.config.vault / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("synthetic\n", encoding="utf-8")
+
+    service.repo.stage_all()
+
+    assert relative in service.repo.staged_paths()
+    assert relative in service.repo.sensitive_paths()
+
+
+@pytest.mark.parametrize(
+    "relative",
+    ["notes.md", "notes with space.md", "weird[1].md", "memories/2026-01.md"],
+)
+def test_normal_files_are_not_flagged_as_sensitive(tmp_path, relative):
+    service = make_service(tmp_path)
+    path = service.config.vault / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("synthetic\n", encoding="utf-8")
+
+    service.repo.stage_all()
+
+    assert relative in service.repo.staged_paths()
+    assert service.repo.sensitive_paths() == []
+
+
+def test_init_vault_refuses_untracked_sensitive_file(tmp_path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / ".env").write_text("API_KEY=synthetic\n", encoding="utf-8")
+    service = make_uninitialized_service(vault)
+
+    with pytest.raises(GitError) as caught:
+        service.init_vault()
+
+    assert caught.value.kind == "sensitive"
+    assert (vault / ".env").exists()
+    assert _git("rev-list", "--count", "HEAD", cwd=vault, check=False).returncode != 0
+
+
+def test_init_vault_refuses_pre_staged_sensitive_file(tmp_path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    _git("init", cwd=vault)
+    (vault / ".env").write_text("API_KEY=synthetic\n", encoding="utf-8")
+    _git("add", ".env", cwd=vault)
+    service = make_uninitialized_service(vault)
+
+    with pytest.raises(GitError) as caught:
+        service.init_vault()
+
+    assert caught.value.kind == "sensitive"
+    assert (vault / ".env").exists()
+    staged = [item for item in _git("diff", "--cached", "--name-only", "-z", cwd=vault).stdout.split("\x00") if item]
+    assert ".env" in staged
+    assert _git("rev-list", "--count", "HEAD", cwd=vault, check=False).returncode != 0
+
+
+def test_init_vault_refuses_staged_sensitive_file_even_if_gitignored(tmp_path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    _git("init", cwd=vault)
+    (vault / ".gitignore").write_text("*.env\n", encoding="utf-8")
+    (vault / ".env").write_text("API_KEY=synthetic\n", encoding="utf-8")
+    _git("add", ".gitignore", cwd=vault)
+    _git("add", "-f", ".env", cwd=vault)
+    service = make_uninitialized_service(vault)
+
+    with pytest.raises(GitError) as caught:
+        service.init_vault()
+
+    assert caught.value.kind == "sensitive"
+    assert ".env" in caught.value.args[0]
+    assert (vault / ".env").exists()
+    assert _git("rev-list", "--count", "HEAD", cwd=vault, check=False).returncode != 0
+
+
+def test_init_vault_commits_normal_files(tmp_path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "notes.md").write_text("# synthetic\n", encoding="utf-8")
+    service = make_uninitialized_service(vault)
+
+    result = service.init_vault()
+
+    assert result["commit"]
+    tracked = _git("ls-files", cwd=vault).stdout.splitlines()
+    assert "notes.md" in tracked
+    assert not any(name.endswith(".env") for name in tracked)
 
 
 def test_sync_never_calls_llm(monkeypatch, tmp_path):

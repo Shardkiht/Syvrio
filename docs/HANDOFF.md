@@ -1,5 +1,16 @@
 # 开发交接
 
+## Evolution 安全边界与写入一致性修复（2026-11-05）
+
+- 分支 `evolution`（跟踪 `origin/feature-memory-evolution`），审查基线 `5d7b0e9`；本轮改动仅在工作区，未 commit、未 push。
+- Git 根目录：`GitRepo.is_repo` 改为要求 `git rev-parse --show-toplevel` 与 Vault 路径（realpath/normcase 归一）一致。Vault 位于父仓库子目录时，初始化、提交、同步、Push 统一拒绝并返回 `foreign_repo`，不会再误用父仓库的索引/remote；相对路径与符号链接 Vault 仍正常识别。
+- 敏感文件：首次 `init_vault` 与日常提交共用 `_stage_all_checked()`，暂存前后各检查一次；`sensitive_paths()` 同时覆盖工作区与已暂存内容，`staged_paths()` 使用 `git diff --cached --name-only -z` 避免空格/非 ASCII 引号绕过。新增 `*.env`、`*.env.*` 规则，覆盖 `keys.env`/`secrets.env`/`credentials.env`。拒绝时不删除文件、不清空暂存区。
+- 演化事务：`evolve()` 用既有 `rollback_files()` 覆盖事实主题文件、`audit.jsonl` 与 `inferences.jsonl`；追加新事实、旧状态更新、审计写入、推断失效任一步异常都按字节恢复。
+- 迁移脚本：标签改写失败、校验失败、删除旧元数据后的配置迁移失败都会统一恢复记忆文件、元数据目录与本次新建配置；恢复使用备份的复制而非移动，备份保持独立可用。Keyring 在文件迁移完成后执行，失败只报告部分进度，不回滚已完成的文件迁移。`resolve_vault()` 修复 `SYVRIO_VAULT=""` 被当成当前目录的问题。
+- Profile 状态：`schedule_overview()` 暴露 `pending_inferences`；`/profile status` 在 `0 pending changes` 时仍明确显示 `inference batch pending`，不虚构推断数量。
+- 验证：全量 `PYTHONUTF8=1 HF_HUB_OFFLINE=1 uv run pytest -q` 为 1235 passed、1 skipped（本机无符号链接权限）、1 个既有 Pydantic 警告，耗时 726 秒；`git diff --check` 通过。新增测试均使用临时 Vault、本地 bare remote、模拟时间与假 Keyring；未读取真实 Vault/凭据，未调用真实模型或付费 API。
+- 已知边界：跨进程写入仍依赖 advisory lock；文件恢复只覆盖普通 Python 异常，不覆盖进程强杀/断电；Keyring 本身没有事务语义，部分失败需人工核对。
+
 ## Syvrio 品牌迁移完成（2026-11-04）
 
 - 唯一 Python 包与 CLI 为 `syvrio`；`src/quiet_memo` 兼容包、`qm`/`quietmemo` 别名及旧导入适配器已删除。

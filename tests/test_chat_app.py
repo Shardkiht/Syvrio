@@ -4030,3 +4030,22 @@ async def test_startup_compensation_runs_missed_daily_sync(tmp_path):
         assert state["last_daily_blocked_date"] == date.today().isoformat()
         assert state.get("last_daily_success_date") != date.today().isoformat()
         assert not app._git_sync_running
+
+
+async def test_reflection_status_shows_pending_inference_batch(tmp_path):
+    import asyncio
+
+    app = build_app(tmp_path, [])
+    state = app.service.reflection.schedule.load()
+    state["profile"]["pending_changes"] = 0
+    state["profile"]["pending_inferences"] = True
+    app.service.reflection.schedule.save(state)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
+        app._reflection_command("profile", "status")
+        await pilot.pause()
+        cards = [str(card.content) for card in app.query(".card")]
+        assert any(
+            "0 pending changes" in text and "inference batch pending" in text
+            for text in cards
+        )

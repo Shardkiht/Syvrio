@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from datetime import date
+
 import pytest
 from typer.testing import CliRunner
 
@@ -190,6 +193,69 @@ def test_source_audit_survives_inference_append_failure(service, monkeypatch, ac
     assert len(service.store.entries()) == (1 if action == "correct" else 0)
     monkeypatch.setattr(service.inferences, "record", original)
     assert service.list_inferences()[0].status == "superseded"
+
+
+# ---------- 演化写入的事务边界 ----------
+
+
+@pytest.mark.parametrize(
+    "stage", ["after_new_fact", "after_status", "after_audit", "during_inference"]
+)
+def test_evolve_rolls_back_every_write_stage(service, monkeypatch, stage):
+    old = service.note("合成状态：居住地 A", topic="profile")
+    service.propose_inference("可能即将搬家", [old.id])
+    paths = [
+        service.store.topic_path(old.topic),
+        service.audit.path,
+        service.inferences.path,
+    ]
+
+    def snapshot() -> dict[str, bytes | None]:
+        return {str(path): path.read_bytes() if path.exists() else None for path in paths}
+
+    def fail(*args, **kwargs):
+        raise OSError("合成写入失败")
+
+    restores = []
+    if stage == "after_new_fact":
+        original = service.store.set_status
+        monkeypatch.setattr(service.store, "set_status", fail)
+        restores.append(lambda: monkeypatch.setattr(service.store, "set_status", original))
+    elif stage == "after_status":
+        original = service.audit.write
+        monkeypatch.setattr(service.audit, "write", fail)
+        restores.append(lambda: monkeypatch.setattr(service.audit, "write", original))
+    elif stage == "after_audit":
+        original = service._invalidate_inferences
+        monkeypatch.setattr(service, "_invalidate_inferences", fail)
+        restores.append(lambda: monkeypatch.setattr(service, "_invalidate_inferences", original))
+    else:
+        original = service.inferences.record
+        monkeypatch.setattr(service.inferences, "record", fail)
+        restores.append(lambda: monkeypatch.setattr(service.inferences, "record", original))
+
+    before = snapshot()
+    effective_from = date.today().isoformat()
+    with pytest.raises(OSError, match="合成写入失败"):
+        service.evolve(old.id, "合成状态：居住地 B", effective_from)
+
+    assert snapshot() == before
+    assert service.store.find(old.id).status == "active"
+    assert [entry.text for entry in service.store.entries()] == ["合成状态：居住地 A"]
+    assert [item.status for item in service.inferences.all()] == ["hypothesis"]
+    assert not service.audit.path.exists()
+
+    for restore in restores:
+        restore()
+    new = service.evolve(old.id, "合成状态：居住地 B", effective_from)
+
+    assert new.status == "active"
+    assert new.context.valid_from == effective_from
+    assert service.store.find(old.id).status == "superseded"
+    assert service.inferences.all()[0].status == "superseded"
+    audit_lines = service.audit.path.read_text(encoding="utf-8").splitlines()
+    assert len(audit_lines) == 1
+    assert json.loads(audit_lines[0])["action"] == "evolve"
 
 
 @pytest.mark.agent

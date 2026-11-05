@@ -159,8 +159,140 @@ def test_keyring_dry_run_and_apply(tmp_path, monkeypatch):
     assert "synthetic-secret" not in text
 
 
+def test_keyring_partial_failure_reports_actual_progress(tmp_path, monkeypatch):
+    fake = fake_keyring(monkeypatch)
+    fake.store[("quiet-memo", "SILICONFLOW_API_KEY")] = "second-synthetic"
+    calls = {"deletes": 0}
+    real_delete = fake.delete_password
+
+    def flaky_delete(service, name):
+        calls["deletes"] += 1
+        if calls["deletes"] == 2:
+            raise RuntimeError("synthetic")
+        return real_delete(service, name)
+
+    fake.delete_password = flaky_delete
+    text = migrate_mod._migrate_keyring(True)
+
+    assert text.startswith("Keyring 迁移失败")
+    assert "已删除旧条目 1 个" in text
+    assert "synthetic" not in text
+    assert fake.store[("syvrio", "DEEPSEEK_API_KEY")] == "synthetic-secret"
+    assert fake.store[("syvrio", "SILICONFLOW_API_KEY")] == "second-synthetic"
+    assert ("quiet-memo", "SILICONFLOW_API_KEY") in fake.store
+
+
 def test_keyring_conflict_stops(tmp_path, monkeypatch):
     fake = fake_keyring(monkeypatch)
     fake.store[("syvrio", "DEEPSEEK_API_KEY")] = "different"
     with pytest.raises(migrate_mod.MigrationError, match="不同值"):
         migrate_mod._migrate_keyring(False)
+
+
+# ---------- 迁移失败恢复 ----------
+
+
+def _backups(tmp_path: Path) -> list[Path]:
+    return sorted(tmp_path.glob("syvrio-migration-backup-*"))
+
+
+def test_validation_failure_restores_tags_metadata_and_config(tmp_path, monkeypatch):
+    vault = make_vault(tmp_path)
+    config = make_config(tmp_path)
+    new_config = tmp_path / "config" / "syvrio.toml"
+    memory_path = vault / "memories" / "01-test.md"
+    memory_before = memory_path.read_bytes()
+    meta_before = {
+        path.name: path.read_bytes()
+        for path in (vault / ".quiet-memo").iterdir()
+        if path.is_file()
+    }
+    real = migrate_mod._memory_fingerprint
+    calls = {"count": 0}
+
+    def fingerprint(path):
+        calls["count"] += 1
+        current = real(path)
+        if calls["count"] >= 3:  # before / backup manifest / after tags
+            return {**current, "digest": current["digest"] + "changed"}
+        return current
+
+    monkeypatch.setattr(migrate_mod, "_memory_fingerprint", fingerprint)
+    with pytest.raises(migrate_mod.MigrationError, match="记忆条目/ID"):
+        run(vault, config, new_config, apply=True)
+
+    assert memory_path.read_bytes() == memory_before
+    assert (vault / ".quiet-memo").exists()
+    assert {
+        path.name: path.read_bytes()
+        for path in (vault / ".quiet-memo").iterdir()
+        if path.is_file()
+    } == meta_before
+    assert not (vault / ".syvrio").exists()
+    assert not new_config.exists()
+    backups = _backups(tmp_path)
+    assert len(backups) == 1
+    assert (backups[0] / ".quiet-memo" / "pending.jsonl").read_bytes() == meta_before["pending.jsonl"]
+
+
+def test_config_failure_after_metadata_removal_restores_source(tmp_path, monkeypatch):
+    vault = make_vault(tmp_path)
+    config = make_config(tmp_path)
+    new_config = tmp_path / "config" / "syvrio.toml"
+    memory_path = vault / "memories" / "01-test.md"
+    memory_before = memory_path.read_bytes()
+    pending_before = (vault / ".quiet-memo" / "pending.jsonl").read_bytes()
+    real = migrate_mod._migrate_config
+
+    def failing(old, new, apply):
+        if apply:
+            raise migrate_mod.MigrationError("合成配置迁移失败")
+        return real(old, new, apply)
+
+    monkeypatch.setattr(migrate_mod, "_migrate_config", failing)
+    with pytest.raises(migrate_mod.MigrationError, match="合成配置迁移失败"):
+        run(vault, config, new_config, apply=True)
+
+    assert memory_path.read_bytes() == memory_before
+    assert (vault / ".quiet-memo" / "pending.jsonl").read_bytes() == pending_before
+    assert not (vault / ".syvrio").exists()
+    assert not new_config.exists()
+    backups = _backups(tmp_path)
+    assert len(backups) == 1
+    assert (backups[0] / ".quiet-memo" / "pending.jsonl").read_bytes() == pending_before
+
+
+def test_keyring_partial_failure_keeps_file_migration_and_reports(tmp_path, monkeypatch):
+    vault = make_vault(tmp_path)
+    config = make_config(tmp_path)
+    new_config = tmp_path / "config" / "syvrio.toml"
+
+    def failing_keyring(apply):
+        if not apply:
+            return "dry"
+        raise RuntimeError("synthetic")
+
+    monkeypatch.setattr(migrate_mod, "_migrate_keyring", failing_keyring)
+    report = run(vault, config, new_config, apply=True, keyring=True)
+
+    assert report["keyring_complete"] is False
+    assert "未完成" in report["keyring"]
+    assert (vault / ".syvrio").exists()
+    assert not (vault / ".quiet-memo").exists()
+    text = (vault / "memories" / "01-test.md").read_text(encoding="utf-8")
+    assert "~qm-escaped~" not in text and "~syvrio-escaped~" in text
+    assert report["validation"]
+
+
+# ---------- 默认 Vault 路径 ----------
+
+
+def test_resolve_vault_priority(tmp_path):
+    explicit = Path("synthetic-vault")
+    assert migrate_mod.resolve_vault(explicit, {}) == explicit
+    assert migrate_mod.resolve_vault(None, {"SYVRIO_VAULT": str(tmp_path / "env-vault")}) == (
+        tmp_path / "env-vault"
+    )
+    default = Path.home() / ".syvrio" / "vault"
+    assert migrate_mod.resolve_vault(None, {}) == default
+    assert migrate_mod.resolve_vault(None, {"SYVRIO_VAULT": ""}) == default
