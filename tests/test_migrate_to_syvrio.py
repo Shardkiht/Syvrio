@@ -287,6 +287,118 @@ def test_keyring_partial_failure_keeps_file_migration_and_reports(tmp_path, monk
 # ---------- 默认 Vault 路径 ----------
 
 
+def _cli(vault: Path, config: Path, new_config: Path, backup_dir: Path, *options: str) -> int:
+    return migrate_mod.main([
+        "--vault", str(vault),
+        "--config", str(config),
+        "--new-config", str(new_config),
+        "--backup-dir", str(backup_dir),
+        *options,
+    ])
+
+
+def test_cli_partial_keyring_failure_returns_nonzero_and_keeps_files(
+    tmp_path, monkeypatch, capsys
+):
+    fake = fake_keyring(monkeypatch)
+    fake.store[("quiet-memo", "SILICONFLOW_API_KEY")] = "second-synthetic"
+    real_delete = fake.delete_password
+    calls = {"deletes": 0}
+
+    def flaky_delete(service, name):
+        calls["deletes"] += 1
+        if calls["deletes"] == 2:
+            raise RuntimeError("synthetic")
+        return real_delete(service, name)
+
+    fake.delete_password = flaky_delete
+    vault = make_vault(tmp_path)
+    config = make_config(tmp_path)
+    new_config = tmp_path / "config" / "syvrio.toml"
+
+    code = _cli(vault, config, new_config, tmp_path, "--apply")
+    output = capsys.readouterr()
+
+    assert code == 2
+    assert "Keyring 迁移失败" in output.out + output.err
+    assert "file migration is complete" in output.err
+    assert "synthetic-secret" not in output.out + output.err
+    assert "second-synthetic" not in output.out + output.err
+    assert (vault / ".syvrio").exists()
+    assert not (vault / ".quiet-memo").exists()
+    assert new_config.exists()
+
+
+def test_cli_already_migrated_reports_keyring_failure(tmp_path, monkeypatch, capsys):
+    vault = make_vault(tmp_path)
+    config = make_config(tmp_path)
+    new_config = tmp_path / "config" / "syvrio.toml"
+    assert _cli(vault, config, new_config, tmp_path, "--apply", "--skip-keyring") == 0
+    capsys.readouterr()
+
+    fake = fake_keyring(monkeypatch)
+
+    def fail_set(service, name, value):
+        raise RuntimeError("synthetic")
+
+    fake.set_password = fail_set
+    code = _cli(vault, config, new_config, tmp_path, "--apply")
+    output = capsys.readouterr()
+
+    assert code == 2
+    assert "already migrated" in output.out
+    assert "Keyring 迁移失败" in output.out + output.err
+    assert "synthetic-secret" not in output.out + output.err
+
+
+def test_cli_keyring_success_returns_zero(tmp_path, monkeypatch, capsys):
+    fake = fake_keyring(monkeypatch)
+    vault = make_vault(tmp_path)
+    config = make_config(tmp_path)
+    new_config = tmp_path / "config" / "syvrio.toml"
+
+    code = _cli(vault, config, new_config, tmp_path, "--apply")
+    output = capsys.readouterr()
+
+    assert code == 0
+    assert "synthetic-secret" not in output.out + output.err
+    assert fake.store[("syvrio", "DEEPSEEK_API_KEY")] == "synthetic-secret"
+    assert ("quiet-memo", "DEEPSEEK_API_KEY") not in fake.store
+    assert (vault / ".syvrio").exists()
+    assert new_config.exists()
+
+
+def test_cli_skip_keyring_returns_zero(tmp_path, monkeypatch, capsys):
+    vault = make_vault(tmp_path)
+    config = make_config(tmp_path)
+    new_config = tmp_path / "config" / "syvrio.toml"
+
+    code = _cli(vault, config, new_config, tmp_path, "--apply", "--skip-keyring")
+    output = capsys.readouterr()
+
+    assert code == 0
+    assert "已跳过 Keyring" in output.out
+    assert (vault / ".syvrio").exists()
+
+
+def test_cli_dry_run_writes_nothing_and_returns_zero(tmp_path, monkeypatch, capsys):
+    fake = fake_keyring(monkeypatch)
+    before = dict(fake.store)
+    vault = make_vault(tmp_path)
+    config = make_config(tmp_path)
+    new_config = tmp_path / "config" / "syvrio.toml"
+
+    code = _cli(vault, config, new_config, tmp_path)
+    output = capsys.readouterr()
+
+    assert code == 0
+    assert "DRY-RUN" in output.out
+    assert "~qm-escaped~" in (vault / "memories" / "01-test.md").read_text(encoding="utf-8")
+    assert not (vault / ".syvrio").exists()
+    assert not new_config.exists()
+    assert fake.store == before
+
+
 def test_resolve_vault_priority(tmp_path):
     explicit = Path("synthetic-vault")
     assert migrate_mod.resolve_vault(explicit, {}) == explicit

@@ -345,6 +345,73 @@ def test_own_vault_commit_and_push_still_work(tmp_path):
     assert service.repo.foreign_repo_root() is None
 
 
+# ---------- GitRepo.commit 的索引级最终保护 ----------
+
+
+@pytest.mark.parametrize("name", [".env", "keys.env", "my secrets.env", "密钥 文件.env"])
+def test_commit_rejects_staged_sensitive_file(tmp_path, name):
+    service = make_service(tmp_path)
+    vault = service.config.vault
+    target = vault / name
+    target.write_text("synthetic\n", encoding="utf-8")
+    _git("add", name, cwd=vault)
+    head_before = _git("rev-parse", "HEAD", cwd=vault).stdout.strip()
+    staged_before = service.repo.staged_paths()
+
+    with pytest.raises(GitError) as caught:
+        service.repo.commit("synthetic commit")
+
+    assert caught.value.kind == "sensitive"
+    assert name in str(caught.value)
+    assert _git("rev-parse", "HEAD", cwd=vault).stdout.strip() == head_before
+    assert service.repo.staged_paths() == staged_before
+    assert target.exists()
+
+
+def test_commit_allows_staged_clean_file_with_unstaged_sensitive_file(tmp_path):
+    service = make_service(tmp_path)
+    vault = service.config.vault
+    (vault / ".env").write_text("API_KEY=synthetic\n", encoding="utf-8")
+    (vault / "notes.md").write_text("synthetic\n", encoding="utf-8")
+    _git("add", "notes.md", cwd=vault)
+
+    commit_hash = service.repo.commit("synthetic commit")
+
+    assert commit_hash
+    tracked = _git("ls-files", cwd=vault).stdout.splitlines()
+    assert "notes.md" in tracked
+    assert ".env" not in tracked
+    assert (vault / ".env").exists()
+
+
+def test_commit_normal_file_succeeds(tmp_path):
+    service = make_service(tmp_path)
+    vault = service.config.vault
+    (vault / "notes.md").write_text("synthetic\n", encoding="utf-8")
+    _git("add", "notes.md", cwd=vault)
+
+    commit_hash = service.repo.commit("synthetic commit")
+
+    assert commit_hash
+    assert _git("log", "-1", "--pretty=%s", cwd=vault).stdout.strip() == "synthetic commit"
+
+
+def test_direct_commit_still_rejects_parent_repository(tmp_path):
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    _git("init", cwd=parent)
+    vault = parent / "vault"
+    vault.mkdir()
+    service = make_uninitialized_service(vault)
+    (vault / "notes.md").write_text("synthetic\n", encoding="utf-8")
+
+    with pytest.raises(GitError) as caught:
+        service.repo.commit("synthetic commit")
+
+    assert caught.value.kind == "foreign_repo"
+    assert _git("rev-list", "--count", "HEAD", cwd=parent, check=False).returncode != 0
+
+
 # ---------- 敏感路径 ----------
 
 

@@ -214,11 +214,11 @@ class GitRepo:
         completed = self._run(["diff", "--cached", "--name-only", "-z"])
         return [item for item in completed.stdout.split("\x00") if item]
 
-    def sensitive_paths(self) -> list[str]:
-        """工作区与暂存区中疑似凭据文件；返回 Git 原始相对路径供提示。"""
+    @staticmethod
+    def _sensitive_in(paths: list[str]) -> list[str]:
         found: list[str] = []
         seen: set[str] = set()
-        for path in (*self.status_paths(), *self.staged_paths()):
+        for path in paths:
             relative = _normalized_relative(path)
             if relative in seen:
                 continue
@@ -230,6 +230,14 @@ class GitRepo:
             ):
                 found.append(path)
         return found
+
+    def sensitive_staged_paths(self) -> list[str]:
+        """仅索引中即将提交的疑似凭据文件。"""
+        return self._sensitive_in(self.staged_paths())
+
+    def sensitive_paths(self) -> list[str]:
+        """工作区与暂存区中疑似凭据文件；返回 Git 原始相对路径供提示。"""
+        return self._sensitive_in([*self.status_paths(), *self.staged_paths()])
 
     def has_staged(self) -> bool:
         completed = self._run(["diff", "--cached", "--quiet"])
@@ -253,6 +261,11 @@ class GitRepo:
         self._require_own_repo()
         if not self.has_staged():
             return None
+        # 最终保护：只按即将提交的索引判断，未暂存的工作区文件不影响独立提交。
+        sensitive = self.sensitive_staged_paths()
+        if sensitive:
+            paths = "、".join(sensitive[:5])
+            raise GitError(f"拒绝提交疑似敏感文件：{paths}。请移出 vault 或加入 .gitignore。", kind="sensitive")
         completed = self._run([*self._identity_args(), "commit", "-m", message])
         if completed.returncode != 0:
             detail = completed.stderr.strip() or completed.stdout.strip()

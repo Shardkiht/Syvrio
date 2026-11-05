@@ -46,7 +46,7 @@ uv run python scripts/migrate_to_syvrio.py --dry-run
 uv run python scripts/migrate_to_syvrio.py --apply
 ```
 
-工具会把 Vault 内 `.quiet-memo/` 元数据迁移到 `.syvrio/`，把旧转义标签前缀改写为新前缀，迁移配置与可选 Keyring 条目；锁文件不迁移，可重建缓存不复制。重复执行幂等；新旧目录并存时停止并报告。备份默认保留在 Vault 同级目录。
+工具会把 Vault 内 `.quiet-memo/` 元数据迁移到 `.syvrio/`，把旧转义标签前缀改写为新前缀，迁移配置与可选 Keyring 条目；锁文件不迁移，可重建缓存不复制。重复执行幂等；新旧目录并存时停止并报告。备份默认保留在 Vault 同级目录。退出码 `0` 表示成功，`1` 表示迁移失败（已恢复文件），`2` 表示文件迁移已完成但 Keyring 未完成、需要人工核对（不会回滚文件迁移）。
 
 ## 为什么用 Syvrio
 

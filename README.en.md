@@ -46,7 +46,7 @@ uv run python scripts/migrate_to_syvrio.py --dry-run
 uv run python scripts/migrate_to_syvrio.py --apply
 ```
 
-It moves Vault `.quiet-memo/` metadata to `.syvrio/`, rewrites old escaped tag prefixes, and migrates the config file plus optional Keyring entries. Locks are not copied and rebuildable caches are not migrated. Re-running is idempotent; existing old and new metadata directories stop the migration with a report. Backups are retained beside the Vault by default.
+It moves Vault `.quiet-memo/` metadata to `.syvrio/`, rewrites old escaped tag prefixes, and migrates the config file plus optional Keyring entries. Locks are not copied and rebuildable caches are not migrated. Re-running is idempotent; existing old and new metadata directories stop the migration with a report. Backups are retained beside the Vault by default. Exit code `0` means success, `1` means the migration failed and files were restored, and `2` means file migration completed but Keyring is incomplete and needs manual review; file changes are not rolled back.
 
 ## Why Syvrio
 

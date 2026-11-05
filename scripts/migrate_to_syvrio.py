@@ -508,12 +508,12 @@ def _print_report(report: dict[str, object], apply: bool) -> None:
     print(f"  old metadata: {report['old_meta']}")
     print(f"  new metadata: {report['new_meta']}")
     if report["already_migrated"]:
-        print("  already migrated; no changes")
-        return
-    print(f"  metadata files: {report['metadata_files']}")
-    print(f"  tag files: {report['tag_files']}, tag values: {report['tag_values']}")
-    if report["skipped_files"]:
-        print(f"  skipped (locks/caches): {', '.join(report['skipped_files'])}")
+        print("  already migrated; no file changes")
+    else:
+        print(f"  metadata files: {report['metadata_files']}")
+        print(f"  tag files: {report['tag_files']}, tag values: {report['tag_values']}")
+        if report["skipped_files"]:
+            print(f"  skipped (locks/caches): {', '.join(report['skipped_files'])}")
     print(f"  config: {report['config']}")
     print(f"  keyring: {report['keyring']}")
     if report["backup"]:
@@ -551,6 +551,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     _print_report(report, apply)
+    if apply and report.get("keyring_complete") is False:
+        print(
+            "WARNING: file migration is complete and was kept, but Keyring migration "
+            "is incomplete; review the reported entries manually.",
+            file=sys.stderr,
+        )
+        return 2
     return 0
 
 

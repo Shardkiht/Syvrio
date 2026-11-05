@@ -1,5 +1,12 @@
 # 开发交接
 
+## Evolution Review 收尾补强（2026-11-05）
+
+- 分支 `evolution`（跟踪 `origin/feature-memory-evolution`），基线 `2444491`；本轮改动仅在工作区，未 commit、未 push。
+- 迁移 CLI：`main()` 在 `--apply` 且 `keyring_complete=False` 时返回 `2`，并在 stderr 说明文件迁移已完成且保留、Keyring 需人工核对；`MigrationError` 仍返回 `1`。`_print_report()` 不再在 `already_migrated` 时提前返回，已迁移 Vault 的再次执行仍显示 Keyring 结果。dry-run、`--skip-keyring` 和完全成功的返回码不变，输出不包含凭据值。
+- Git 提交：`GitRepo.commit()` 在真正提交前只对索引执行敏感路径终检，复用 `staged_paths()` 与 `SENSITIVE_PATTERNS`；命中抛 `GitError(kind="sensitive")`，不删除文件、不 reset 索引。未暂存的工作区敏感文件不影响独立 Commit，`_require_own_repo()` 保护保持不变。
+- 验证：`tests/test_migrate_to_syvrio.py` 19 passed；`tests/test_git_sync.py` 66 passed、1 skipped（Windows 无符号链接权限）。按任务约定未重复全量测试；未读取真实 Vault/Keyring，未调用真实模型或搜索 API。
+
 ## Evolution 安全边界与写入一致性修复（2026-11-05）
 
 - 分支 `evolution`（跟踪 `origin/feature-memory-evolution`），审查基线 `5d7b0e9`；本轮改动仅在工作区，未 commit、未 push。
