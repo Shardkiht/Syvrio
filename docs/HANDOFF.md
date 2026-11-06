@@ -6,6 +6,14 @@
 - Agent `search` 工具与 MCP `search` 共用该配置；只有值大于 0 时才限制，错误信息随配置值变化。自动回退的 `max_engines`（默认 3）语义不变，仍只控制首选引擎失败后的候补尝试数。
 - 验证：`tests/test_setup.py`、`tests/test_web_search.py`、`tests/test_server.py` 164 passed；新增默认接受 4 个引擎、配置上限拒绝超限、配置往返保留字段的回归。
 
+## Application Layer 稳定性修复（2026-11-06）
+
+- P1 会话加载异常：`run_turn()` 现在把目标会话加载纳入统一 try，加载失败返回 `failed` TurnResult（保留目标 session_id、无 user_message_id 时不执行 Undo），记录 `chat.failed`，UI 收尾后恢复输入与队列。
+- P1 生命周期：请求状态由 Application 独占。`begin_turn()` 分配 turn_id，Worker 完成只返回结果，不释放状态；UI 完成渲染后调用 `end_turn(turn_id)` 确认终态，过期回调无法清理新请求。UI 收尾异常通过 `_finish_on_ui()` 的 finally 释放，避免永久 busy。Worker 完成到 UI 确认之间提交的新消息继续按 FIFO 排队。
+- P2 队列所有权：UI 通过 `take_next()`、`queue_snapshot()`、`take_pending_command()`、`take_pending_navigation()`、`resume_after_undo()` 操作；不再直接 pop/append 内部队列。`ChatApp._STATE_ALIASES` 仅保留旧 UI 测试兼容访问，属于后续技术债。
+- P2 架构测试：AST 依赖检查按文件包路径解析 `node.level`，可识别 `..app`、`...app` 与 `from ..app import widget`；新增临时合成模块验证绝对导入、相对导入、多级相对导入和合法导入。
+- 新增 `tests/test_application_lifecycle.py` 覆盖 Worker 完成待确认、过期回调、会话加载失败、切换/取消/Undo 竞争、快速连续提交；UI 回归补充过期 ack 与收尾异常释放。真实 TUI/LLM 验收记录见本次交付报告。
+
 ## Application Layer 解耦（2026-11-06）
 
 - 新增 `src/syvrio/application/`：`contracts.py`（DTO）、`conversation.py`（FIFO/请求绑定/Undo/会话生命周期）、`memory.py`（Pending/推断审查/导入/画像）、`settings.py`（模型/供应商/推理/上下文）、`reflection.py`、`git.py` 与 `service.py` 组合入口。依赖方向为 `app → application → agent/memory/llm/infra`；应用层不依赖 Textual、Rich、Typer 或 `app/`。

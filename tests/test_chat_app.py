@@ -5088,3 +5088,40 @@ async def test_reflection_status_shows_pending_inference_batch(tmp_path):
             "0 pending changes" in text and "inference batch pending" in text
             for text in cards
         )
+
+
+async def test_stale_turn_ack_does_not_clear_new_request(tmp_path):
+    app = build_app(tmp_path, [])
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._begin_ask(None)
+        old_turn = app.application.conversation.active_turn_id
+        app._end_ask(old_turn)
+        app._begin_ask(None)
+        new_turn = app.application.conversation.active_turn_id
+        app._stream_buffer = "new request partial"
+        rendered = []
+        app._finish_on_ui(old_turn, lambda: rendered.append(True))
+        assert rendered == []
+        app._end_ask(old_turn)
+        assert app.application.conversation.active_turn_id == new_turn
+        assert app._ask_active is True
+        assert app._stream_buffer == "new request partial"
+        app._end_ask(new_turn)
+        assert app.busy is False
+
+
+async def test_ui_finalize_exception_still_releases_request(tmp_path):
+    app = build_app(tmp_path, [])
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._begin_ask(None)
+        turn_id = app.application.conversation.active_turn_id
+
+        def fail_render():
+            raise RuntimeError("synthetic render failure")
+
+        with pytest.raises(RuntimeError):
+            app._finish_on_ui(turn_id, fail_render)
+        assert app.busy is False
+        assert app.application.conversation.ask_active is False

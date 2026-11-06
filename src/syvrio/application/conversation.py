@@ -41,6 +41,8 @@ class ConversationUseCases:
         self._ask_active = False
         self._ask_in_flight: str | None = None
         self._ask_user_message_id: str | None = None
+        self._active_turn_id: int | None = None
+        self._turn_seq = 0
         self._cancel: Event | None = None
         self._undo_requested = False
         self._undo_target_session_id: str | None = None
@@ -64,6 +66,10 @@ class ConversationUseCases:
     @property
     def ask_active(self) -> bool:
         return self._ask_active
+
+    @property
+    def active_turn_id(self) -> int | None:
+        return self._active_turn_id
 
     @property
     def ask_in_flight(self) -> str | None:
@@ -188,6 +194,37 @@ class ConversationUseCases:
         with self._lock:
             self.queue_paused_after_undo = False
 
+    def set_pending_command(self, item: QueuedLine | None) -> None:
+        with self._lock:
+            self.pending_command = item
+
+    def take_pending_command(self) -> QueuedLine | None:
+        with self._lock:
+            item = self.pending_command
+            self.pending_command = None
+            return item
+
+    def request_new(self) -> None:
+        with self._lock:
+            self.pending_new = True
+            self.pending_switch = None
+
+    def request_switch(self, session_id: str) -> None:
+        with self._lock:
+            self.pending_switch = session_id
+            self.pending_new = False
+
+    def take_pending_navigation(self) -> tuple[str, str | None] | None:
+        with self._lock:
+            if self.pending_new:
+                self.pending_new = False
+                return ("new", None)
+            if self.pending_switch:
+                session_id = self.pending_switch
+                self.pending_switch = None
+                return ("switch", session_id)
+            return None
+
     @staticmethod
     def _is_undo(line: str) -> bool:
         text = line.strip()
@@ -205,6 +242,8 @@ class ConversationUseCases:
     def begin_turn(self, session_id: str | None = None) -> Event:
         token = Event()
         with self._lock:
+            self._turn_seq += 1
+            self._active_turn_id = self._turn_seq
             self._cancel = token
             self._ask_active = True
             self._ask_in_flight = session_id
@@ -269,17 +308,19 @@ class ConversationUseCases:
                 callbacks.on_user_message(message_id)
 
         session = None
-        if session_id and not (
-            self.runtime.has_session and self.runtime.session.id == session_id
-        ):
-            # 后台任务执行时从磁盘新鲜加载，不跨切换复用内存对象（对象会过期）。
-            session = self.sessions.load(session_id)
         status = "ok"
         reply = None
         content = ""
         error = None
         exception = None
+        with self._lock:
+            turn_id = self._active_turn_id or 0
         try:
+            if session_id and not (
+                self.runtime.has_session and self.runtime.session.id == session_id
+            ):
+                # 后台任务执行时从磁盘新鲜加载，不跨切换复用内存对象（对象会过期）。
+                session = self.sessions.load(session_id)
             reply = self.runtime.ask(
                 line,
                 session=session,
@@ -308,11 +349,11 @@ class ConversationUseCases:
         if self.undo_requested:
             undo = self.perform_undo(bound["session_id"], bound["user_message_id"], error)
             status = "undo"
-        self.end_turn()
         return TurnResult(
             status=status,
             session_id=bound["session_id"],
             user_message_id=bound["user_message_id"],
+            turn_id=turn_id,
             reply=reply,
             content=content,
             error=error,
@@ -320,12 +361,17 @@ class ConversationUseCases:
             undo=undo,
         )
 
-    def end_turn(self) -> None:
+    def end_turn(self, turn_id: int | None = None) -> bool:
+        """确认并释放请求状态；过期 Turn 的迟到回调不得清理新请求。"""
         with self._lock:
+            if turn_id is not None and self._active_turn_id != turn_id:
+                return False
             self._ask_active = False
             self._ask_in_flight = None
             self._ask_user_message_id = None
+            self._active_turn_id = None
             self._cancel = None
+            return True
 
     def perform_undo(
         self,

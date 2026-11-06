@@ -88,7 +88,9 @@ def test_turn_streams_in_order_and_binds_session(tmp_path):
     assert result.content == "abcdef"
     assert result.session_id == session.id
     assert deltas == ["abc", "def"]
-    assert not conv.ask_active
+    assert conv.ask_active is True  # UI 终态确认前仍占用请求槽
+    assert conv.end_turn(result.turn_id) is True
+    assert conv.ask_active is False
     assert runtime.sessions.load(session.id).user_texts() == ["hello"]
 
 

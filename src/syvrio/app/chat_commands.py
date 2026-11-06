@@ -250,8 +250,7 @@ class ChatCommandsMixin:
             self.query_one("#input", Input).focus()
             return
         if self._navigation_busy:
-            self._pending_new = False
-            self._pending_switch = session_id
+            self.application.conversation.request_switch(session_id)
             return
         self._switch_session(session_id)
 

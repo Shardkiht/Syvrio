@@ -173,13 +173,13 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
 
     def _handle_exception(self, error: Exception) -> None:
         record_event("tui.failed", error, busy=self.busy, streaming=self._ask_active,
-                     queued=len(self._queue))
+                     queued=self.application.conversation.queue_snapshot().count)
         super()._handle_exception(error)
 
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
         if event.state == WorkerState.ERROR:
             record_event("tui.failed", event.worker.error, busy=self.busy,
-                         streaming=self._ask_active, queued=len(self._queue))
+                         streaming=self._ask_active, queued=self.application.conversation.queue_snapshot().count)
 
     def _warm_search(self) -> None:
         self.run_worker(
@@ -324,8 +324,7 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
         if self._navigation_busy:
             # 导航期间点击会话：记住意图，结束后自动切换，不静默丢弃。
             # LLM 请求进行中不排队：回复由 runtime 绑定原会话写盘，可立即切换。
-            self._pending_switch = event.item.row["id"]
-            self._pending_new = False
+            self.application.conversation.request_switch(event.item.row["id"])
             return
         row = event.item.row
         if self.application.conversation.current_id == row["id"]:
@@ -357,8 +356,7 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
 
     def _new_session(self) -> None:
         if self._navigation_busy:
-            self._pending_new = True
-            self._pending_switch = None
+            self.application.conversation.request_new()
             return
         self._begin_navigation()
         self.run_worker(
@@ -371,8 +369,7 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
 
     def _switch_session(self, session_id: str) -> None:
         if self._navigation_busy:
-            self._pending_switch = session_id
-            self._pending_new = False
+            self.application.conversation.request_switch(session_id)
             return
         self._begin_navigation()
         self.run_worker(
@@ -387,22 +384,20 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
         """空闲时接续排队的切换意图与等待期消息，最后一次切换优先，不静默丢弃。"""
         if self.busy:
             return
-        if self._pending_new:
-            self._pending_new = False
-            self._new_session()
-            return
-        if self._pending_switch:
-            session_id = self._pending_switch
-            self._pending_switch = None
-            self._switch_session(session_id)
+        navigation = self.application.conversation.take_pending_navigation()
+        if navigation is not None:
+            kind, session_id = navigation
+            if kind == "new":
+                self._new_session()
+            else:
+                self._switch_session(session_id)
             return
         if self._queue_paused_after_undo:
             # 撤销后保留队列但不自动发送，直到用户下一次主动提交。
             return
-        if self._pending_command:
+        item = self.application.conversation.take_pending_command()
+        if item is not None:
             # 导航期间可能再次切换视图，执行前重新核验完整队列项的目标。
-            item = self._pending_command
-            self._pending_command = None
             self._run_queued_command(item)
             if not self.busy:
                 self._drain_pending_intent()
@@ -718,7 +713,7 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
         self._release_input_if_idle()
 
     def _begin_ask(self, session_id: str | None) -> None:
-        record_event("generation.started", queued=len(self._queue))
+        record_event("generation.started", queued=self.application.conversation.queue_snapshot().count)
         self._reflection_activity()
         self.application.conversation.begin_turn(session_id)
         self._progress_started = time.monotonic()
@@ -726,11 +721,12 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
         self.query_one("#input", BarInput).set_hint("Message to queue · Esc to stop")
         self._render_model_status()
 
-    def _end_ask(self) -> None:
-        record_event("generation.finished", queued=len(self._queue),
+    def _end_ask(self, turn_id: int | None = None) -> None:
+        record_event("generation.finished", queued=self.application.conversation.queue_snapshot().count,
                      elapsed_ms=round((time.monotonic() - self._progress_started) * 1000)
                      if self._ask_active else 0)
-        self.application.conversation.end_turn()
+        if not self.application.conversation.end_turn(turn_id):
+            return
         self._stream_widget = None
         self._stream_buffer = ""
         self._stream_stamp = ""
@@ -787,7 +783,7 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
             return
         # 用户主动开始下一轮消息后，撤销期间暂停的旧队列才恢复接续。
         if not line.startswith("/"):
-            self._queue_paused_after_undo = False
+            self.application.conversation.resume_after_undo()
         if line.startswith("/"):
             palette = self.query_one("#cmd-palette", CommandPalette)
             if palette.display and palette.current and " " not in line:
