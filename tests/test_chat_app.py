@@ -3508,7 +3508,7 @@ async def test_busy_progress_and_right_aligned_context(tmp_path, width):
         context = app.query_one("#status", Static)
         assert "search" in str(model.content)
         assert model.region.right <= context.region.x
-        app._end_ask()
+        app._end_ask(app.application.conversation.active_turn_id)
         assert "search" not in str(model.content)
 
 
@@ -3897,7 +3897,7 @@ async def test_natural_completion_after_undo_request_does_not_keep_reply(tmp_pat
         app._undo_requested = True
         app._undo_target_session_id = session.id
         app._undo_target_message_id = "u1"
-        app._finish_reply("final reply", "12:00", "", session.id, "u1")
+        app._finish_on_ui(app.application.conversation.active_turn_id, app._finish_reply, "final reply", "12:00", "", session.id, "u1")
         await pilot.pause()
 
         assert app.query_one("#input", Input).value == "m1"
@@ -3924,7 +3924,7 @@ async def test_undo_without_bound_message_does_not_touch_earlier_turn(tmp_path):
         app._undo_requested = True
         app._undo_target_session_id = session.id
         app._undo_target_message_id = None
-        app._finish_cancelled(session.id, None)
+        app._finish_on_ui(app.application.conversation.active_turn_id, app._finish_cancelled, session.id, None)
         await pilot.pause()
 
         loaded = app.sessions.load(session.id)
@@ -3956,7 +3956,7 @@ async def test_undo_restores_multiple_background_sessions_independently(tmp_path
             app._undo_requested = True
             app._undo_target_session_id = session.id
             app._undo_target_message_id = message_id
-            app._finish_cancelled(session.id, message_id)
+            app._finish_on_ui(app.application.conversation.active_turn_id, app._finish_cancelled, session.id, message_id)
             await pilot.pause()
 
         assert app._pending_undo_restore == {
@@ -4033,7 +4033,7 @@ async def test_undo_without_target_resumes_queued_messages(tmp_path, monkeypatch
         app._undo_requested = True
         app._undo_target_session_id = session.id
         app._undo_target_message_id = None
-        app._finish_cancelled(session.id, None)
+        app._finish_on_ui(app.application.conversation.active_turn_id, app._finish_cancelled, session.id, None)
 
         await _wait_ask_started(app, pilot)
         assert app._queue_paused_after_undo is False
@@ -4080,7 +4080,7 @@ async def test_undo_session_load_failure_resumes_queued_messages(tmp_path, monke
         app._undo_requested = True
         app._undo_target_session_id = session.id
         app._undo_target_message_id = "old"
-        app._finish_cancelled(session.id, "old")
+        app._finish_on_ui(app.application.conversation.active_turn_id, app._finish_cancelled, session.id, "old")
 
         await _wait_ask_started(app, pilot)
         assert app._queue_paused_after_undo is False
@@ -4120,7 +4120,7 @@ async def test_undo_write_failure_resumes_queued_messages(tmp_path, monkeypatch)
         app._undo_requested = True
         app._undo_target_session_id = session.id
         app._undo_target_message_id = "old"
-        app._finish_cancelled(session.id, "old")
+        app._finish_on_ui(app.application.conversation.active_turn_id, app._finish_cancelled, session.id, "old")
 
         await _wait_ask_started(app, pilot)
         assert app._queue_paused_after_undo is False
@@ -4528,7 +4528,7 @@ async def test_escape_closes_palette_before_stopping(tmp_path):
         assert widget.value == "/sta"
         await pilot.press("escape")
         assert app._cancel_generation.is_set()
-        app._end_ask()
+        app._end_ask(app.application.conversation.active_turn_id)
 
 
 @pytest.mark.parametrize("size", [(80, 24), (120, 40), (160, 50)])
@@ -5121,7 +5121,188 @@ async def test_ui_finalize_exception_still_releases_request(tmp_path):
         def fail_render():
             raise RuntimeError("synthetic render failure")
 
-        with pytest.raises(RuntimeError):
-            app._finish_on_ui(turn_id, fail_render)
+        app._finish_on_ui(turn_id, fail_render)
         assert app.busy is False
         assert app.application.conversation.ask_active is False
+
+
+async def test_session_switch_failure_keeps_turn_and_queues_message(tmp_path):
+    app = build_app(tmp_path, [])
+    gated = GatedChatModel([AssistantTurn(content="reply A"), AssistantTurn(content="reply B")])
+    gated.gates.extend([threading.Event(), threading.Event()])
+    app.runtime.model = gated
+    session = app.runtime.ensure_session()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._start_ask("original turn")
+        await _wait_ask_started(app, pilot)
+        turn_id = app.application.conversation.active_turn_id
+
+        app.run_worker(lambda: app._session_work("missing-session"), group="session",
+                       thread=True, exclusive=True, exit_on_error=False)
+        for _ in range(200):
+            await pilot.pause()
+            if not app._navigation_busy and any(
+                "Session switch failed" in str(card.render()) for card in app.query(".card")
+            ):
+                break
+        assert app.application.conversation.active_turn_id == turn_id
+        assert app._ask_active is True
+
+        widget = app.query_one("#input", Input)
+        widget.value = "queued during failed switch"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.application.conversation.queue_snapshot().count == 1
+
+        gated.gates[0].set()
+        for _ in range(200):
+            await pilot.pause()
+            replies = app.query(".reply")
+            if replies and "reply B" in str(replies[-1].render()):
+                break
+        gated.gates[1].set()
+        await _wait_idle(app, pilot)
+        loaded = app.application.conversation.current
+        assert loaded.user_texts() == ["original turn", "queued during failed switch"]
+        assert app.application.conversation.active_turn_id is None
+
+
+async def test_model_load_failure_keeps_active_turn_and_queue(tmp_path, monkeypatch):
+    app = build_app(tmp_path, [])
+    gated = GatedChatModel([AssistantTurn(content="reply A"), AssistantTurn(content="reply B")])
+    gated.gates.extend([threading.Event(), threading.Event()])
+    app.runtime.model = gated
+    app.runtime.ensure_session()
+    monkeypatch.setattr(
+        "syvrio.application.settings.SettingsUseCases.model_options",
+        lambda self, *args, **kwargs: (_ for _ in ()).throw(RuntimeError("synthetic model metadata failure")),
+    )
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._start_ask("original turn")
+        await _wait_ask_started(app, pilot)
+        turn_id = app.application.conversation.active_turn_id
+
+        app._command("/model")
+        for _ in range(200):
+            await pilot.pause()
+            if any("Loading models failed" in str(card.render()) for card in app.query(".card")):
+                break
+        assert "synthetic model metadata failure" in str(app.query(".card")[-1].render())
+        assert app.application.conversation.active_turn_id == turn_id
+        assert app._ask_active is True
+
+        widget = app.query_one("#input", Input)
+        widget.value = "queued during model failure"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.application.conversation.queue_snapshot().count == 1
+        gated.gates[0].set()
+        gated.gates[1].set()
+        await _wait_idle(app, pilot)
+        assert app.application.conversation.current.user_texts() == [
+            "original turn",
+            "queued during model failure",
+        ]
+
+
+async def test_navigation_and_background_errors_do_not_touch_active_turn(tmp_path):
+    app = build_app(tmp_path, [])
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._begin_ask(None)
+        turn_id = app.application.conversation.active_turn_id
+        app._begin_navigation()
+
+        app._finish_navigation_error("navigation failed")
+        assert app._navigation_busy is False
+        assert app._ask_active is True
+        assert app.application.conversation.active_turn_id == turn_id
+
+        app._background_error("background failed")
+        assert app._ask_active is True
+        assert app.application.conversation.active_turn_id == turn_id
+        assert app._end_ask(turn_id) is True
+
+
+async def test_generation_finished_recorded_once_and_stale_finish_keeps_queue(tmp_path, monkeypatch):
+    import syvrio.app.chat_app as chat_app_module
+
+    events = []
+    monkeypatch.setattr(chat_app_module, "record_event", lambda name, *args, **kwargs: events.append(name))
+    app = build_app(tmp_path, [])
+    session = None
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app.runtime.ensure_session()
+        app._begin_ask(None)
+        session = app.application.conversation.current
+        turn_id = app.application.conversation.active_turn_id
+        app.application.conversation.enqueue(session.id, "queued message")
+        dispatched = []
+        app._start_ask = lambda line, session_id=None: dispatched.append(line)
+
+        app._finish_on_ui(turn_id, app._finish_reply, "reply", "12:00", "", session.id, "u1")
+        assert events.count("generation.finished") == 1
+        assert dispatched == ["queued message"]
+        assert app.application.conversation.queue_snapshot().count == 0
+        # 重复确认与过期确认都不得重复记录或消费队列。
+        app.application.conversation.enqueue(session.id, "still queued")
+        app._finish_on_ui(turn_id, app._finish_reply, "duplicate", "12:00", "", session.id, "u1")
+        assert events.count("generation.finished") == 1
+        assert dispatched == ["queued message"]
+        assert app.application.conversation.queue_snapshot().count == 1
+
+
+async def test_context_compact_and_import_failures_release_only_own_state(tmp_path, monkeypatch):
+    app = build_app(tmp_path, [])
+    gated = GatedChatModel([AssistantTurn(content="reply")])
+    gated.gates.append(threading.Event())
+    app.runtime.model = gated
+    app.runtime.ensure_session()
+    monkeypatch.setattr(
+        "syvrio.application.settings.SettingsUseCases.context_options",
+        lambda self: (_ for _ in ()).throw(RuntimeError("synthetic context failure")),
+    )
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._begin_ask(None)
+        turn_id = app.application.conversation.active_turn_id
+
+        app._command("/context")
+        for _ in range(200):
+            await pilot.pause()
+            if any("Loading context options failed" in str(card.render()) for card in app.query(".card")):
+                break
+        assert app._context_loading is False
+        assert app.application.conversation.active_turn_id == turn_id
+        assert app._ask_active is True
+
+        app._end_ask(turn_id)
+        gated.gates[0].set()
+
+        def fail_compact(*args, **kwargs):
+            raise RuntimeError("synthetic compact failure")
+
+        monkeypatch.setattr(app.runtime, "force_compact", fail_compact)
+        app._run_compact()
+        for _ in range(200):
+            await pilot.pause()
+            if any("Compaction failed" in str(card.render()) for card in app.query(".card")):
+                break
+        assert app._navigation_busy is False
+        assert app._ask_active is False
+
+        def fail_import(*args, **kwargs):
+            raise RuntimeError("synthetic import failure")
+
+        monkeypatch.setattr(app.application.memory, "import_path", fail_import)
+        app._start_import(tmp_path / "missing.txt", False)
+        for _ in range(200):
+            await pilot.pause()
+            if any("Import failed" in str(card.render()) for card in app.query(".card")):
+                break
+        assert app._navigation_busy is False
+        assert app._ask_active is False
+        assert not app.busy

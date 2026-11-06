@@ -91,7 +91,7 @@ class ChatFlowMixin:
         )
         self._apply_undo_outcome(outcome)
 
-    def _apply_undo_outcome(self, outcome: UndoOutcome, turn_id: int | None = None) -> None:
+    def _apply_undo_outcome(self, outcome: UndoOutcome) -> None:
         """应用层已完成撤销状态变更，这里只更新视图、通知与队列接续。"""
         self._progress_phase = "Undoing"
         self._render_model_status()
@@ -114,7 +114,6 @@ class ChatFlowMixin:
         self._heal_current_session(outcome.target_session_id)
         self.refresh_sessions()
         self.refresh_pending()
-        self._end_ask(turn_id)
         self.update_status()
         if outcome.paused:
             self.notify(
@@ -126,7 +125,6 @@ class ChatFlowMixin:
             # 可安全接续队列（成功后 pause 分支不会走到这里）。
             if outcome.queued_count:
                 self.notify(f"{outcome.queued_count} queued message(s) resumed.")
-            self._drain_pending_intent()
 
     def _apply_undo_view(self, session_id: str, text: str) -> bool:
         """目标会话就是当前视图：从磁盘重载，清除已撤销回合并回填原文。"""
@@ -171,7 +169,6 @@ class ChatFlowMixin:
         self,
         session_id: str | None = None,
         user_message_id: str | None = None,
-        turn_id: int | None = None,
     ) -> None:
         if self._undo_requested:
             self._finish_undo(session_id, user_message_id)
@@ -188,9 +185,7 @@ class ChatFlowMixin:
         self._heal_current_session(sid)
         self.refresh_sessions()
         self.refresh_pending()
-        self._end_ask(turn_id)
         self.update_status()
-        self._drain_pending_intent()
 
     def _start_ask(self, line: str, session_id: str | None = None) -> None:
         stamp = time.strftime("%H:%M")
@@ -251,16 +246,19 @@ class ChatFlowMixin:
         except RuntimeError:
             pass  # 界面已退出：丢弃收尾回调，避免淹没退出流程。
 
-    def _finish_on_ui(self, turn_id: int, fn, *args) -> None:
+    def _finish_on_ui(self, turn_id: int | None, fn, *args) -> None:
         """UI 终态确认；渲染异常也要释放请求，避免输入框永久忙碌。"""
         conversation = self.application.conversation
-        if turn_id is not None and conversation.active_turn_id != turn_id:
-            return  # 过期回调：不渲染、不释放当前请求。
+        if turn_id is None or conversation.active_turn_id != turn_id:
+            return  # 缺失或过期回调：不渲染、不释放当前请求。
         try:
             fn(*args)
+        except Exception as exc:
+            record_event("tui.finalize_failed", exc)
+            self.notify("UI update failed; request state was released.", severity="warning")
         finally:
-            self._end_ask(turn_id)
-            self._drain_pending_intent()
+            if self._end_ask(turn_id):
+                self._drain_pending_intent()
 
     def _ask_work(
         self,
@@ -283,7 +281,7 @@ class ChatFlowMixin:
             line, callbacks, token, session_id
         )
         if result.status == "undo":
-            self._ui(self._finish_on_ui, result.turn_id, self._apply_undo_outcome, result.undo, result.turn_id)
+            self._ui(self._finish_on_ui, result.turn_id, self._apply_undo_outcome, result.undo)
             return
         if result.status == "cancelled":
             self._ui(
@@ -292,7 +290,6 @@ class ChatFlowMixin:
                 self._finish_cancelled,
                 result.session_id,
                 result.user_message_id,
-                result.turn_id,
             )
             return
         if result.status == "failed":
@@ -300,11 +297,10 @@ class ChatFlowMixin:
             self._ui(
                 self._finish_on_ui,
                 result.turn_id,
-                self._finish_error,
+                self._finish_chat_error,
                 result.error or "Request failed",
                 result.session_id,
                 result.user_message_id,
-                result.turn_id,
             )
             return
         reply = result.reply
@@ -322,7 +318,6 @@ class ChatFlowMixin:
             " · ".join(meta),
             result.session_id,
             result.user_message_id,
-            result.turn_id,
         )
 
     # ---------- 流式渲染：帧合并更新，完成/中断后收尾 ----------
@@ -397,7 +392,6 @@ class ChatFlowMixin:
         meta: str,
         session_id: str | None,
         user_message_id: str | None = None,
-        turn_id: int | None = None,
     ) -> None:
         if self._undo_requested:
             # 用户已要求撤销：自然完成与取消竞争时只撤销一次，不保留最终回复。
@@ -423,15 +417,12 @@ class ChatFlowMixin:
         self.refresh_sessions()  # 首条消息会创建会话，侧栏需要随之出现
         self.refresh_pending()
         self.update_status()
-        self._end_ask(turn_id)
-        self._drain_pending_intent()
 
-    def _finish_error(
+    def _finish_chat_error(
         self,
         message: str,
         session_id: str | None = None,
         user_message_id: str | None = None,
-        turn_id: int | None = None,
     ) -> None:
         if self._undo_requested:
             self._finish_undo(session_id, user_message_id, error=message)
@@ -450,14 +441,25 @@ class ChatFlowMixin:
             self.notify(f"Background request failed: {message}")
         self._heal_current_session(sid)
         self.refresh_sessions()
-        self._end_ask(turn_id)
-        # 通用失败出口：压缩/导入/切换失败走这里时还要释放导航忙。
+        self.refresh_pending()
+        self.update_status()
+
+    def _finish_navigation_error(self, message: str, *, drop_pending: bool = False) -> None:
+        """只释放本次导航状态，不触碰活动聊天请求。"""
+        self.add_card(message)
         self._end_navigation()
-        if self._pending_command:
-            # 切回目标会话失败：挂起的命令失去目标上下文，丢弃而非误伤当前会话。
-            self.notify("Queued command dropped: session switch failed")
-            self.application.conversation.set_pending_command(None)
+        if drop_pending:
+            item = self.application.conversation.take_pending_command()
+            if item is not None:
+                # 切回目标会话失败：挂起的命令失去目标上下文，丢弃而非误伤当前会话。
+                self.notify("Queued command dropped: session switch failed")
+        self.update_status()
         self._drain_pending_intent()
+
+    def _background_error(self, message: str) -> None:
+        """普通后台任务失败：只展示错误并恢复自身 UI 状态。"""
+        self.add_card(message)
+        self._release_input_if_idle()
 
     def _plan_is_current(self) -> bool:
         """last_plan 属于别的会话时不得污染当前视图的上下文用量显示。"""

@@ -413,7 +413,7 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
         except Exception as exc:
             # 会话文件损坏/被删等异常不能让 busy 卡死：留在原会话并提示。
             record_event("session.failed", exc)
-            self.call_from_thread(self._finish_error, f"Session switch failed: {exc}")
+            self.call_from_thread(self._finish_navigation_error, f"Session switch failed: {exc}", drop_pending=True)
             return
         self.call_from_thread(self._after_session_switch, stats, label)
         # 沉淀延后到后台：刚切走的会话标记 distill_deferred，这里立即补；
@@ -721,18 +721,18 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
         self.query_one("#input", BarInput).set_hint("Message to queue · Esc to stop")
         self._render_model_status()
 
-    def _end_ask(self, turn_id: int | None = None) -> None:
+    def _end_ask(self, turn_id: int | None) -> bool:
+        if turn_id is None or not self.application.conversation.end_turn(turn_id):
+            return False
         record_event("generation.finished", queued=self.application.conversation.queue_snapshot().count,
-                     elapsed_ms=round((time.monotonic() - self._progress_started) * 1000)
-                     if self._ask_active else 0)
-        if not self.application.conversation.end_turn(turn_id):
-            return
+                     elapsed_ms=round((time.monotonic() - self._progress_started) * 1000))
         self._stream_widget = None
         self._stream_buffer = ""
         self._stream_stamp = ""
         self._stream_flush_scheduled = False
         self.query_one("#input", BarInput).set_hint("Message or /command")
         self._release_input_if_idle()
+        return True
 
     def _release_input_if_idle(self) -> None:
         self._reflection_activity()

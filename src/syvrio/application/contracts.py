@@ -70,7 +70,7 @@ class TurnResult:
     status: str  # ok / cancelled / failed / undo
     session_id: str | None = None
     user_message_id: str | None = None
-    turn_id: int = 0
+    turn_id: int | None = None
     reply: AgentReply | None = None
     content: str = ""
     error: str | None = None

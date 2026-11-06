@@ -314,7 +314,10 @@ class ConversationUseCases:
         error = None
         exception = None
         with self._lock:
-            turn_id = self._active_turn_id or 0
+            turn_id = self._active_turn_id
+        if turn_id is None:
+            record_event("turn.unbound", RuntimeError("run_turn without begin_turn"))
+            return TurnResult(status="failed", error="No active turn", turn_id=None)
         try:
             if session_id and not (
                 self.runtime.has_session and self.runtime.session.id == session_id
@@ -361,10 +364,12 @@ class ConversationUseCases:
             undo=undo,
         )
 
-    def end_turn(self, turn_id: int | None = None) -> bool:
-        """确认并释放请求状态；过期 Turn 的迟到回调不得清理新请求。"""
+    def end_turn(self, turn_id: int) -> bool:
+        """只有匹配的活动 Turn 才能释放请求状态；缺失或过期 ID 一律拒绝。"""
+        if turn_id is None:
+            return False
         with self._lock:
-            if turn_id is not None and self._active_turn_id != turn_id:
+            if self._active_turn_id != turn_id:
                 return False
             self._ask_active = False
             self._ask_in_flight = None

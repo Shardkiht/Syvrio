@@ -341,7 +341,7 @@ class ChatCommandsMixin:
             events = self.application.conversation.force_compact()
         except Exception as exc:
             record_event("command.failed", exc)
-            self.call_from_thread(self._finish_error, f"Compaction failed: {exc}")
+            self.call_from_thread(self._finish_navigation_error, f"Compaction failed: {exc}")
             return
         self.call_from_thread(self._after_compact, events)
 
@@ -405,7 +405,7 @@ class ChatCommandsMixin:
             )
         except Exception as exc:
             record_event("command.failed", exc)
-            self.call_from_thread(self._finish_error, f"Import failed: {exc}")
+            self.call_from_thread(self._finish_navigation_error, f"Import failed: {exc}")
             return
         self.call_from_thread(self.refresh_pending)
         message = "Import complete." if apply else "Preview complete; use /import <path> --apply to analyze again and save."
@@ -447,7 +447,7 @@ class ChatCommandsMixin:
             entries = self._model_entries(fetched, capabilities=False)
         except Exception as exc:
             record_event("command.failed", exc)
-            self.call_from_thread(self._finish_error, f"Loading models failed: {exc}")
+            self.call_from_thread(self._background_error, f"Loading models failed: {exc}")
             return
         self.call_from_thread(self._show_model_picker, entries, True, refresh)
 
@@ -668,7 +668,7 @@ class ChatCommandsMixin:
 
     def _context_failed(self, message: str) -> None:
         self._context_loading = False
-        self._finish_error(f"Loading context options failed: {message}")
+        self._background_error(f"Loading context options failed: {message}")
 
     def _context_picked(self, value) -> None:
         if value is None:

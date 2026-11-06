@@ -171,11 +171,12 @@ def test_fast_submissions_keep_order_and_single_active_turn(tmp_path):
     runtime, conv = build(tmp_path, [AssistantTurn(content=f"reply {i}") for i in range(3)])
     runtime.ensure_session()
     token = conv.begin_turn()
+    first_turn = conv.active_turn_id
     for line in ("m1", "m2", "m3"):
         assert conv.submit_during_ask(line).kind == "queued"
     assert [item.line for item in conv.queue_snapshot().items] == ["m1", "m2", "m3"]
 
-    assert conv.end_turn() is True
+    assert conv.end_turn(first_turn) is True
     for expected in ("m1", "m2", "m3"):
         item = conv.take_next()
         assert item is not None and item.line == expected
@@ -186,3 +187,27 @@ def test_fast_submissions_keep_order_and_single_active_turn(tmp_path):
         assert conv.end_turn(result.turn_id) is True
     assert conv.ask_active is False
     assert conv.queue_snapshot().count == 0
+
+def test_end_turn_requires_matching_turn_id(tmp_path):
+    runtime, conv = build(tmp_path, [AssistantTurn(content="reply")])
+    runtime.ensure_session()
+    conv.begin_turn()
+    turn_id = conv.active_turn_id
+
+    assert conv.end_turn(None) is False
+    assert conv.ask_active is True and conv.active_turn_id == turn_id
+    assert conv.end_turn(turn_id + 1) is False
+    assert conv.ask_active is True and conv.active_turn_id == turn_id
+    assert conv.end_turn(turn_id) is True
+    assert conv.ask_active is False and conv.active_turn_id is None
+
+
+def test_run_turn_without_active_turn_does_not_fabricate_id(tmp_path):
+    runtime, conv = build(tmp_path, [])
+    runtime.ensure_session()
+    result = conv.run_turn("message", TurnCallbacks(), threading.Event())
+
+    assert result.status == "failed"
+    assert result.turn_id is None
+    assert conv.ask_active is False
+    assert conv.active_turn_id is None

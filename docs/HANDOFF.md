@@ -6,6 +6,13 @@
 - Agent `search` 工具与 MCP `search` 共用该配置；只有值大于 0 时才限制，错误信息随配置值变化。自动回退的 `max_engines`（默认 3）语义不变，仍只控制首选引擎失败后的候补尝试数。
 - 验证：`tests/test_setup.py`、`tests/test_web_search.py`、`tests/test_server.py` 164 passed；新增默认接受 4 个引擎、配置上限拒绝超限、配置往返保留字段的回归。
 
+## Application Layer 生命周期收口（2026-11-06）
+
+- `ConversationUseCases.end_turn()` 现在必须传入有效 `turn_id`；`None`、过期或不匹配均返回 `False`，不修改任何请求状态。`run_turn()` 不再用 `active_turn_id or 0` 兜底，没有活动 Turn 时返回 `failed` 且不伪造 ID。
+- 错误处理拆分为三类：`_finish_chat_error`（只收尾聊天 Turn）、`_finish_navigation_error`（只释放导航状态，必要时丢弃失去目标上下文的 pending command）、`_background_error`（模型/Context 等普通后台任务只展示错误并恢复自身 UI）。会话切换失败不再释放正在生成的请求。
+- Turn 终态确认只剩 `_finish_on_ui()`：校验 Turn ID、渲染结果、异常时记录 `tui.finalize_failed`，确认成功后只触发一次 `generation.finished` 和一次 FIFO 接续。`_finish_reply` / `_finish_chat_error` / `_finish_cancelled` / `_apply_undo_outcome` 不再各自释放状态或调度队列。
+- 新增确定性测试覆盖 `end_turn(None)`、无活动 Turn 的 `run_turn`、生成中会话切换失败、模型加载失败、Context/Compact/Import 失败隔离、单次终态确认与过期回调不消耗队列。真实 TUI/LLM 验收记录见交付报告。
+
 ## Application Layer 稳定性修复（2026-11-06）
 
 - P1 会话加载异常：`run_turn()` 现在把目标会话加载纳入统一 try，加载失败返回 `failed` TurnResult（保留目标 session_id、无 user_message_id 时不执行 Undo），记录 `chat.failed`，UI 收尾后恢复输入与队列。
