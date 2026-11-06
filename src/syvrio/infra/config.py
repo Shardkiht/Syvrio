@@ -131,6 +131,8 @@ class SearchConfig:
     fallback_engines: list[str] = field(default_factory=lambda: ["baidu", "duckduckgo", "sogou"])
     # 每次自动搜索最多尝试的上游引擎数（含首选）；显式指定引擎时不回退。
     max_engines: int = 3
+    # 显式 search_engine 数组允许的最大引擎数；0 表示不限制。
+    max_search_engines: int = 0
     # 一次搜索所有引擎回退共享的超时预算，秒；超出即停止候补。
     timeout_budget: float = 25.0
     # 一次搜索跨所有 provider 共享的请求次数上限；超出即返回当前最佳候选。
@@ -318,7 +320,7 @@ def _validate_config(data: dict) -> None:
     for name in (
         "llm.num_retries", "llm.temperature", "chat.reserve_output_tokens",
         "chat.keep_recent_tokens", "chat.auto_recall", "chat.recall_context_turns",
-        "search.cache_ttl", "chat.reflect_request_budget",
+        "search.cache_ttl", "search.max_search_engines", "chat.reflect_request_budget",
     ):
         _validate_range(data, name)
     for name in ("confidence_threshold", "chat.compact_threshold"):
@@ -452,6 +454,7 @@ def load_config(path: Path | str | None = None) -> Config:
         fetch_timeout=float(search_raw.get("fetch_timeout", 45.0)),
         fallback_engines=fallback_engines,
         max_engines=max(1, int(search_raw.get("max_engines", 3))),
+        max_search_engines=max(0, int(search_raw.get("max_search_engines", 0))),
         timeout_budget=float(search_raw.get("timeout_budget", 25.0)),
         max_requests=int(search_raw.get("max_requests", 9)),
         anysearch_zone=str(search_raw.get("anysearch_zone", "cn")),

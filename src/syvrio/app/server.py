@@ -138,7 +138,9 @@ def build_server(
                     "hint": "query 为空",
                 }
             try:
-                engines = normalize_search_engines(search_engine, SEARCH_ENGINES)
+                engines = normalize_search_engines(
+                    search_engine, SEARCH_ENGINES, search_config.max_search_engines
+                )
             except ValueError as exc:
                 return {
                     "results": [],

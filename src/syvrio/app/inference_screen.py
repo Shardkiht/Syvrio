@@ -7,13 +7,15 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from rich.console import Console, ConsoleOptions, RenderResult
 from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Label, ListItem, ListView, Static, TextArea
+from textual.widgets import Button, OptionList, Static, TextArea
+from textual.widgets.option_list import Option
 
 from ..memory.models import Inference
 
@@ -43,16 +45,34 @@ def _short_id(source_id: str) -> str:
     return source_id if len(source_id) <= 18 else source_id[:10] + "…" + source_id[-5:]
 
 
-class InferenceItem(ListItem):
-    def __init__(self, item: Inference) -> None:
-        self.item = item
-        super().__init__(
-            Label(
-                f"{STATUS_LABELS[item.status]} · {KIND_LABELS.get(item.kind, item.kind)}",
-                classes=f"inference-item-meta status-{item.status}",
-            ),
-            Label(item.text, classes="inference-item-text"),
-        )
+_META_COLORS = {"hypothesis": "#6cb6ff", "rejected": "#6f6f6f", "superseded": "#6f6f6f"}
+
+
+def _prompt(item: Inference) -> Text:
+    """单条选项内容：状态行 + 单行省略正文；OptionList 只保留文本，挂载成本低。"""
+    prompt = Text(no_wrap=True, overflow="ellipsis")
+    prompt.append(
+        f"{STATUS_LABELS[item.status]} · {KIND_LABELS.get(item.kind, item.kind)}",
+        style=_META_COLORS.get(item.status, "#8e8e8e"),
+    )
+    prompt.append("\n")
+    prompt.append(item.text, style="#d4d4d4")
+    prompt.append("\n")  # 保留旧 ListItem 的一行间距。
+    return prompt
+
+
+class _NoWrap:
+    """包一层 Rich renderable，避免 visualize() 转成 Content 后丢失单行省略。"""
+
+    def __init__(self, text: Text) -> None:
+        self.text = text
+
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        yield self.text
+
+
+def _option(item: Inference) -> Option:
+    return Option(_NoWrap(_prompt(item)), id=item.id)
 
 
 class InferenceScreen(ModalScreen):
@@ -83,6 +103,10 @@ class InferenceScreen(ModalScreen):
         self._detail_item: Inference | None = None
         self._busy = False
         self._editing = False
+        self._by_id: dict[str, Inference] = {}
+        self._rendered: dict[str, Inference] = {}
+        self._visible_ids: set[str] = set()
+        self._list_filter: str | None = None
 
     # ---------- 布局 ----------
     def compose(self) -> ComposeResult:
@@ -92,7 +116,7 @@ class InferenceScreen(ModalScreen):
             yield Static("", id="inference-filters")
             yield Static("No inferences yet. Reflection and profile review will add them here.", id="inference-empty")
             with Horizontal(id="inference-body"):
-                yield ListView(id="inference-list", classes="thin-scroll")
+                yield OptionList(id="inference-list", classes="thin-scroll")
                 with Vertical(id="inference-detail"):
                     with VerticalScroll(id="inference-detail-body", classes="thin-scroll"):
                         yield Static(id="inference-detail-status")
@@ -125,7 +149,7 @@ class InferenceScreen(ModalScreen):
         self.query_one("#inference-card").styles.height = card_height if self._items else "auto"
         body = self.query_one("#inference-body")
         body.styles.layout = "vertical" if narrow else "horizontal"
-        listing = self.query_one("#inference-list", ListView)
+        listing = self.query_one("#inference-list", OptionList)
         listing.styles.width = "1fr" if narrow else "38%"
         listing.styles.height = "50%" if narrow else "1fr"
         detail = self.query_one("#inference-detail")
@@ -142,16 +166,17 @@ class InferenceScreen(ModalScreen):
         feedback: str | None = None,
     ) -> None:
         self._items = list(items)
+        self._by_id = {item.id: item for item in items}
         self._sources = dict(sources)
         self._busy = False
         self._editing = False
         if focus_id is not None:
             self._selected_id = focus_id
-        elif self._selected_id not in {item.id for item in items}:
+        elif self._selected_id not in self._by_id:
             self._selected_id = None
         self._set_message("")
         self._refresh_filters()
-        self._rebuild_list()
+        self._sync_list()
         if feedback:
             if self._filter == "hypothesis":
                 feedback += f" {len(self._filtered())} pending remaining."
@@ -178,26 +203,48 @@ class InferenceScreen(ModalScreen):
             return list(self._items)
         return [item for item in self._items if item.status == self._filter]
 
-    def _rebuild_list(self) -> None:
-        listing = self.query_one("#inference-list", ListView)
-        listing.clear()
+    def _sync_list(self) -> None:
+        """按 id 增量同步选项；确认/拒绝只移除一条或改一条，不再整表重建。"""
+        listing = self.query_one("#inference-list", OptionList)
         visible = self._filtered()
+        self._visible_ids = {item.id for item in visible}
+        new_ids = [item.id for item in visible]
+        current_ids = [option.id for option in listing.options]
+        rebuild = self._list_filter != self._filter
+        if not rebuild:
+            removed = [index for index, item_id in enumerate(current_ids) if item_id not in self._visible_ids]
+            for index in reversed(removed):
+                listing.remove_option_at_index(index)
+            current_ids = [item_id for item_id in current_ids if item_id in self._visible_ids]
+            rebuild = current_ids != new_ids[: len(current_ids)]
+        if rebuild:
+            listing.clear_options()
+            listing.add_options(_option(item) for item in visible)
+        else:
+            for index, item in enumerate(visible[: len(current_ids)]):
+                if self._rendered.get(item.id) != item:
+                    listing.replace_option_prompt_at_index(index, _NoWrap(_prompt(item)))
+            for item in visible[len(current_ids):]:
+                listing.add_option(_option(item))
+        self._list_filter = self._filter
+        self._rendered = {item.id: item for item in visible}
         selected_index = 0
-        for index, item in enumerate(visible):
-            listing.append(InferenceItem(item))
-            if item.id == self._selected_id:
-                selected_index = index
         if visible:
-            listing.index = selected_index
+            selected_index = next(
+                (index for index, item in enumerate(visible) if item.id == self._selected_id), 0
+            )
+            listing.highlighted = selected_index
             self._selected_id = visible[selected_index].id
-            self.query_one("#inference-list", ListView).focus()
+            listing.focus()
+        else:
+            listing.highlighted = None
         self._show_detail(visible[selected_index] if visible else None)
 
     def _current(self) -> Inference | None:
         if self._detail_item is not None:
             return self._detail_item
-        child = self.query_one("#inference-list", ListView).highlighted_child
-        return child.item if isinstance(child, InferenceItem) else None
+        option = self.query_one("#inference-list", OptionList).highlighted_option
+        return self._by_id.get(option.id) if option is not None and option.id else None
 
     def _show_detail(self, item: Inference | None) -> None:
         self._detail_item = item
@@ -244,7 +291,7 @@ class InferenceScreen(ModalScreen):
             return
         self._filter = key
         self._refresh_filters()
-        self._rebuild_list()
+        self._sync_list()
 
     def _move_filter(self, step: int) -> None:
         keys = [key for key, _ in FILTERS]
@@ -263,13 +310,14 @@ class InferenceScreen(ModalScreen):
         if event.widget.id == "inference-filters" and not self._editing and not self._busy:
             self._move_filter(1)
 
-    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
-        if isinstance(event.item, InferenceItem) and not self._editing:
-            # 列表重建期间，旧筛选的高亮事件可能延迟到达，不能把过期项写回详情。
-            if event.item.item.id in {item.id for item in self._filtered()}:
-                self._show_detail(event.item.item)
+    def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
+        # 列表变更期间旧高亮事件可能延迟到达，不能把已移出筛选的项写回详情。
+        if not self._editing and event.option.id in self._visible_ids:
+            item = self._by_id.get(event.option.id)
+            if item is not None:
+                self._show_detail(item)
 
-    def on_list_view_selected(self, event: ListView.Selected) -> None:
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         event.stop()
         for action in ("confirm", "reject", "correct"):
             button = self.query_one(f"#inference-{action}", Button)

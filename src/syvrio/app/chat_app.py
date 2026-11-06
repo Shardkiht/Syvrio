@@ -24,6 +24,7 @@ from ..agent.session import Session, SessionStore
 from ..infra.search.daemon import ensure_search_daemon
 from ..infra.tokens import format_tokens
 from ..infra.diagnostics import record_event
+from ..llm import warm_model_metadata
 from ..memory.service import MemoryService
 from .chat_commands import ChatCommandsMixin
 from .chat_git import ChatGitMixin
@@ -85,6 +86,7 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
         self._model_status = Static("", id="model-status")
         self._pending_switch: str | None = None
         self._pending_new = False
+        self._context_loading = False
         # 排队命令绑定提交时的会话：目标不是当前会话时先切回再执行。
         self._pending_command: _QueuedLine | None = None
         self._queue: list[_QueuedLine] = []
@@ -142,6 +144,9 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
         self._set_sidebar_visible(False)
         self._run_catchup()
         self._warm_search()
+        # 首次 /model、/context 会同步导入 LiteLLM；启动预热避免开屏空白期。
+        self.run_worker(partial(warm_model_metadata, self.service.config.llm.litellm_model()),
+                        group="warm", thread=True, exit_on_error=False)
         self._start_auto_reflection()
         self._start_git_scheduler()
 
@@ -231,10 +236,21 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
         if len(self.screen_stack) > 1:
             for widget in self.screen.query(Input):
                 if widget.can_focus and widget.display and not widget.disabled:
-                    widget.focus()
-                    return
+                    widget.focus(); return
             return
         self.query_one("#input", Input).focus()
+
+    def pop_screen(self):
+        # 模态屏关闭后恢复输入框焦点与硬件光标；否则原生竖线会停在左上角闪烁。
+        result = super().pop_screen()
+        self.call_after_refresh(self._restore_input_cursor)
+        return result
+
+    def _restore_input_cursor(self) -> None:
+        for widget in self.screen.query(Input):
+            if widget.has_focus:
+                self.cursor_position = widget.cursor_screen_offset
+                return
 
     def action_focus_next(self) -> None:
         self._focus_active_input()
@@ -424,12 +440,7 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
             message = "New session · created after your first message"
         else:
             self.build_transcript()
-            if (
-                self._ask_active
-                and self._ask_in_flight is not None
-                and self.runtime.has_session
-                and self.runtime.current.id == self._ask_in_flight
-            ):
+            if self._ask_active and self._ask_in_flight is not None and self.runtime.has_session and self.runtime.current.id == self._ask_in_flight:
                 # 切回生成中的会话：磁盘重建负责已完成轮次，活跃段从状态重放。
                 self._replay_stream()
         if stats.get("admitted") or stats.get("queued"):
@@ -471,11 +482,7 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
             self.notify("Cannot delete the current session; use /new first.")
             self._focus_session_picker_or_input()
             return False
-        if (
-            (self._pending_command and self._pending_command.session_id == session_id)
-            or session_id == self._ask_in_flight
-            or any(item.session_id == session_id for item in self._queue)
-        ):
+        if (self._pending_command and self._pending_command.session_id == session_id) or session_id == self._ask_in_flight or any(item.session_id == session_id for item in self._queue):
             self.notify("Session is generating or has queued tasks; try again later.")
             self._focus_session_picker_or_input()
             return False

@@ -1185,7 +1185,7 @@ def test_agent_search_tool_accepts_legacy_engine_and_multiple_engines(tmp_path):
     assert provider.queries[-1].engines == ("bing", "baidu")
 
 
-def test_agent_search_tool_rejects_too_many_engines(tmp_path):
+def test_agent_search_tool_accepts_many_engines(tmp_path):
     provider = FakeProvider([SearchResult("标题", "https://example.com", "摘要")])
     router = SearchRouter({"fake": provider}, order=["fake"])
     config = Config(
@@ -1204,8 +1204,32 @@ def test_agent_search_tool_rejects_too_many_engines(tmp_path):
         {"query": "查询", "search_engine": ["bing", "baidu", "sogou", "brave"]},
     )
 
+    assert outcome.ok is True
+    assert provider.calls == 1
+    assert provider.queries[0].engines == ("bing", "baidu", "sogou", "brave")
+
+
+def test_agent_search_tool_honors_configured_engine_limit(tmp_path):
+    provider = FakeProvider([SearchResult("标题", "https://example.com", "摘要")])
+    router = SearchRouter({"fake": provider}, order=["fake"])
+    config = Config(
+        vault=tmp_path / "vault",
+        llm=LLMConfig(),
+        chat=ChatConfig(),
+        search=SearchConfig(enabled=True, max_search_engines=2),
+    )
+    service = MemoryService(config)
+    service.init_vault()
+    session = SessionStore(config.vault).create()
+    tools = build_tools(service, session, search_router=router)
+
+    outcome = tools.execute(
+        "search",
+        {"query": "查询", "search_engine": ["bing", "baidu", "sogou"]},
+    )
+
     assert outcome.ok is False
-    assert "at most 3 search engines" in outcome.display
+    assert "at most 2 search engines" in outcome.display
     assert provider.calls == 0
 
 

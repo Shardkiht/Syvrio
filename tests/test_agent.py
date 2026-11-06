@@ -528,6 +528,34 @@ def test_model_options_uses_fetched_models(service):
     assert "future-model" in {option.model for option in options}
 
 
+def test_model_options_merges_short_fetched_list_with_presets(service):
+    """线上列表只含当前模型时仍保留预设模型，否则选择器只剩一项、方向键无事可做。"""
+    from syvrio.app import actions
+
+    options = actions.model_options(service, ["deepseek-flash"])
+    models = {option.model for option in options if option.provider == "deepseek"}
+
+    assert "deepseek-flash" in models
+    assert "deepseek-v4-pro" in models
+    assert len(options) > 1
+
+
+def test_model_options_can_skip_metadata_for_fast_open(service, monkeypatch):
+    from syvrio.app import actions
+
+    monkeypatch.setattr(
+        actions, "model_metadata", lambda *_: pytest.fail("快速开屏不应读取模型元数据")
+    )
+    monkeypatch.setattr(
+        actions, "supported_params", lambda *_: pytest.fail("快速开屏不应读取模型能力")
+    )
+
+    options = actions.model_options(service, capabilities=False)
+
+    assert options[0].current
+    assert "(" not in options[0].label
+
+
 def test_provider_options_mark_current_and_unconfigured(service):
     from syvrio.app import actions
 

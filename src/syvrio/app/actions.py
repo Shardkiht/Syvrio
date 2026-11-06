@@ -18,9 +18,14 @@ class ModelOption:
 
 
 def model_options(
-    service: MemoryService, fetched: list[str] | None = None
+    service: MemoryService,
+    fetched: list[str] | None = None,
+    capabilities: bool = True,
 ) -> list[ModelOption]:
-    """枚举可选模型；fetched 是当前供应商的缓存/线上列表，空时退回预设模型。"""
+    """枚举可选模型；fetched 是当前供应商的缓存/线上列表，空时退回预设模型。
+
+    capabilities=False 跳过 LiteLLM 元数据，先用基础标签开屏，再由后台补全。
+    """
     from dataclasses import replace
     from ..infra.providers import PRESETS, display_model, has_api_key, provider_label
 
@@ -31,7 +36,11 @@ def model_options(
             continue
         if preset.key != current.provider and not has_api_key(preset):
             continue
-        models = fetched if preset.key == current.provider and fetched else list(preset.models)
+        models = list(preset.models)
+        if preset.key == current.provider and fetched:
+            # 线上 /models 可能只返回当前一个模型（如 Spark）；与预设合并，
+            # 避免选择器里只剩一项、方向键看起来失效。
+            models = list(fetched) + [model for model in preset.models if model not in fetched]
         entries.extend((preset.key, model) for model in models)
     if current.provider not in {preset.key for preset in PRESETS}:
         entries = [(current.provider, model) for model in (fetched or [current.model])] + entries
@@ -49,16 +58,17 @@ def model_options(
             provider=provider,
             model=model,
         ).litellm_model()
-        info = model_metadata(key)
         caps = []
-        max_input = info.get("max_input_tokens")
-        if max_input:
-            try:
-                caps.append(format_tokens(int(max_input)))
-            except (TypeError, ValueError):
-                pass
-        if "reasoning_effort" in supported_params(key):
-            caps.append("reasoning")
+        if capabilities:
+            info = model_metadata(key)
+            max_input = info.get("max_input_tokens")
+            if max_input:
+                try:
+                    caps.append(format_tokens(int(max_input)))
+                except (TypeError, ValueError):
+                    pass
+            if "reasoning_effort" in supported_params(key):
+                caps.append("reasoning")
         label = f"{provider_label(provider)} · {display_model(model)}"
         if caps:
             label += f"  ({', '.join(caps)})"

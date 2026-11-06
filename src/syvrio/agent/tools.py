@@ -9,7 +9,6 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from ..infra.search import (
-    MAX_SEARCH_ENGINES,
     SEARCH_ENGINES,
     ProviderError,
     SearchQuery,
@@ -518,7 +517,9 @@ def build_tools(
                     data=payload,
                 )
             try:
-                engines = normalize_search_engines(requested_engines, SEARCH_ENGINES)
+                engines = normalize_search_engines(
+                    requested_engines, SEARCH_ENGINES, search_config.max_search_engines
+                )
             except ValueError as exc:
                 payload = {
                     "results": [],
@@ -645,12 +646,12 @@ def build_tools(
                                     "type": "array",
                                     "items": {"type": "string", "enum": list(SEARCH_ENGINES)},
                                     "minItems": 1,
-                                    "maxItems": MAX_SEARCH_ENGINES,
                                 },
                             ],
                             "default": "auto",
                             "description": (
-                                "上游搜索引擎，可传一个或最多三个（数组）；"
+                                "上游搜索引擎，可传单个或数组（数量上限由 "
+                                "search.max_search_engines 配置，0 不限）；"
                                 "结果跑题时换 baidu/sogou 重试"
                             ),
                         },

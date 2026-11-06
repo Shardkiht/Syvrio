@@ -1,5 +1,23 @@
 # 开发交接
 
+## 搜索显式引擎列表配置化（2026-11-06）
+
+- 移除代码内固定的 3 引擎上限；新增 `search.max_search_engines`，默认 `0` 表示不限制，写入 `config.example.toml`、TUI 生成的配置与中英文 README。
+- Agent `search` 工具与 MCP `search` 共用该配置；只有值大于 0 时才限制，错误信息随配置值变化。自动回退的 `max_engines`（默认 3）语义不变，仍只控制首选引擎失败后的候补尝试数。
+- 验证：`tests/test_setup.py`、`tests/test_web_search.py`、`tests/test_server.py` 164 passed；新增默认接受 4 个引擎、配置上限拒绝超限、配置往返保留字段的回归。
+
+## TUI 焦点与性能专项回归（2026-11-06）
+
+- 分支 `evolution`（跟踪 `origin/feature-memory-evolution`），基线 `ea163a3`；本轮改动仅在工作区，未 commit、未 push。
+- `/model` 首次打开此前在 Worker 里先算完 LiteLLM 能力标签才挂屏（本机冷启动 3.7–9.2s）；改为先用基础标签开屏、后台刷新补全能力标签并批量挂载。搜索框内按 ↑↓ 只移动列表高亮，不再把焦点移到列表，输入过滤可连续进行；后台刷新按值保留搜索过滤和高亮项，不再把键盘选择重置到第 1 项。启动时后台预热当前模型元数据，预热完成后 `/model` 约 0.2–0.8s、`/context` 0.01s 开屏。
+- `/context` 此前在 UI 线程同步读取模型元数据（冷启动实测阻塞 3.4–6.7s）；改为 Worker 构建选项，加载期间事件循环保持响应（最大间隔 <0.1s），重复触发只保留一个等待；失败显示错误并解除加载锁。
+- `/inferences` 此前每次确认/拒绝/编辑都清空并逐条重建 ListView；改为文本型 OptionList + 按 id 增量同步（只删/改变化项），保留选中与详情。400 条整表重建 2.56s→0.07–0.12s，1000 条 11.7s→0.14–0.25s；单次确认 UI 同步 2–8ms，后端读取/失效校验仍为 O(n)（400 条约 20–40ms），日志解析不是主要瓶颈。
+- 实测：400 条 Pending 时确认按键到反馈 4.95s→0.44s（测试器轮询口径；核心阶段约 50ms）；后台刷新后选中项与键盘焦点保持。
+- 测试：`tests/test_chat_app.py` 191 passed；`tests/test_agent.py`、`tests/test_inference.py`、`tests/test_context.py` 96 passed。测试侧另修复 Windows GBK 下 Git 日志读取（显式 UTF-8）及 Git 同步启动、会话栏布局的时序等待。
+- 隔离真实应用冒烟（实际 `ChatApp` + 磁盘配置 + 临时合成 Vault，非原生终端）：`/model` 0.4–0.8s 开屏，↑↓ 保持搜索框焦点并移动高亮，后台补全后高亮与焦点保持；`/context` 0.01–0.07s；`/inferences` 400 条开屏 0.19–0.27s，连续 5 次确认约 0.1–0.4s，编辑保存成功且事实数不变；全程 0 次模型调用。
+- 未读取真实 Vault/Keyring，未调用真实模型、搜索或远端 Git；预览仅使用合成数据。Textual SVG 导出的中文字形受回退字体影响，真实终端字形未重新人工验证。
+- 后续修正（同日晚）：`/model` 的线上 `/models` 只返回当前一个模型时，旧的“用线上列表替换预设”会让选择器只剩一项、↑↓ 看起来无效；改为线上列表与供应商预设合并。模态屏打开时焦点在布局前建立，硬件光标停在旧坐标（左上角）闪烁；改为布局后再次聚焦并校正 `cursor_position`，关闭模态屏后恢复到输入框插入点。`tests/test_chat_app.py` 相关 31 passed，`tests/test_agent.py -k model_options` 4 passed。
+
 ## 二级界面统一与高风险操作保护（2026-11-05）
 
 - 分支 `evolution`（跟踪 `origin/feature-memory-evolution`），基线 `dfec0a2`；本轮改动与本记录在同一提交中，推送目标由用户明确授权。

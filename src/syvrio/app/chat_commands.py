@@ -456,15 +456,18 @@ class ChatCommandsMixin:
     def _open_models_work(self, refresh: bool) -> None:
         fetched = None if refresh else cached_provider_models(self.service.config.llm)
         try:
-            entries = self._model_entries(fetched)
+            # 先不带能力标签开屏：LiteLLM 元数据首次导入很慢，放到后台刷新补全。
+            entries = self._model_entries(fetched, capabilities=False)
         except Exception as exc:
             record_event("command.failed", exc)
             self.call_from_thread(self._finish_error, f"Loading models failed: {exc}")
             return
         self.call_from_thread(self._show_model_picker, entries, True, refresh)
 
-    def _model_entries(self, fetched: list[str] | None = None) -> list[tuple]:
-        options = actions.model_options(self.service, fetched)
+    def _model_entries(
+        self, fetched: list[str] | None = None, *, capabilities: bool = True
+    ) -> list[tuple]:
+        options = actions.model_options(self.service, fetched, capabilities)
         return [
             (option.label, (option.provider, option.model), option.current)
             for option in options
@@ -475,7 +478,7 @@ class ChatCommandsMixin:
         entries: list[tuple],
         background_refresh: bool = False,
         refresh: bool = False,
-    ) -> None:
+    ) -> PickScreen:
         self._drain_pending_intent()
         picker = ModelPickerScreen(
             f"Current model: {self.runtime.model_label}",
@@ -486,6 +489,7 @@ class ChatCommandsMixin:
         self.push_screen(picker)
         if background_refresh:
             self._refresh_models(picker, refresh)
+        return picker
 
     def _refresh_models(self, picker: PickScreen, refresh: bool = False) -> None:
         self.run_worker(
@@ -498,11 +502,14 @@ class ChatCommandsMixin:
     def _refresh_models_work(self, picker: PickScreen, refresh: bool = False) -> None:
         try:
             fetched = fetch_provider_models(self.service.config.llm, refresh=refresh)
-            entries = self._model_entries(fetched) if fetched else None
+            # 即使线上列表不可用，也要用完整能力标签覆盖先前的快速清单。
+            entries = self._model_entries(
+                fetched or cached_provider_models(self.service.config.llm)
+            )
         except Exception as exc:
             record_event("command.failed", exc)
             return
-        if entries is not None:
+        if entries:
             self.call_from_thread(self._apply_fetched_models, picker, entries)
 
     def _apply_fetched_models(self, picker: PickScreen, entries: list[tuple]) -> None:
@@ -650,10 +657,31 @@ class ChatCommandsMixin:
         self.query_one("#input", Input).focus()
 
     def _pick_context(self) -> None:
+        if self._context_loading:
+            return
+        self._context_loading = True
+        # 模型元数据首次读取会导入 LiteLLM，必须离开 UI 线程，避免整屏卡住。
+        self.run_worker(self._pick_context_work, group="context", thread=True, exit_on_error=False)
+
+    def _pick_context_work(self) -> None:
+        try:
+            options = actions.context_options(self.service)
+        except Exception as exc:
+            record_event("command.failed", exc)
+            self.call_from_thread(self._context_failed, str(exc))
+            return
+        self.call_from_thread(self._show_context_picker, options)
+
+    def _show_context_picker(self, options: list[int]) -> None:
+        self._context_loading = False
         current = self.service.config.chat.context_window
-        entries = [(format_tokens(size), size, size == current) for size in actions.context_options(self.service)]
+        entries = [(format_tokens(size), size, size == current) for size in options]
         entries.append(("Custom…", 0, False))
         self.push_screen(PickScreen(f"Context window: {format_tokens(current)}", entries, self._context_picked))
+
+    def _context_failed(self, message: str) -> None:
+        self._context_loading = False
+        self._finish_error(f"Loading context options failed: {message}")
 
     def _context_picked(self, value) -> None:
         if value is None:

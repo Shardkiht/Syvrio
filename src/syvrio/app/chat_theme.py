@@ -181,13 +181,10 @@ APP_CSS = """
     #inference-filters { height: auto; margin-bottom: 1; color: #8e8e8e; }
     #inference-empty { color: $muted; height: auto; padding: 1 0; display: none; }
     #inference-body { height: 1fr; }
-    #inference-list { width: 38%; height: 1fr; background: #191919; border-right: solid #2a2a2a; }
-    #inference-list > ListItem { height: auto; padding: 0 1; margin-bottom: 1; border-left: heavy transparent; }
-    #inference-list > ListItem.-highlight { background: #303030; border-left: heavy $accent; }
-    .inference-item-meta { color: #8e8e8e; height: 1; }
-    .inference-item-meta.status-hypothesis { color: $accent; }
-    .inference-item-meta.status-rejected, .inference-item-meta.status-superseded { color: #6f6f6f; }
-    .inference-item-text { color: #d4d4d4; height: 1; width: 1fr; overflow-x: hidden; text-overflow: ellipsis; }
+    /* OptionList 只保留文本选项，数百条推断时挂载成本远低于每项多控件 ListView。 */
+    #inference-list { width: 38%; height: 1fr; background: #191919; border: none; border-right: solid #2a2a2a; padding: 0 1; }
+    #inference-list > .option-list--option { padding: 0 1; }
+    #inference-list > .option-list--option-highlighted { background: #303030; }
     #inference-detail { width: 1fr; height: 1fr; padding-left: 2; }
     #inference-detail-body { height: 1fr; }
     #inference-detail-status { color: $accent; height: auto; margin-bottom: 1; }

@@ -1,7 +1,6 @@
 from .base import (
     FetchQuery,
     FetchResult,
-    MAX_SEARCH_ENGINES,
     ProviderError,
     ProviderErrorKind,
     SearchFailure,
@@ -21,7 +20,6 @@ __all__ = [
     "FetchQuery",
     "FetchResult",
     "FetchRouter",
-    "MAX_SEARCH_ENGINES",
     "OpenWebSearchProvider",
     "ProviderError",
     "ProviderErrorKind",

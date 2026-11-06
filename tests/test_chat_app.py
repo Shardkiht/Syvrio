@@ -247,8 +247,10 @@ async def test_inference_screen_filters_and_readonly_states(tmp_path):
         await pilot.press("right")  # Invalidated → All
         await pilot.pause()
         assert screen._filter == "all"
-        assert len(list(screen.query("#inference-list InferenceItem"))) == 4
-        assert pending.id in {item.item.id for item in screen.query("#inference-list InferenceItem")}
+        from textual.widgets import OptionList
+        listing = screen.query_one("#inference-list", OptionList)
+        assert len(listing.options) == 4
+        assert pending.id in {option.id for option in listing.options}
 
 
 async def test_inference_screen_long_text_and_long_source_ids(tmp_path):
@@ -297,8 +299,9 @@ async def test_inference_screen_reject_and_correct_full_text(tmp_path):
 
         screen._set_filter("all")
         await pilot.pause()
-        listing = screen.query_one("#inference-list")
-        listing.index = next(index for index, node in enumerate(screen.query("#inference-list InferenceItem")) if node.item.id == item.id)
+        from textual.widgets import OptionList
+        listing = screen.query_one("#inference-list", OptionList)
+        listing.highlighted = next(index for index, option in enumerate(listing.options) if option.id == item.id)
         await pilot.pause()
         # 已拒绝不可再操作。
         assert all(button.disabled for button in screen.query("#inference-actions Button"))
@@ -380,11 +383,11 @@ async def test_inference_screen_list_and_detail_scroll(tmp_path):
     for index in range(12):
         app.service.propose_inference(f"第{index}条待审查推断。" + "补充说明" * 80, [source.id])
     async with app.run_test(size=(100, 26)) as pilot:
+        from textual.widgets import OptionList
         screen = await _open_inferences(app, pilot)
-        listing = screen.query_one("#inference-list")
-        items = list(screen.query("#inference-list InferenceItem"))
-        assert len(items) == 12
-        listing.index = 11
+        listing = screen.query_one("#inference-list", OptionList)
+        assert listing.option_count == 12
+        listing.highlighted = 11
         await pilot.pause()
         listing.scroll_end(animate=False)
         await pilot.pause()
@@ -428,6 +431,35 @@ async def test_inference_screen_reopen_and_responsive_layout(tmp_path):
             assert isinstance(app.screen, InferenceScreen)
             await pilot.press("escape")
             await pilot.pause()
+
+
+async def test_inference_sync_updates_options_in_place(tmp_path):
+    from textual.widgets import OptionList
+
+    app = build_app(tmp_path, [])
+    source = app.service.note("合成事实")
+    entries = [app.service.propose_inference(f"合成假设 {index}", [source.id]) for index in range(5)]
+    sources = {source.id: source.text}
+    async with app.run_test(size=(120, 36)) as pilot:
+        screen = await _open_inferences(app, pilot)
+        screen._set_filter("all")
+        await pilot.pause()
+        listing = screen.query_one("#inference-list", OptionList)
+        before = list(listing.options)
+        assert [option.id for option in before] == [item.id for item in entries]
+
+        # 状态变化只替换对应提示文本，其余选项对象原样复用，不整表重建。
+        changed = [entries[0].model_copy(update={"status": "confirmed"}), *entries[1:]]
+        screen.set_items(changed, sources)
+        assert "Confirmed" in listing.options[0].prompt.text.plain
+        assert all(listing.options[index] is before[index] for index in range(1, 5))
+
+        # 移除一条时只删除该选项，其他选项对象和选中高亮保持稳定。
+        remaining = [entries[0], *entries[2:]]
+        screen.set_items(remaining, sources, focus_id=entries[3].id)
+        assert [option.id for option in listing.options] == [item.id for item in remaining]
+        assert listing.options[1] is before[2]
+        assert listing.highlighted_option.id == entries[3].id
 
 
 async def test_inference_review_error_releases_input(tmp_path, monkeypatch):
@@ -1658,7 +1690,9 @@ async def test_model_picker_filters_by_search(tmp_path):
 
         await pilot.press("down")
         await pilot.pause()
-        assert listing.has_focus
+        # 方向键在搜索框内移动高亮，不把焦点抢到列表。
+        assert search.has_focus
+        assert listing.index == 0
 
 
 async def test_model_picker_uses_cache_and_refreshes_in_background(tmp_path, monkeypatch):
@@ -1707,6 +1741,203 @@ async def test_model_picker_uses_cache_and_refreshes_in_background(tmp_path, mon
             if any("fresh-model" in label for label in labels):
                 break
         assert any("fresh-model" in label for label in labels)
+
+
+async def test_model_picker_preserves_highlight_during_background_refresh(tmp_path):
+    from textual.widgets import ListView
+
+    app = build_app(tmp_path, [])
+    entries = [(f"model-{i}", ("deepseek", f"model-{i}"), i == 0) for i in range(12)]
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._show_model_picker(entries)
+        await pilot.pause()
+        picker = app.screen
+        listing = picker.query_one("#pick-list", ListView)
+        search = picker.query_one("#pick-search", Input)
+        await pilot.press("down")
+        await pilot.pause()
+        assert search.has_focus and listing.index == 1
+        listing.index = 5
+        await pilot.pause()
+
+        app._apply_fetched_models(picker, entries)
+        await pilot.pause()
+        assert listing.index == 5
+        assert search.has_focus
+        assert search.value == ""
+
+        # 线上目录插入新模型导致索引偏移时，仍按原值保持高亮。
+        app._apply_fetched_models(
+            picker, [("new-model", ("deepseek", "new"), False), *entries]
+        )
+        await pilot.pause()
+        assert listing.highlighted_child.value == ("deepseek", "model-5")
+        assert search.has_focus
+
+        # 搜索过滤文本和过滤后的高亮也必须在刷新后保留。
+        search.focus()
+        search.value = "model-1"
+        await pilot.pause()
+        assert search.has_focus
+        listing.index = 1
+        app._apply_fetched_models(picker, [("new-model", ("deepseek", "new"), False), *entries])
+        await pilot.pause()
+        assert search.value == "model-1"
+        assert listing.index == 1
+
+
+async def test_model_picker_arrow_keys_keep_search_focus(tmp_path):
+    from textual.widgets import ListView
+
+    selected = []
+    app = build_app(tmp_path, [])
+    entries = [(f"model-{i}", ("deepseek", f"model-{i}"), i == 0) for i in range(6)]
+    async with app.run_test(size=(120, 40)) as pilot:
+        original = app._model_picked
+        app._model_picked = selected.append
+        try:
+            await pilot.pause()
+            app._show_model_picker(entries)
+            await pilot.pause()
+            picker = app.screen
+            search = picker.query_one("#pick-search", Input)
+            listing = picker.query_one("#pick-list", ListView)
+            assert search.has_focus
+
+            await pilot.press("down", "down", "up")
+            await pilot.pause()
+            assert search.has_focus
+            assert listing.index == 1
+
+            # 方向键之后继续输入仍然过滤，不需要重新点搜索框。
+            search.value = "model-4"
+            await pilot.pause()
+            assert search.has_focus
+            assert [item.label for item in picker.query("#pick-list OptionItem")] == ["model-4"]
+
+            await pilot.press("enter")
+            for _ in range(50):
+                await pilot.pause()
+                if selected:
+                    break
+            assert selected == [("deepseek", "model-4")]
+        finally:
+            app._model_picked = original
+
+
+async def test_model_picker_opens_quickly_before_metadata_enrichment(tmp_path, monkeypatch):
+    import threading
+
+    from syvrio.app.actions import ModelOption
+    from syvrio.app.chat_widgets import ModelPickerScreen
+
+    release = threading.Event()
+    calls: list[bool] = []
+
+    def fake_options(service, fetched=None, capabilities=True):
+        calls.append(capabilities)
+        label = "DeepSeek · Model (128K)" if capabilities else "DeepSeek · Model"
+        return [ModelOption("deepseek", "model", label, True)]
+
+    monkeypatch.setattr("syvrio.app.chat_commands.actions.model_options", fake_options)
+    monkeypatch.setattr("syvrio.app.chat_commands.cached_provider_models", lambda config: None)
+
+    def fake_fetch(config, refresh=False):
+        release.wait(5)
+        return []
+
+    monkeypatch.setattr("syvrio.app.chat_commands.fetch_provider_models", fake_fetch)
+    app = build_app(tmp_path, [])
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._open_models()
+        for _ in range(100):
+            await pilot.pause()
+            if isinstance(app.screen, ModelPickerScreen):
+                break
+        picker = app.screen
+        assert isinstance(picker, ModelPickerScreen)
+        for _ in range(50):
+            await pilot.pause()
+            labels = [item.label for item in picker.query("#pick-list OptionItem")]
+            if labels:
+                break
+        assert labels == ["DeepSeek · Model"]
+        assert calls[0] is False
+
+        release.set()
+        for _ in range(200):
+            await pilot.pause()
+            labels = [item.label for item in picker.query("#pick-list OptionItem")]
+            if labels == ["DeepSeek · Model (128K)"]:
+                break
+        assert labels == ["DeepSeek · Model (128K)"]
+        assert True in calls
+
+
+async def test_context_picker_builds_options_off_ui_thread(tmp_path, monkeypatch):
+    import threading
+
+    from syvrio.app.chat_widgets import PickScreen
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_options(service):
+        started.set()
+        release.wait(5)
+        return [8_000, 16_000]
+
+    monkeypatch.setattr("syvrio.app.chat_commands.actions.context_options", slow_options)
+    app = build_app(tmp_path, [])
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        ticks: list[int] = []
+        app.set_interval(0.02, lambda: ticks.append(1))
+        app._command("/context")
+        for _ in range(100):
+            if started.is_set():
+                break
+            await pilot.pause()
+        assert started.is_set()
+        before = len(ticks)
+        await pilot.pause()
+        assert len(ticks) > before  # 元数据等待期间事件循环仍在响应
+        assert not isinstance(app.screen, PickScreen)
+        assert not app.query_one("#input", Input).disabled
+
+        app._command("/context")  # 加载中重复触发只保留一个等待
+        release.set()
+        for _ in range(100):
+            await pilot.pause()
+            if isinstance(app.screen, PickScreen):
+                break
+        assert isinstance(app.screen, PickScreen)
+        labels = [item.label for item in app.screen.query("#pick-list OptionItem")]
+        assert labels[:2] == ["8K", "16K"]
+        assert labels[-1] == "Custom…"
+
+
+async def test_context_picker_failure_reports_and_recovers(tmp_path, monkeypatch):
+    from syvrio.app.chat_widgets import PickScreen
+
+    monkeypatch.setattr(
+        "syvrio.app.chat_commands.actions.context_options",
+        lambda service: (_ for _ in ()).throw(RuntimeError("合成元数据失败")),
+    )
+    app = build_app(tmp_path, [])
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._command("/context")
+        for _ in range(100):
+            await pilot.pause()
+            if app.query(".card"):
+                break
+        assert "Loading context options failed" in str(app.query(".card")[-1].render())
+        assert "合成元数据失败" in str(app.query(".card")[-1].render())
+        assert app._context_loading is False
+        assert not app.query_one("#input", Input).disabled
 
 
 async def test_ctrl_b_toggles_sidebar(tmp_path):
@@ -2311,7 +2542,12 @@ async def test_session_picker_escape_and_arrow_navigation_with_rail(tmp_path):
         listing = picker.query_one("#picker-list", ListView)
         first = listing.highlighted_child
         assert isinstance(first, SessionItem)
-        aligned = _session_rail_cells(picker)
+        for _ in range(50):
+            # 启动预热线程会拉长首帧；等列表真正布局后再取网格基线。
+            aligned = _session_rail_cells(picker)
+            if aligned and all(cell["height"] for cell in aligned.values()):
+                break
+            await pilot.pause()
 
         await pilot.press("down")
         await pilot.pause()
@@ -4636,8 +4872,10 @@ def _configure_git_remote(app, tmp_path):
 
 
 def _remote_log(remote) -> list[str]:
+    # Vault 提交信息含中文；Windows GBK 默认解码会炸掉 subprocess 读取线程。
     completed = subprocess.run(
-        ["git", "-C", str(remote), "log", "--oneline"], capture_output=True, text=True
+        ["git", "-C", str(remote), "log", "--oneline"],
+        capture_output=True, text=True, encoding="utf-8",
     )
     return [line for line in completed.stdout.splitlines() if line]
 
@@ -4748,6 +4986,10 @@ async def test_git_sync_failure_shows_reason(tmp_path):
         await pilot.press("ctrl+s")
         await pilot.pause()
         await pilot.click("#git-synchronize")
+        for _ in range(100):
+            await pilot.pause()
+            if app._git_sync_running:
+                break
         await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
         await pilot.pause()
 

@@ -97,6 +97,8 @@ engines = ["bing"]
 fallback_engines = ["baidu", "duckduckgo", "sogou"]
 # 每次自动搜索最多尝试的上游引擎数（含首选）。
 max_engines = 3
+# 显式 search_engine 数组允许的最大引擎数；0 表示不限制（默认）。
+max_search_engines = 0
 # 一次搜索所有回退共享的超时预算（秒）；超出即停止候补，
 # 单次请求的超时也不会超过剩余预算。
 timeout_budget = 25.0

@@ -284,6 +284,7 @@ def test_search_config_roundtrip(tmp_path):
             fetch_timeout=15.0,
             fallback_engines=["duckduckgo", "startpage"],
             max_engines=2,
+            max_search_engines=5,
             timeout_budget=18.0,
             max_requests=7,
         ),
@@ -304,6 +305,7 @@ def test_search_config_roundtrip(tmp_path):
     assert loaded.search.fetch_timeout == 15.0
     assert loaded.search.fallback_engines == ["duckduckgo", "startpage"]
     assert loaded.search.max_engines == 2
+    assert loaded.search.max_search_engines == 5
     assert loaded.search.timeout_budget == 18.0
     assert loaded.search.max_requests == 7
 

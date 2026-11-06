@@ -12,7 +12,6 @@ from enum import Enum
 from typing import Protocol
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-MAX_SEARCH_ENGINES = 3
 # 常见 TUN 代理的合成 DNS 段，仅用于域名解析结果，不放行直接 IP 目标。
 DEFAULT_FAKE_IP_CIDRS = "198.18.0.0/15,2001:2::/48"
 
@@ -74,8 +73,10 @@ def assert_public_fetch_url(url: str, label: str = "抓取地址") -> None:
             raise ValueError(f"{label}解析到非公网地址，已拒绝抓取")
 
 
-def normalize_search_engines(value: object, allowed: Sequence[str]) -> tuple[str, ...]:
-    """把单个或一组引擎名规范化；auto 和空值表示使用配置默认。"""
+def normalize_search_engines(
+    value: object, allowed: Sequence[str], limit: int = 0
+) -> tuple[str, ...]:
+    """把单个或一组引擎名规范化；auto 和空值表示使用配置默认；limit=0 表示不限。"""
     if value is None:
         return ()
     if isinstance(value, str):
@@ -87,7 +88,7 @@ def normalize_search_engines(value: object, allowed: Sequence[str]) -> tuple[str
                 raise ValueError("search_engine must be a valid JSON array or engine name") from None
             if not isinstance(value, list):
                 raise ValueError("search_engine must be a list of strings")
-            return normalize_search_engines(value, allowed)
+            return normalize_search_engines(value, allowed, limit)
         values = [value]
     elif isinstance(value, (list, tuple)):
         if not all(isinstance(item, str) for item in value):
@@ -124,8 +125,8 @@ def normalize_search_engines(value: object, allowed: Sequence[str]) -> tuple[str
             raise ValueError(f"unsupported search engine {name}")
         if name not in selected:
             selected.append(name)
-    if len(selected) > MAX_SEARCH_ENGINES:
-        raise ValueError(f"at most {MAX_SEARCH_ENGINES} search engines")
+    if limit > 0 and len(selected) > limit:
+        raise ValueError(f"at most {limit} search engines")
     return tuple(selected)
 
 

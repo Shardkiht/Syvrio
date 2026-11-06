@@ -355,6 +355,7 @@ engines = {toml_literal(config.search.engines)}
 fetch_timeout = {config.search.fetch_timeout}
 fallback_engines = {toml_literal(config.search.fallback_engines)}
 max_engines = {config.search.max_engines}
+max_search_engines = {config.search.max_search_engines}
 timeout_budget = {config.search.timeout_budget}
 max_requests = {config.search.max_requests}
 anysearch_zone = {toml_literal(config.search.anysearch_zone)}

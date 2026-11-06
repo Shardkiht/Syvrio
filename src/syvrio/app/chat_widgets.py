@@ -371,18 +371,16 @@ class SessionItem(ListItem):
 
 class PickScreen(ModalScreen):
     """单选模态：ESC 取消（回调收到 None），Enter/点击确认；可选用搜索框过滤。"""
-
     BINDINGS = [
         ("escape", "cancel", "Cancel"),
-        ("down", "focus_list", "Select"),
+        ("up", "move_selection(-1)", "Previous"),
+        ("down", "move_selection(1)", "Next"),
         Binding("pageup", "read_detail(-1)", show=False, priority=True),
         Binding("pagedown", "read_detail(1)", show=False, priority=True),
     ]
 
-    def __init__(
-        self, title: str, options: list[tuple], on_result, searchable: bool = False,
-        *, detail: str | None = None
-    ) -> None:
+    def __init__(self, title: str, options: list[tuple], on_result, searchable: bool = False,
+                 *, detail: str | None = None) -> None:
         super().__init__()
         self._title = title
         self._options = list(options)
@@ -391,16 +389,11 @@ class PickScreen(ModalScreen):
         self._detail = detail
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
-        if action == "read_detail":
-            return self._detail is not None
-        return super().check_action(action, parameters)
+        return self._detail is not None if action == "read_detail" else super().check_action(action, parameters)
 
     def action_read_detail(self, direction: int) -> None:
         panel = self.query_one("#pick-detail", VerticalScroll)
-        if direction < 0:
-            panel.scroll_page_up(animate=False)
-        else:
-            panel.scroll_page_down(animate=False)
+        (panel.scroll_page_up if direction < 0 else panel.scroll_page_down)(animate=False)
 
     @staticmethod
     def _items(options: list[tuple]) -> list[OptionItem]:
@@ -416,7 +409,7 @@ class PickScreen(ModalScreen):
                 yield Input(placeholder="Search models…", id="pick-search")
             yield ListView(*self._items(self._options), id="pick-list", classes="thin-scroll")
             hint = (
-                "Type to filter · ↓ list · Enter confirm · ESC cancel"
+                "Type to filter · ↑↓ select · Enter confirm · ESC cancel"
                 if self._searchable
                 else "↑↓ select · Enter confirm · ESC cancel"
             )
@@ -425,9 +418,15 @@ class PickScreen(ModalScreen):
             yield Static(hint, classes="pick-hint")
 
     def on_mount(self) -> None:
-        target = "#pick-search" if self._searchable else "#pick-list"
-        self.query_one(target).focus()
+        self._focus_current()
+        self.call_after_refresh(self._focus_current)
         self.on_resize()
+
+    def _focus_current(self) -> None:
+        widget = self.query_one("#pick-search" if self._searchable else "#pick-list")
+        if widget.can_focus:
+            widget.focus()
+            if isinstance(widget, Input): self.app.cursor_position = widget.cursor_screen_offset
 
     def on_resize(self) -> None:
         if self._detail is not None:
@@ -436,33 +435,37 @@ class PickScreen(ModalScreen):
 
     def update_options(self, options: list[tuple]) -> None:
         self._options = list(options)
-        value = self.query_one("#pick-search", Input).value if self._searchable else ""
-        self._apply_filter(value)
+        self._apply_filter(self.query_one("#pick-search", Input).value if self._searchable else "", preserve=True)
 
-    def _apply_filter(self, value: str) -> None:
+    def _apply_filter(self, value: str, preserve: bool = False) -> None:
         needle = value.strip().lower()
         options = [option for option in self._options if needle in option[0].lower()]
         listing = self.query_one("#pick-list", ListView)
+        previous, previous_index = listing.highlighted_child, listing.index
         listing.clear()
-        for item in self._items(options):
-            listing.append(item)
+        listing.extend(self._items(options))
         if options:
-            listing.index = 0
+            index = 0
+            if preserve and previous is not None:
+                # 后台刷新不打断键盘导航：按值找回高亮项，找不到再按原位置收敛。
+                index = next((i for i, option in enumerate(options) if option[1] == previous.value), min(previous_index or 0, len(options) - 1))
+            listing.index = index
 
     def on_input_changed(self, event: Input.Changed) -> None:
-        if self._searchable:
-            self._apply_filter(event.value)
+        if self._searchable: self._apply_filter(event.value)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if not self._searchable:
             return
         event.stop()
         item = self.query_one("#pick-list", ListView).highlighted_child
-        if item is not None:
-            self._finish(item.value)
+        if item is not None: self._finish(item.value)
 
-    def action_focus_list(self) -> None:
-        self.query_one("#pick-list", ListView).focus()
+    def action_move_selection(self, step: int) -> None:
+        # 搜索框保持焦点，方向键只移动高亮，用户可以继续输入过滤。
+        listing = self.query_one("#pick-list", ListView)
+        if listing.children:
+            listing.index = max(0, min(len(listing.children) - 1, (listing.index or 0) + step))
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         value = getattr(event.item, "value", None) if event.item is not None else None
@@ -490,7 +493,7 @@ class ModelPickerScreen(PickScreen):
     def on_mount(self) -> None:
         super().on_mount()
         self.query_one(".pick-hint", Static).update(
-            "Type to search · Down to select · Enter to confirm · Esc to cancel\n"
+            "Type to search · ↑↓ select · Enter to confirm · Esc to cancel\n"
             "Ctrl+P providers · Ctrl+R refresh · Ctrl+N custom model"
         )
 
@@ -729,8 +732,7 @@ class ProfileScreen(ModalScreen):
     BINDINGS = [("escape", "close", "Close")]
 
     def __init__(self, body: str, status: str, stale: bool = False,
-                 generated_at: str | None = None, fact_count: int | None = None,
-                 unique_count: int | None = None) -> None:
+                 generated_at: str | None = None, fact_count: int | None = None, unique_count: int | None = None) -> None:
         super().__init__()
         self._body = body
         self._status = status
@@ -744,8 +746,7 @@ class ProfileScreen(ModalScreen):
         with Vertical(id="profile-card"):
             yield Static("User Profile", id="profile-title")
             yield Static("Personal memory overview", id="profile-subtitle")
-            yield Static(self._status, id="profile-status",
-                         classes="profile-status stale" if self._stale else "profile-status")
+            yield Static(self._status, id="profile-status", classes="profile-status stale" if self._stale else "profile-status")
             yield Static(self._metadata, id="profile-meta")
             with VerticalScroll(id="profile-body", classes="thin-scroll"):
                 yield Static(self._body, id="profile-text", markup=False)

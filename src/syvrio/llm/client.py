@@ -179,6 +179,16 @@ def supported_params(model: str) -> tuple[str, ...]:
         return ()
 
 
+def warm_model_metadata(model: str) -> None:
+    """预热 LiteLLM 导入与当前模型元数据；纯本地读取，不访问网络或凭据。"""
+    try:
+        model_metadata(model)
+        supported_params(model)
+    except Exception:
+        # 预热只影响首次打开速度，失败留到实际使用时再报错。
+        pass
+
+
 def fetch_provider_models(
     config: LLMConfig,
     timeout: float = 5.0,
