@@ -6,6 +6,14 @@
 - Agent `search` 工具与 MCP `search` 共用该配置；只有值大于 0 时才限制，错误信息随配置值变化。自动回退的 `max_engines`（默认 3）语义不变，仍只控制首选引擎失败后的候补尝试数。
 - 验证：`tests/test_setup.py`、`tests/test_web_search.py`、`tests/test_server.py` 164 passed；新增默认接受 4 个引擎、配置上限拒绝超限、配置往返保留字段的回归。
 
+## Application Layer 解耦（2026-11-06）
+
+- 新增 `src/syvrio/application/`：`contracts.py`（DTO）、`conversation.py`（FIFO/请求绑定/Undo/会话生命周期）、`memory.py`（Pending/推断审查/导入/画像）、`settings.py`（模型/供应商/推理/上下文）、`reflection.py`、`git.py` 与 `service.py` 组合入口。依赖方向为 `app → application → agent/memory/llm/infra`；应用层不依赖 Textual、Rich、Typer 或 `app/`。
+- `ChatApp`/Mixin 的业务调用已改为应用层用例；UI 仅保留 Widget、焦点、渲染、Worker 与 `call_from_thread`。为兼容既有 UI 测试，`ChatApp` 保留 `runtime/service/sessions` 只读属性与队列状态别名，但不再直接存储或调用这些核心对象。
+- `app/actions.py` 改为 `application/settings.py` 的旧签名适配器，不保留重复实现。Conversation 队列、请求中会话/用户消息绑定、Undo 目标与撤销后暂停队列均由应用层维护；确认/拒绝/编辑、来源摘要、导入批次与 Profile 读取也改由应用层组合。
+- 新增不启动 Textual 的 `test_application_conversation.py`、`test_application_memory.py`、`test_application_settings.py` 与 AST 依赖边界 `test_application_architecture.py`。真实 TUI/真实 LLM 验收结果见本次交付报告。
+- 残余耦合：TUI 仍以 `ChatApp.runtime/service/sessions` 只读属性供旧测试读取；会话列表展示仍使用 `session_ui.visible_sessions` 进行界面分组；Reflection/Git 的定时器仍由 TUI 生命周期触发（业务判定与运行已走应用层）。
+
 ## TUI 焦点与性能专项回归（2026-11-06）
 
 - 分支 `evolution`（跟踪 `origin/feature-memory-evolution`），基线 `ea163a3`；本轮改动仅在工作区，未 commit、未 push。

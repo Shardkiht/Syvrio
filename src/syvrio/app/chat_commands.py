@@ -8,10 +8,7 @@ from textual.widgets import Input
 
 from ..infra.tokens import format_tokens
 from ..infra.diagnostics import record_event
-from ..infra.documents import DocumentError, SUPPORTED_SUFFIXES, read_document
-from ..memory.extractor import split_chunks
 from ..llm import cached_provider_models, fetch_provider_models
-from . import actions
 from .chat_widgets import ModelPickerScreen, PickScreen, SessionPickerScreen, TextInputScreen
 from .inference_screen import InferenceScreen
 from .command_catalog import SLASH_COMMANDS
@@ -49,20 +46,20 @@ class ChatCommandsMixin:
         elif command == "/undo":
             self._undo_message()
         elif command == "/summary":
-            if not self.runtime.has_session:
+            if not self.application.conversation.has_session:
                 self.add_card("This new session has no summary yet.")
             else:
-                summary = self.runtime.summary_text()
+                summary = self.application.conversation.summary_text()
                 self.add_markdown_card(summary, "Session summary") if summary else self.add_card("This session has no summary yet.")
         elif command == "/status":
             self._show_status()
         elif command == "/git":
             self.open_git_screen()
         elif command == "/rename":
-            if not self.runtime.has_session:
+            if not self.application.conversation.has_session:
                 self.add_card("The session is not created yet; send a message first, then rename.")
             elif argument:
-                self.runtime.rename(argument)
+                self.application.conversation.rename_current(argument)
                 self.refresh_sessions()
                 self.add_card(f"Renamed to: {argument}")
             else:
@@ -93,29 +90,22 @@ class ChatCommandsMixin:
 
     def _inference_work(self, item_id: str | None, action: str | None, text: str | None) -> None:
         try:
-            updated = self.service.review_inference(item_id or "", action, text) if action is not None else None
-            items = self.service.list_inferences()
-            source_ids = {source_id for item in items for source_id in item.source_ids}
-            # 来源摘要共用一次事实库读取，避免每个来源 ID 都重复解析全部主题文件。
-            sources = {
-                entry.id: entry.text
-                for entry in self.service.store.entries(include_inactive=True)
-                if entry.id in source_ids
-            }
+            review = (
+                self.application.memory.review_inference(item_id or "", action, text)
+                if action is not None
+                else self.application.memory.load_inference_review()
+            )
         except Exception as exc:
             record_event("command.failed", exc)
             message = f"Inference action failed: {exc}" if action else f"Could not load inferences: {exc}"
             self.call_from_thread(self._inference_failed, message)
             return
-        feedback = None
-        if updated is not None:
-            feedback = {
-                "confirm": "Confirmed.",
-                "reject": "Rejected.",
-                "correct": "Edit saved as a new pending hypothesis.",
-            }[action]
         self.call_from_thread(
-            self._show_inferences, items, sources, updated.id if updated else None, feedback,
+            self._show_inferences,
+            review.items,
+            review.sources,
+            review.updated_id,
+            review.feedback,
         )
 
     def _show_inferences(
@@ -148,7 +138,7 @@ class ChatCommandsMixin:
         return text if len(text) <= width else text[:width] + "…"
 
     def _open_pending(self) -> None:
-        items = self.service.pending()
+        items = self.application.memory.pending().items
         if not items:
             self.add_card("No pending items.")
             return
@@ -162,7 +152,7 @@ class ChatCommandsMixin:
         if item_id is None:
             self.query_one("#input", Input).focus()
             return
-        item = next((i for i in self.service.pending() if i.id == item_id), None)
+        item = self.application.memory.pending_item(item_id)
         if item is None:
             self.notify("That pending item no longer exists.")
             return
@@ -180,7 +170,7 @@ class ChatCommandsMixin:
             return
         action, item_id, _ = value
         if action == "edit":
-            item = next((i for i in self.service.pending() if i.id == item_id), None)
+            item = self.application.memory.pending_item(item_id)
             default = item.text if item else ""
             self.push_screen(
                 TextInputScreen("Full revised text", default=default, on_result=lambda v: self._pending_edited(item_id, v))
@@ -197,10 +187,10 @@ class ChatCommandsMixin:
     def _pending_apply(self, action: str, item_id: str, override: str | None) -> None:
         try:
             if action == "approve":
-                entry = self.service.approve(item_id, text_override=override)
+                entry = self.application.memory.approve(item_id, text_override=override)
                 message = f"Saved [{entry.topic}] {entry.text}"
             else:
-                item = self.service.reject(item_id)
+                item = self.application.memory.reject(item_id)
                 message = f"Rejected {item.id} {self._truncate(item.text, 40)}"
         except (KeyError, ValueError) as exc:
             self.add_card(str(exc))
@@ -208,7 +198,7 @@ class ChatCommandsMixin:
         self.add_card(message)
         self.refresh_pending()
         self.update_status()
-        if self.service.pending():
+        if self.application.memory.pending_count():
             # 队列里还有：自动进入下一条，ESC 随时退出循环。
             self.call_after_refresh(self._open_pending)
         else:
@@ -216,7 +206,7 @@ class ChatCommandsMixin:
             self.query_one("#input", Input).focus()
 
     def _show_topics(self, name: str | None = None) -> None:
-        topics = self.service.topics()
+        topics = self.application.memory.topics()
         if not topics:
             self.add_card("The memory vault is empty.")
             return
@@ -229,7 +219,7 @@ class ChatCommandsMixin:
             if matched is None:
                 self.add_card(f"No matching topic: {name}")
                 return
-            entries = self.service.topic_entries(matched["topic"])
+            entries = self.application.memory.topic_entries(matched["topic"])
             lines = [f"{matched['title']} ({matched['topic']}) · {len(entries)} entries", ""]
             for entry in entries:
                 tag = "" if entry.status == "active" else f" ({entry.status})"
@@ -242,11 +232,11 @@ class ChatCommandsMixin:
         )
 
     def open_session_picker(self) -> None:
-        rows = visible_sessions(self.sessions.list(100, with_tokens=False))
+        rows = visible_sessions(self.application.conversation.list_sessions(100))
         if not rows:
             self.add_card("No sessions to choose from.")
             return
-        current_id = self.runtime.current.id if self.runtime.has_session else None
+        current_id = self.application.conversation.current_id
         self.push_screen(
             SessionPickerScreen(rows, current_id, self._picker_selected)
         )
@@ -255,7 +245,7 @@ class ChatCommandsMixin:
         if session_id is None:
             self.query_one("#input", Input).focus()
             return
-        if self.runtime.has_session and session_id == self.runtime.current.id:
+        if self.application.conversation.current_id == session_id:
             self.notify("Already the current session.")
             self.query_one("#input", Input).focus()
             return
@@ -269,14 +259,14 @@ class ChatCommandsMixin:
         self.push_screen(
             TextInputScreen(
                 "Rename session",
-                default=self.runtime.current.title(),
+                default=self.application.conversation.current.title(),
                 on_result=self._rename_current_result,
             )
         )
 
     def _rename_current_result(self, title) -> None:
         if title:
-            self.runtime.rename(title)
+            self.application.conversation.rename_current(title)
             self.refresh_sessions()
             self.notify(f"Renamed to: {title}")
         self.query_one("#input", Input).focus()
@@ -292,18 +282,14 @@ class ChatCommandsMixin:
 
     def _rename_session_result(self, row: dict, title) -> None:
         if title:
-            if not self.sessions.exists(row["id"]):
+            if not self.application.conversation.session_exists(row["id"]):
                 self.notify("Session no longer exists.")
             else:
-                # 当前会话走 runtime，保证内存中的 Session 也立即拿到新标题。
-                if self.runtime.has_session and row["id"] == self.runtime.current.id:
-                    self.runtime.rename(title)
-                else:
-                    self.sessions.rename(self.sessions.load(row["id"]), title)
+                self.application.conversation.rename_session(row["id"], title)
                 self.refresh_sessions()
                 for screen in self.screen_stack:
                     if isinstance(screen, SessionPickerScreen):
-                        screen.set_rows(visible_sessions(self.sessions.list(100, with_tokens=False)))
+                        screen.set_rows(visible_sessions(self.application.conversation.list_sessions(100)))
                 self.notify("Session renamed.")
         # 重命名弹窗关闭后，焦点回到选择器而不是主输入框。
         if isinstance(self.screen, SessionPickerScreen):
@@ -312,10 +298,10 @@ class ChatCommandsMixin:
             self.query_one("#input", Input).focus()
 
     def _show_status(self) -> None:
-        if not self.runtime.has_session:
+        if not self.application.conversation.has_session:
             self.add_card("The session is not created yet; it appears after your first message.")
             return
-        info = self.runtime.status()
+        info = self.application.conversation.status()
         percent = info["estimated_tokens"] / max(info["context_window"], 1)
         self.add_card(
             f"Session: {info['session_id']} · {info['title']}\n"
@@ -328,10 +314,10 @@ class ChatCommandsMixin:
         )
 
     def _undo_message(self) -> None:
-        if not self.runtime.has_session:
+        if not self.application.conversation.has_session:
             self.add_card("No message to undo.")
             return
-        text = self.runtime.undo()
+        text = self.application.conversation.undo_current()
         if text is None:
             self.add_card("No message to undo.")
             return
@@ -353,7 +339,7 @@ class ChatCommandsMixin:
 
     def _compact_work(self) -> None:
         try:
-            events = self.runtime.force_compact()
+            events = self.application.conversation.force_compact()
         except Exception as exc:
             record_event("command.failed", exc)
             self.call_from_thread(self._finish_error, f"Compaction failed: {exc}")
@@ -415,34 +401,36 @@ class ChatCommandsMixin:
 
     def _import_work(self, path: Path, apply: bool) -> None:
         try:
-            files = sorted(file for file in path.iterdir() if file.is_file() and file.suffix.lower() in SUPPORTED_SUFFIXES) if path.is_dir() else [path]
-            if not files:
-                raise ValueError("No supported files in this directory (non-recursive).")
-            for file in files:
-                try:
-                    chunks = split_chunks(read_document(file))
-                    for index, chunk in enumerate(chunks, 1):
-                        self.call_from_thread(self.add_card, escape(f"Analyzing {file.name}: chunk {index}/{len(chunks)}"))
-                        result = self.service.import_text(chunk, source=f"import:{file.name}#chunk:{index}", dry_run=not apply)
-                        lines = [f"{'Processed' if apply else 'Preview'}: saved {len(result.admitted)} · pending {len(result.queued)} · duplicates {len(result.duplicates)} · blocked {len(result.blocked)}"]
-                        # 只展示已通过凭据裁决的候选；被拦截原文不回显。
-                        lines += [f"[{entry.topic}] {entry.text}" for entry in result.admitted]
-                        lines += [f"Pending [{item.topic}] {item.text}" for item in result.queued]
-                        self.call_from_thread(self.add_card, escape("\n".join(lines)))
-                except DocumentError as exc:
-                    record_event("command.failed", exc)
-                    self.call_from_thread(self.add_card, escape(f"{file.name} import failed: {exc}"))
-                except Exception as exc:
-                    record_event("command.failed", exc)
-                    self.call_from_thread(self.add_card, escape(f"{file.name} import failed. Check the format, parser dependencies and model settings; completed changes are retained."))
-            self.call_from_thread(self.refresh_pending)
+            result = self.application.memory.import_path(
+                path, apply, on_progress=lambda item: self.call_from_thread(self._show_import_progress, item)
+            )
         except Exception as exc:
             record_event("command.failed", exc)
             self.call_from_thread(self._finish_error, f"Import failed: {exc}")
             return
-        self.call_from_thread(self._after_import, "Import complete." if apply else "Preview complete; use /import <path> --apply to analyze again and save.")
+        self.call_from_thread(self.refresh_pending)
+        message = "Import complete." if apply else "Preview complete; use /import <path> --apply to analyze again and save."
+        if result.errors:
+            message += f" {len(result.errors)} file/chunk(s) failed; completed changes were retained."
+        self.call_from_thread(self._after_import, message)
 
-    # ---------- 设置类选择器（逻辑在 actions.py） ----------
+    def _show_import_progress(self, progress) -> None:
+        if progress.chunk:
+            self.add_card(escape(f"Analyzing {progress.file}: chunk {progress.chunk}/{progress.total_chunks}"))
+        if progress.error:
+            self.add_card(escape(f"{progress.file} import failed: {progress.error}"))
+            return
+        if not progress.chunk:
+            return
+        lines = [
+            f"{'Processed' if progress.apply else 'Preview'}: saved {progress.saved} · "
+            f"pending {progress.queued} · duplicates {progress.duplicates} · blocked {progress.blocked}"
+        ]
+        lines += [f"[{topic}] {text}" for topic, text in progress.admitted]
+        lines += [f"Pending [{topic}] {text}" for topic, text in progress.pending]
+        self.add_card(escape("\n".join(lines)))
+
+    # ---------- 设置类选择器（逻辑在 application/settings.py） ----------
 
     def _open_models(self, refresh: bool = False) -> None:
         # keyring/供应商元数据查询可能很慢，不能在 UI 线程先算选项再开选择器。
@@ -454,7 +442,7 @@ class ChatCommandsMixin:
         )
 
     def _open_models_work(self, refresh: bool) -> None:
-        fetched = None if refresh else cached_provider_models(self.service.config.llm)
+        fetched = None if refresh else cached_provider_models(self.application.config.llm)
         try:
             # 先不带能力标签开屏：LiteLLM 元数据首次导入很慢，放到后台刷新补全。
             entries = self._model_entries(fetched, capabilities=False)
@@ -467,7 +455,7 @@ class ChatCommandsMixin:
     def _model_entries(
         self, fetched: list[str] | None = None, *, capabilities: bool = True
     ) -> list[tuple]:
-        options = actions.model_options(self.service, fetched, capabilities)
+        options = self.application.settings.model_options(fetched, capabilities)
         return [
             (option.label, (option.provider, option.model), option.current)
             for option in options
@@ -481,7 +469,7 @@ class ChatCommandsMixin:
     ) -> PickScreen:
         self._drain_pending_intent()
         picker = ModelPickerScreen(
-            f"Current model: {self.runtime.model_label}",
+            f"Current model: {self.application.conversation.model_label}",
             entries,
             self._model_picked,
             searchable=True,
@@ -501,10 +489,10 @@ class ChatCommandsMixin:
 
     def _refresh_models_work(self, picker: PickScreen, refresh: bool = False) -> None:
         try:
-            fetched = fetch_provider_models(self.service.config.llm, refresh=refresh)
+            fetched = fetch_provider_models(self.application.config.llm, refresh=refresh)
             # 即使线上列表不可用，也要用完整能力标签覆盖先前的快速清单。
             entries = self._model_entries(
-                fetched or cached_provider_models(self.service.config.llm)
+                fetched or cached_provider_models(self.application.config.llm)
             )
         except Exception as exc:
             record_event("command.failed", exc)
@@ -534,7 +522,7 @@ class ChatCommandsMixin:
             self._open_models(True)
             return
         if provider == "__custom__":
-            current = self.service.config.llm
+            current = self.application.config.llm
             self.push_screen(
                 TextInputScreen("Model name", default=current.model, on_result=self._model_custom)
             )
@@ -547,7 +535,7 @@ class ChatCommandsMixin:
         if provider_action:
             self._manage_providers(provider_action)
             return
-        message = actions.apply_model(self.service, self.runtime, provider, model)
+        message = self.application.settings.apply_model(provider, model).message
         self.add_card(message)
         self.update_status()
         self.query_one("#input", Input).focus()
@@ -559,31 +547,33 @@ class ChatCommandsMixin:
             self._manage_providers(action)
 
     def _manage_providers(self, action: str) -> None:
-        options = actions.provider_options(self.service)
-        current = self.service.config.llm.provider
+        options = self.application.settings.provider_options()
+        current = self.application.config.llm.provider
         if action == "add":
-            candidates = [option for option in options if not option[1][2]]
+            candidates = [option for option in options if not option.configured]
             title = "Add provider"
             empty = "All built-in providers already have API keys."
         elif action == "update":
-            candidates = [option for option in options if option[1][2]]
+            candidates = [option for option in options if option.configured]
             title = "Update provider key"
             empty = "No built-in provider has a saved API key yet."
         else:
-            candidates = [
-                option
-                for option in options
-                if option[1][2] and option[1][0] != current
-            ]
+            candidates = [option for option in options if option.configured and option.key != current]
             title = "Remove provider"
             empty = "Switch to another model before removing the current provider."
         if not candidates:
             self.add_card(empty)
             self.query_one("#input", Input).focus()
             return
-        self.push_screen(
-            PickScreen(title, candidates, partial(self._provider_selected, action))
-        )
+        rows = [
+            (
+                f"{option.label} · {'configured' if option.configured else 'add provider'}",
+                (option.key, option.label, option.configured),
+                option.current,
+            )
+            for option in candidates
+        ]
+        self.push_screen(PickScreen(title, rows, partial(self._provider_selected, action)))
 
     def _provider_selected(self, action: str, value) -> None:
         if value is None:
@@ -612,11 +602,9 @@ class ChatCommandsMixin:
             self.query_one("#input", Input).focus()
             return
         if action == "add":
-            message = actions.configure_provider(
-                self.service, self.runtime, provider_key, api_key
-            )
+            message = self.application.settings.configure_provider(provider_key, api_key).message
         else:
-            message = actions.update_provider_key(self.service, provider_key, api_key)
+            message = self.application.settings.update_provider_key(provider_key, api_key).message
         self.add_card(message)
         self.update_status()
         self.query_one("#input", Input).focus()
@@ -625,7 +613,7 @@ class ChatCommandsMixin:
         if confirmed is not True:
             self.query_one("#input", Input).focus()
             return
-        message = actions.remove_provider(self.service, provider_key)
+        message = self.application.settings.remove_provider(provider_key).message
         self.add_card(message)
         self.update_status()
         self.query_one("#input", Input).focus()
@@ -634,18 +622,18 @@ class ChatCommandsMixin:
         if not name:
             self.query_one("#input", Input).focus()
             return
-        current = self.service.config.llm
-        message = actions.apply_model(self.service, self.runtime, current.provider, name)
+        current = self.application.config.llm
+        message = self.application.settings.apply_model(current.provider, name).message
         self.add_card(message)
         self.update_status()
         self.query_one("#input", Input).focus()
 
     def _pick_reasoning(self) -> None:
-        options = actions.reasoning_options(self.service)
+        options = self.application.settings.reasoning_options()
         if not options:
-            self.add_card(f"{self.runtime.model_label} does not support reasoning effort; use /model to switch to a reasoning-capable model.")
+            self.add_card(f"{self.application.conversation.model_label} does not support reasoning effort; use /model to switch to a reasoning-capable model.")
             return
-        current = self.service.config.llm.reasoning_effort or ""
+        current = self.application.config.llm.reasoning_effort or ""
         entries = [(label, value, value == current) for value, label in options]
         self.push_screen(PickScreen(f"Reasoning effort: {current or 'default'}", entries, self._reasoning_picked))
 
@@ -653,7 +641,7 @@ class ChatCommandsMixin:
         if value is None:
             self.query_one("#input", Input).focus()
             return
-        self.add_card(actions.apply_reasoning(self.service, value))
+        self.add_card(self.application.settings.apply_reasoning(value).message)
         self.query_one("#input", Input).focus()
 
     def _pick_context(self) -> None:
@@ -665,7 +653,7 @@ class ChatCommandsMixin:
 
     def _pick_context_work(self) -> None:
         try:
-            options = actions.context_options(self.service)
+            options = self.application.settings.context_options()
         except Exception as exc:
             record_event("command.failed", exc)
             self.call_from_thread(self._context_failed, str(exc))
@@ -674,7 +662,7 @@ class ChatCommandsMixin:
 
     def _show_context_picker(self, options: list[int]) -> None:
         self._context_loading = False
-        current = self.service.config.chat.context_window
+        current = self.application.settings.context_window
         entries = [(format_tokens(size), size, size == current) for size in options]
         entries.append(("Custom…", 0, False))
         self.push_screen(PickScreen(f"Context window: {format_tokens(current)}", entries, self._context_picked))
@@ -688,12 +676,12 @@ class ChatCommandsMixin:
             self.query_one("#input", Input).focus()
             return
         if value == 0:
-            current = self.service.config.chat.context_window
+            current = self.application.settings.context_window
             self.push_screen(
                 TextInputScreen("Context window (tokens)", default=str(current), on_result=self._context_custom)
             )
             return
-        self.add_card(actions.apply_context(self.service, value))
+        self.add_card(self.application.settings.apply_context(value).message)
         self.update_status()
         self.query_one("#input", Input).focus()
 
@@ -707,6 +695,6 @@ class ChatCommandsMixin:
             self.add_card("Context window must be a positive integer (tokens).")
             self.query_one("#input", Input).focus()
             return
-        self.add_card(actions.apply_context(self.service, size))
+        self.add_card(self.application.settings.apply_context(size).message)
         self.update_status()
         self.query_one("#input", Input).focus()

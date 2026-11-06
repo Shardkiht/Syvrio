@@ -34,11 +34,13 @@ Python 3.12+、uv、hatchling、Typer、FastMCP、LiteLLM、Pydantic v2、pytest
 ## 分层
 
 ```text
-app → agent → memory → retrieval → infra
+app → application → agent → memory → retrieval → infra
+application → llm → infra
 memory/agent → llm → infra
 ```
 
-- `app/`：Typer CLI、TUI、FastMCP 入口，只做参数解析和界面编排。
+- `app/`：Typer CLI、TUI、FastMCP 入口与展示适配；只做参数解析、焦点/键盘/渲染、Worker 与 UI 线程投递。
+- `application/`：与前端无关的用例编排（会话/FIFO/Undo、记忆审查、设置、Reflection/Git 协调）与数据契约；禁止依赖 Textual、Rich、Typer 或 `app/`，也不重复实现 Agent/Memory 核心逻辑。
 - `agent/`：Agent 循环、上下文压缩、工具注册、会话记录。
 - `memory/`：抽取、裁决、存储、队列、审计。
 - `retrieval/`：检索接口与实现，`Retriever` 是替换点。

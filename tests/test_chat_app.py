@@ -690,7 +690,10 @@ async def test_profile_refresh_does_not_block_chat_while_running(tmp_path, monke
             assert not app.busy
             assert not app.query_one("#input", Input).disabled
             app._command("/profile")
-            await pilot.pause()
+            for _ in range(100):
+                await pilot.pause()
+                if app.screen.query("#profile-text"):
+                    break
             # 摘要生成中仍可打开当前缓存视图（此时应显示空状态）。
             assert "No profile summary yet" in str(app.screen.query_one("#profile-text", Static).content)
             await pilot.press("escape")
@@ -751,7 +754,7 @@ async def test_import_apply_cancel_starts_no_parsing_or_writes(tmp_path, monkeyp
     path = tmp_path / "synthetic.txt"
     path.write_text("合成导入内容", encoding="utf-8")
     monkeypatch.setattr(
-        "syvrio.app.chat_commands.read_document",
+        "syvrio.application.memory.read_document",
         lambda *_: pytest.fail("取消前不得解析文档"),
     )
     async with app.run_test(size=(80, 24)) as pilot:
@@ -838,7 +841,7 @@ def build_app(tmp_path, turns, extract_on_exit=False, search=None, git=None):
         config=config.chat,
     )
     runtime.start()
-    return ChatApp(runtime, service, SessionStore(config.vault))
+    return ChatApp(runtime, service, runtime.sessions)
 
 
 async def _wait_reply(app, pilot, limit=200):
@@ -1835,12 +1838,12 @@ async def test_model_picker_opens_quickly_before_metadata_enrichment(tmp_path, m
     release = threading.Event()
     calls: list[bool] = []
 
-    def fake_options(service, fetched=None, capabilities=True):
+    def fake_options(self, fetched=None, capabilities=True):
         calls.append(capabilities)
         label = "DeepSeek · Model (128K)" if capabilities else "DeepSeek · Model"
         return [ModelOption("deepseek", "model", label, True)]
 
-    monkeypatch.setattr("syvrio.app.chat_commands.actions.model_options", fake_options)
+    monkeypatch.setattr("syvrio.application.settings.SettingsUseCases.model_options", fake_options)
     monkeypatch.setattr("syvrio.app.chat_commands.cached_provider_models", lambda config: None)
 
     def fake_fetch(config, refresh=False):
@@ -1884,12 +1887,12 @@ async def test_context_picker_builds_options_off_ui_thread(tmp_path, monkeypatch
     started = threading.Event()
     release = threading.Event()
 
-    def slow_options(service):
+    def slow_options(self):
         started.set()
         release.wait(5)
         return [8_000, 16_000]
 
-    monkeypatch.setattr("syvrio.app.chat_commands.actions.context_options", slow_options)
+    monkeypatch.setattr("syvrio.application.settings.SettingsUseCases.context_options", slow_options)
     app = build_app(tmp_path, [])
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
@@ -1902,7 +1905,10 @@ async def test_context_picker_builds_options_off_ui_thread(tmp_path, monkeypatch
             await pilot.pause()
         assert started.is_set()
         before = len(ticks)
-        await pilot.pause()
+        for _ in range(50):
+            await pilot.pause()
+            if len(ticks) > before:
+                break
         assert len(ticks) > before  # 元数据等待期间事件循环仍在响应
         assert not isinstance(app.screen, PickScreen)
         assert not app.query_one("#input", Input).disabled
@@ -1923,8 +1929,8 @@ async def test_context_picker_failure_reports_and_recovers(tmp_path, monkeypatch
     from syvrio.app.chat_widgets import PickScreen
 
     monkeypatch.setattr(
-        "syvrio.app.chat_commands.actions.context_options",
-        lambda service: (_ for _ in ()).throw(RuntimeError("合成元数据失败")),
+        "syvrio.application.settings.SettingsUseCases.context_options",
+        lambda self: (_ for _ in ()).throw(RuntimeError("合成元数据失败")),
     )
     app = build_app(tmp_path, [])
     async with app.run_test(size=(120, 40)) as pilot:
@@ -2640,7 +2646,7 @@ async def test_input_cursor_is_vertical_bar(tmp_path):
 async def test_auto_start_warms_search_in_background(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(
-        "syvrio.app.chat_app.ensure_search_daemon",
+        "syvrio.application.service.ensure_search_daemon",
         lambda base_url: calls.append(base_url) or "running",
     )
     app = build_app(
@@ -4065,10 +4071,10 @@ async def test_undo_session_load_failure_resumes_queued_messages(tmp_path, monke
             raise OSError("vault unavailable")
         return original_load(session_id)
 
-    monkeypatch.setattr(app.runtime.sessions, "load", fail_first_load)
-
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
+        # 启动补记可能读取会话；撤销故障注入放在界面稳定之后。
+        monkeypatch.setattr(app.runtime.sessions, "load", fail_first_load)
         app._queue.append(_QueuedLine(session.id, "queued message"))
         app._begin_ask(session.id)
         app._undo_requested = True

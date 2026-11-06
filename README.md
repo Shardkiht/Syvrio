@@ -513,8 +513,10 @@ LLM 可以在 `search` 调用里用 `providers` 指定多个已启用来源的�
 src/syvrio/
 ├── app/          cli.py, server.py, tui.py, chat_app.py, chat_commands.py, chat_flow.py,
 │                 chat_widgets.py, chat_input.py, chat_theme.py, command_catalog.py,
-│                 actions.py, ui.py, session_ui.py, chat_reflection.py, chat_git.py,
-│                 git_screen.py                     # CLI / Textual TUI / FastMCP 入口
+│                 ui.py, session_ui.py, chat_reflection.py, chat_git.py, git_screen.py,
+│                 actions.py                         # CLI / Textual TUI / FastMCP 展示适配
+├── application/  service.py, conversation.py, memory.py, settings.py,
+│                 reflection.py, git.py, contracts.py # 与前端无关的用例编排与数据契约
 ├── agent/        runtime.py, prompts.py, context.py, tools.py,
 │                 session.py, recall.py, file_tools.py # Agent 循环、工具、会话与文件分析
 ├── memory/       service.py, store.py, models.py, queue.py,
@@ -529,7 +531,7 @@ src/syvrio/
                   layout.py, dialogs.py, documents.py, diagnostics.py, search/ # 配置、Git 同步与锁、诊断、文档转换、联网搜索
 ```
 
-依赖方向：`app → agent → memory → retrieval → infra`，`memory/agent → llm → infra`。
+依赖方向：`app → application → agent → memory → retrieval → infra`，`application → llm/infra`，`memory/agent → llm → infra`。`application/` 不依赖 Textual、Rich、Typer 或 `app/`；核心层不反向依赖应用层。
 `retrieval` 会只读 `memory` 的 `models`、`store`、`detect`（条目读取、归一化与字面覆盖判断），这是 `memory ↔ retrieval` 的已知回读；写入与裁决仍只由 `memory` 负责。
 开发约定（代码风格、存储不变量、测试与文档同步）见 [AGENTS.md](AGENTS.md)。
 

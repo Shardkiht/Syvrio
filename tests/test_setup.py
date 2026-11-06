@@ -37,8 +37,8 @@ def test_model_change_preserves_same_provider_endpoint_and_credentials(tmp_path,
     service = MemoryService(config, config_path=config_path)
     reloaded = []
     runtime = SimpleNamespace(reload_llm=reloaded.append, model_label=f"{provider}/synthetic-new")
-    monkeypatch.setattr(actions, "model_metadata", lambda model: {})
-    monkeypatch.setattr(actions, "supported_params", lambda model: ())
+    monkeypatch.setattr("syvrio.application.settings.model_metadata", lambda model: {})
+    monkeypatch.setattr("syvrio.application.settings.supported_params", lambda model: ())
     actions.apply_model(service, runtime, provider, "synthetic-new")
     saved = load_config(config_path)
     assert saved.llm.model == "synthetic-new"

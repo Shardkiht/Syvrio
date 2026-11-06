@@ -22,10 +22,10 @@ class ChatGitMixin:
     def _git_scheduler_tick(self) -> None:
         if not getattr(self, "_reflection_ready", False):
             return
-        if getattr(self, "_git_sync_running", False) or self.service.git_sync.running:
+        if getattr(self, "_git_sync_running", False) or self.application.git.running:
             return
         try:
-            due = self.service.git_sync.due()
+            due = self.application.git.due()
         except Exception as exc:
             record_event("git_sync.scheduler_failed", exc)
             return
@@ -50,7 +50,7 @@ class ChatGitMixin:
 
     def _git_status_work(self, screen: GitScreen) -> None:
         try:
-            status = self.service.git_sync.status()
+            status = self.application.git.status()
         except Exception as exc:
             record_event("git_sync.status_failed", exc)
             try:
@@ -74,7 +74,7 @@ class ChatGitMixin:
     # ---------- 同步 Worker ----------
 
     def start_git_sync(self, screen: GitScreen | None, trigger: str = "manual") -> bool:
-        if getattr(self, "_git_sync_running", False) or self.service.git_sync.running:
+        if getattr(self, "_git_sync_running", False) or self.application.git.running:
             if screen is not None:
                 screen.sync_unavailable("A Git synchronization is already running.")
             return False
@@ -97,7 +97,7 @@ class ChatGitMixin:
                 pass
 
         try:
-            result = self.service.git_sync.sync(
+            result = self.application.git.sync(
                 trigger, progress, wait_for_git=(trigger == "manual")
             )
         except Exception as exc:

@@ -517,8 +517,10 @@ Credential detection considers assignment syntax and separators. It permits Chin
 src/syvrio/
 ├── app/          cli.py, server.py, tui.py, chat_app.py, chat_commands.py, chat_flow.py,
 │                 chat_widgets.py, chat_input.py, chat_theme.py, command_catalog.py,
-│                 actions.py, ui.py, session_ui.py, chat_reflection.py, chat_git.py,
-│                 git_screen.py                     # CLI / Textual TUI / FastMCP entry points
+│                 ui.py, session_ui.py, chat_reflection.py, chat_git.py, git_screen.py,
+│                 actions.py                         # CLI / Textual TUI / FastMCP presentation adapters
+├── application/  service.py, conversation.py, memory.py, settings.py,
+│                 reflection.py, git.py, contracts.py # frontend-neutral use cases and data contracts
 ├── agent/        runtime.py, prompts.py, context.py, tools.py,
 │                 session.py, recall.py, file_tools.py # Agent loop, tools, sessions, file analysis
 ├── memory/       service.py, store.py, models.py, queue.py,
@@ -533,7 +535,7 @@ src/syvrio/
                   layout.py, dialogs.py, documents.py, diagnostics.py, search/ # Config, Git sync and locks, diagnostics, document conversion, web search
 ```
 
-Dependency direction: `app → agent → memory → retrieval → infra`, `memory/agent → llm → infra`.
+Dependency direction: `app → application → agent → memory → retrieval → infra`, `application → llm/infra`, `memory/agent → llm → infra`. The `application/` package does not depend on Textual, Rich, Typer, or `app/`; core modules never import back into the application layer.
 `retrieval` reads only `memory`'s `models`, `store`, and `detect` helpers (entries, normalization, and literal coverage); this is the known `memory ↔ retrieval` back-reference. Writes and decisions stay in `memory`.
 Development conventions (code style, storage invariants, testing, and docs sync) are in [AGENTS.md](AGENTS.md).
 

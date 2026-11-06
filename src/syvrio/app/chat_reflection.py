@@ -26,7 +26,7 @@ class ChatReflectionMixin:
         self._reflection_last_activity = time.monotonic()
 
     def _auto_reflection_tick(self) -> None:
-        config = self.service.config.chat
+        config = self.application.config.chat
         now = time.monotonic()
         if (not config.auto_reflect or self._reflection_paused or not getattr(self, "_reflection_ready", False)
             or self.busy or getattr(self, "_reflection_pending", False)
@@ -36,7 +36,7 @@ class ChatReflectionMixin:
         if self.query_one("#input", Input).value.strip() or len(self.screen_stack) > 1:
             return
         try:
-            due = self.service.reflection.auto_check_due()
+            due = self.application.reflection.auto_check_due()
         except Exception as exc:
             record_event("reflection.schedule_failed", exc)
             return
@@ -50,13 +50,12 @@ class ChatReflectionMixin:
 
     def _auto_reflection_work(self, token: threading.Event) -> None:
         try:
-            mode = self.service.reflection.auto_plan()
+            mode = self.application.reflection.auto_plan()
             if mode is None:
                 self.call_from_thread(self._after_auto_reflection, None, None)
                 return
-            result = self.service.reflection.run(
-                mode, 1, cancel_event=token, auto=True,
-                refresh_summary=mode == "profile")
+            result = self.application.reflection.run(
+                mode, 1, cancel=token, auto=True)
             self.call_from_thread(self._after_auto_reflection, result, result.error)
         except Exception as exc:
             record_event("reflection.failed", exc)
@@ -64,7 +63,7 @@ class ChatReflectionMixin:
 
     def _after_auto_reflection(self, result, error: str | None) -> None:
         self._reflection_pending = False
-        self._reflection_next = time.monotonic() + max(5.0, self.service.config.chat.reflect_interval_seconds)
+        self._reflection_next = time.monotonic() + max(5.0, self.application.config.chat.reflect_interval_seconds)
         if result is not None and result.proposed:
             self.notify(f"Background reflection proposed {result.proposed} inferences. Review with /inferences.")
         if error:
@@ -80,24 +79,18 @@ class ChatReflectionMixin:
             token = getattr(self, "_reflection_cancel", None)
             if token is not None:
                 token.set()
-            self.service.reflection.cancel()
+            self.application.reflection.cancel()
             self.add_card("Cancellation requested; stopping after the active request returns without publishing its candidates.")
             return
         if argument == "status":
             running = "running" if getattr(self, "_reflection_pending", False) else "idle"
-            enabled = self.service.config.chat.auto_reflect and not getattr(self, "_reflection_paused", False)
+            enabled = self.application.config.chat.auto_reflect and not getattr(self, "_reflection_paused", False)
             try:
-                overview = self.service.reflection.schedule_overview()
-                profile = overview["profile"]
-                dream = overview["dream"]
-                profile_next = profile["next_attempt_at"][:16].replace("T", " ")
-                dream_next = dream["next_attempt_at"][:16].replace("T", " ")
-                profile_pending = f"{profile['pending']} pending changes"
-                if profile.get("pending_inferences"):
-                    profile_pending += ", inference batch pending"
+                overview = self.application.reflection.schedule()
                 schedule = (
-                    f"next profile ~{profile_next} ({profile_pending}), "
-                    f"next dream ~{dream_next} ({'pending' if dream['pending'] else 'no pending changes'})"
+                    f"next profile ~{overview.profile_next} ({overview.profile_pending}), "
+                    f"next dream ~{overview.dream_next} "
+                    f"({'pending' if overview.dream_pending else 'no pending changes'})"
                 )
             except Exception:
                 schedule = "schedule state unavailable"
@@ -132,20 +125,13 @@ class ChatReflectionMixin:
         fact_count = None
         unique_count = None
         try:
-            summary = self.service.reflection.profile_summary()
-            if summary is None:
-                body = ("No profile summary yet. Save preferences, goals or habits, then run "
-                        "/profile refresh to generate a cross-topic summary.\n\n"
-                        "The summary is a derived view over valid facts; source facts stay unchanged.")
-                status = "Not generated"
-                stale = False
-            else:
-                body = summary.text
-                stale = summary.stale
-                status = "Outdated · Source facts changed; run /profile refresh." if stale else "Up to date"
-                generated_at = summary.generated_at
-                fact_count = summary.fact_count
-                unique_count = summary.unique_count
+            snapshot = self.application.memory.profile()
+            body = snapshot.body
+            stale = snapshot.stale
+            status = snapshot.status
+            generated_at = snapshot.generated_at
+            fact_count = snapshot.fact_count
+            unique_count = snapshot.unique_count
         except Exception as exc:
             record_event("reflection.failed", exc)
             body = ("Could not read the profile summary cache.\n\n"
@@ -177,8 +163,7 @@ class ChatReflectionMixin:
 
     def _reflection_work(self, mode: str, budget: int, token: threading.Event) -> None:
         try:
-            result = self.service.reflection.run(
-                mode, budget, cancel_event=token, refresh_summary=mode == "profile")
+            result = self.application.reflection.run(mode, budget, cancel=token)
             message = (f"Reflection {'cancelled' if result.cancelled else 'complete'}: requests {result.requests}, "
                        f"proposed {result.proposed}, remaining {result.remaining} batches.")
             if mode == "profile":
@@ -210,4 +195,4 @@ class ChatReflectionMixin:
         token = getattr(self, "_reflection_cancel", None)
         if token is not None:
             token.set()
-        self.service.reflection.cancel()
+        self.application.reflection.cancel()

@@ -541,16 +541,17 @@ def test_model_options_merges_short_fetched_list_with_presets(service):
 
 
 def test_model_options_can_skip_metadata_for_fast_open(service, monkeypatch):
-    from syvrio.app import actions
+    from syvrio.application import settings as settings_module
+    from syvrio.application.settings import SettingsUseCases
 
     monkeypatch.setattr(
-        actions, "model_metadata", lambda *_: pytest.fail("快速开屏不应读取模型元数据")
+        settings_module, "model_metadata", lambda *_: pytest.fail("快速开屏不应读取模型元数据")
     )
     monkeypatch.setattr(
-        actions, "supported_params", lambda *_: pytest.fail("快速开屏不应读取模型能力")
+        settings_module, "supported_params", lambda *_: pytest.fail("快速开屏不应读取模型能力")
     )
 
-    options = actions.model_options(service, capabilities=False)
+    options = SettingsUseCases(service, None).model_options(capabilities=False)
 
     assert options[0].current
     assert "(" not in options[0].label
@@ -686,7 +687,7 @@ def test_apply_reasoning_updates_config_hot(tmp_path, monkeypatch, service):
 
     config_path = tmp_path / "syvrio.toml"
     service.config_path = config_path
-    monkeypatch.setattr(actions, "supported_params", lambda model: ("reasoning_effort",))
+    monkeypatch.setattr("syvrio.application.settings.supported_params", lambda model: ("reasoning_effort",))
 
     assert actions.reasoning_options(service)
     message = actions.apply_reasoning(service, "high")
@@ -699,7 +700,7 @@ def test_apply_reasoning_updates_config_hot(tmp_path, monkeypatch, service):
 def test_reasoning_options_empty_when_unsupported(service, monkeypatch):
     from syvrio.app import actions
 
-    monkeypatch.setattr(actions, "supported_params", lambda model: ())
+    monkeypatch.setattr("syvrio.application.settings.supported_params", lambda model: ())
     assert actions.reasoning_options(service) == []
 
 
