@@ -22,18 +22,20 @@ FOLLOWUP_RE = re.compile(
     re.IGNORECASE,
 )
 ATTRIBUTE_RE = re.compile(
-    r"叫什么|名字|姓名|怎么称呼|我多大|年龄|家乡|老家|住哪|住处|住址",
+    r"叫什么|名字|姓名|怎么称呼|我是谁|我的身份|我多大|年龄|家乡|老家|"
+    r"住哪|住处|住址|我的职业|从事什么|设备型号",
     re.IGNORECASE,
 )
-REWRITE_PROMPT = """把当前问题和最近对话合并成一个用于检索个人记忆的独立查询。
+REWRITE_PROMPT = """为当前问题生成用于检索个人记忆的独立关键词查询。
 要求：
-1. 保留人物、地点、时间、数字、型号和主题词。
-2. 补充同义词和常见说法，例如“找房子”可以补充“租房、房源”。
-3. 非中文的问题，先补上对应的中文说法（记忆库以中文为主）。
-4. 不要回答问题，不要解释，只输出一行查询。"""
+1. 如果在问个人资料中的某个字段，把口语问法转为常用字段名，例如“我多大了”转为“年龄”，“我做哪一行”转为“职业”。保留用户已明确说出的字段名。
+2. 保留有助于定位的人物、地点、时间、数字和型号。只有在指代不明确时才参考最近对话，最多补充两个同义词。
+3. 忽略对回复形式、工具和检索步骤的要求。非中文的问题补上相应中文关键词。
+4. 不要回答问题，不要解释，只输出一行关键词。"""
 
 COMBINED_QUERY_MAX_CHARS = 400
 REWRITE_MAX_TOKENS = 120
+SPARK_REWRITE_MAX_TOKENS = 600  # Spark's completion cap includes its reasoning.
 REWRITTEN_QUERY_MAX_CHARS = 200
 
 
@@ -42,6 +44,7 @@ class RecallQuery:
     text: str
     cue: bool = False
     rewritten: bool = False
+    original: str = ""
 
 
 Completer = Callable[..., object]
@@ -95,9 +98,9 @@ class RecallQueryBuilder:
 
         combined = " ".join([*recent, text])[-COMBINED_QUERY_MAX_CHARS:]
         if not self.rewrite or (self.llm.requires_api_key() and not self.llm.api_key()):
-            return RecallQuery(combined, cue=cue)
+            return RecallQuery(combined, cue=cue, original=text)
 
-        recent_block = "\n".join(f"- {item}" for item in recent)
+        recent_block = "\n".join(f"- {item}" for item in recent)[-COMBINED_QUERY_MAX_CHARS:]
         try:
             response = self.completer(
                 self.llm,
@@ -109,15 +112,16 @@ class RecallQueryBuilder:
                     },
                 ],
                 temperature=0.0,
-                max_tokens=REWRITE_MAX_TOKENS,
+                max_tokens=(SPARK_REWRITE_MAX_TOKENS if self.llm.provider.lower() == "spark"
+                            else REWRITE_MAX_TOKENS),
             )
             content = (response.choices[0].message.content or "").strip()
             query = content.splitlines()[0].strip().strip("\"'“”")
             if query:
-                return RecallQuery(query[:REWRITTEN_QUERY_MAX_CHARS], cue=cue, rewritten=True)
+                return RecallQuery(query[:REWRITTEN_QUERY_MAX_CHARS], cue=cue, rewritten=True, original=text)
         except Exception:
             pass
-        return RecallQuery(combined, cue=cue)
+        return RecallQuery(combined, cue=cue, original=text)
 
 
 def memory_references(hits: Iterable[SearchHit], max_tokens: int = 2400) -> str:

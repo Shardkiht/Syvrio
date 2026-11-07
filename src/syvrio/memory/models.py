@@ -9,6 +9,31 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
+_SHORT_FIELD = re.compile(
+    r"(?P<label>[\u3400-\u4dbf\u4e00-\u9fffA-Za-z][\u3400-\u4dbf\u4e00-\u9fffA-Za-z0-9 _-]{1,17})"
+    r"\s*[:：]\s*(?P<value>[^\n\r。！？]{1,64})"
+)
+
+
+def short_field(text: str) -> tuple[str, str] | None:
+    """Recognize a bounded, standalone field without guessing its meaning."""
+    match = _SHORT_FIELD.fullmatch(text.strip())
+    if match and (value := match["value"].strip()):
+        return match["label"].strip(), value
+    return None
+
+
+def matches_short_field(query: str, text: str) -> bool:
+    field = short_field(text)
+    if field is None:
+        return False
+    label = field[0].casefold()
+    query = query.casefold()
+    if re.search(r"[\u3400-\u4dbf\u4e00-\u9fff]", label):
+        return label in query
+    return bool(re.search(rf"(?<![a-z0-9]){re.escape(label)}(?![a-z0-9])", query))
+
+
 class MemoryContext(BaseModel):
     """可选的事实上下文；日期字符串自身保留年、月、日精度。"""
 
@@ -244,6 +269,7 @@ class Entry(BaseModel):
     confidence: float | None = None
     context_fields: tuple[FieldNode, ...] = ()
     extension_fields: tuple[FieldNode, ...] = ()
+    topic_title: str = Field(default="", exclude=True)
 
     @property
     def context(self) -> MemoryContext | None:
@@ -270,6 +296,18 @@ class Entry(BaseModel):
                                        if f.key not in {"syvrio.recorded_at", "syvrio.supersedes", "syvrio.session",
                                                         "syvrio.message", "syvrio.change_kind",
                                                         "migration.evidence_v1", "migration.evidence_v2"})])
+
+    @property
+    def embedding_text(self) -> str:
+        indexed = self.index_text
+        field = short_field(self.text)
+        if field is None:
+            return indexed
+        label, value = field
+        if not re.search(r"[\u3400-\u4dbf\u4e00-\u9fff]", label):
+            return indexed
+        context = f"\n主题：{self.topic_title}" if 1 <= len(self.topic_title) <= 64 else ""
+        return f"{label}是{value}。{context}{indexed[len(self.text):]}"
 
 
 class TopicInfo(BaseModel):

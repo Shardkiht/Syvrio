@@ -23,6 +23,7 @@ uv sync --extra local-embed
 uv run python evals/retrieval_eval.py               # 全部三路
 uv run python evals/retrieval_eval.py --keyword     # 只跑 BM25（离线）
 uv run python evals/retrieval_eval.py --failures    # 打印未过 @3 的用例
+uv run python -m evals.short_facts_eval --details  # 大规模短字段回归
 ```
 
 ## 方法
@@ -30,6 +31,8 @@ uv run python evals/retrieval_eval.py --failures    # 打印未过 @3 的用例
 - **语料**：456 条合成条目（脚本内确定性生成）。按个人记忆库特征建模——中文短条目、小节标题前缀、含"的"虚词噪声、领域干扰项、短身份行——不含任何真实个人信息。
 - **用例**：27 例，分五类（原词 / 口语改写 / 身份 / 数字 / 跨语言）；top-3 内命中任一可接受子串记过。
 - **指标**：脚本将任一可接受目标的命中率标为 Recall@3、Recall@5，更准确地说是 Hit@K，并非对所有相关条目的完整召回率；MRR@10 为前十条内首个匹配目标的倒数排名。
+
+短字段评测在原有合成数据上加入字段式姓名、年龄、家乡、职业、设备型号，以及同领域和带数字的干扰项。它通过 `MemoryService.recall` 跑混合检索，分别报告原题、短字段和整体的 Hit@1/3/5、MRR@10、预热查询中位耗时，以及冷建索引耗时。该评测直测检索层，未调用 LLM 改写或自动召回。
 
 ## 最新重跑（2026-10-30）
 

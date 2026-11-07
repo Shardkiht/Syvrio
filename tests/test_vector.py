@@ -214,6 +214,85 @@ def test_hybrid_falls_back_to_keyword_when_vector_fails(tmp_path):
     assert hits and hits[0].topic == "memories/general/preferences.md"
 
 
+def test_literal_coverage_does_not_join_words_across_separators():
+    from syvrio.memory.detect import bigram_coverage
+
+    assert bigram_coverage("姓名，年龄", "姓名") == 0.5
+    assert bigram_coverage("姓名 年龄", "姓名 年龄") == 1.0
+    assert bigram_coverage("名年", "姓名 年龄") == 0.0
+
+
+def test_short_field_coverage_keeps_exact_hit_without_restoring_noise(tmp_path):
+    store = MemoryStore(tmp_path)
+    name = store.append("identity", "姓名：虚构人物甲", title="合成人物资料")
+    noise = store.append("archive", "登记规则会核验称呼，并检查活动报名材料")
+    competing = store.append("archive", "登山装备清单")
+    query = "姓名 名字 称呼 身份"
+
+    class SemanticHits:
+        def search(self, query, limit):
+            return [SearchHit(id=competing.id, text=competing.text, topic=competing.topic)]
+
+    keyword = KeywordRetriever(store)
+    assert noise.id in {hit.id for hit in keyword.search(query)}
+    hits = HybridRetriever(keyword, SemanticHits()).search(query)
+    assert [hit.id for hit in hits] == [name.id, competing.id]
+    assert hits[0].raw_markdown == name.raw_markdown
+    assert (hits[0].source_path, hits[0].line) == (name.source_path, name.line)
+
+
+def test_embedding_cache_rebuilds_changed_short_fact_only(tmp_path):
+    from syvrio.retrieval.vector import text_hash
+
+    store = MemoryStore(tmp_path)
+    short = store.append("identity", "姓名：虚构人物甲", title="合成人物资料")
+    long = store.append("preferences", "我喜欢清淡的咖啡，有时也会喝茶")
+    embedder = FakeEmbedder({"name": ["姓名"], **GROUPS})
+    vector = VectorRetriever(store, embedder)
+    vector.cache_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(
+        vector.cache_path, model=np.array(embedder.model_id),
+        ids=np.array([short.id, long.id]),
+        hashes=np.array([text_hash(short.index_text), text_hash(long.index_text)]),
+        vectors=np.array([[1., 0., 0., 0.], [0., 0., 1., 0.]]),
+    )
+    assert short.embedding_text != short.index_text
+    assert "合成人物资料" in short.embedding_text
+    assert long.embedding_text == long.index_text
+    assert vector.search("姓名")[0].id == short.id
+    assert embedder.passages == [short.embedding_text]
+    assert store.find(short.id).raw_markdown == short.raw_markdown
+
+    path = store.topic_path(short.topic)
+    path.write_text(path.read_text().replace("# 合成人物资料", "# 演示身份档案"))
+    embedder.passages.clear()
+    vector.sync()
+    updated = store.find(short.id)
+    assert embedder.passages == [updated.embedding_text]
+    assert updated.raw_markdown == short.raw_markdown
+
+
+def test_large_corpus_keeps_explicit_short_fields_without_local_model(tmp_path):
+    from evals.short_facts_eval import SHORT_CASES, seed_vault
+
+    assert seed_vault(tmp_path) >= 1200
+    store = MemoryStore(tmp_path)
+    keyword = KeywordRetriever(store)
+
+    class DistractingVector:
+        def search(self, query, limit):
+            return [
+                SearchHit(id=f"distractor-{n:04}", text="同领域干扰", topic="archive")
+                for n in range(min(limit, 80))
+            ]
+
+    hybrid = HybridRetriever(keyword, DistractingVector())
+    for field, query in SHORT_CASES:
+        if query in {"我是谁", "我叫什么名字"}:
+            continue  # These require query rewriting or semantic embeddings.
+        assert f"short-{field}" in {hit.id for hit in hybrid.search(query, 3)}, query
+
+
 def test_build_retriever_falls_back_without_fastembed(tmp_path, monkeypatch):
     monkeypatch.setattr(
         service_module.LocalEmbedder, "available", staticmethod(lambda: False)

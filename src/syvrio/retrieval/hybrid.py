@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from ..memory.detect import CJK_RE, bigram_coverage
+from ..memory.models import matches_short_field
 from .base import Retriever, SearchHit
 
 RRF_K = 60
@@ -26,10 +27,11 @@ class HybridRetriever:
             return keyword_hits[:limit]
         # 非 CJK 查询没有 bigram 覆盖率信号，不能套字面闸，否则精确命中也会被清空。
         literal_gate = bool(CJK_RE.search(query))
+        exact_fields = {hit.id for hit in keyword_hits if matches_short_field(query, hit.text)}
         keyword_hits = [
-            hit
-            for hit in keyword_hits
-            if not literal_gate or bigram_coverage(query, hit.index_text or hit.text) >= MIN_QUERY_COVERAGE
+            hit for hit in keyword_hits
+            if (hit.id in exact_fields or not literal_gate
+                or bigram_coverage(query, hit.index_text or hit.text) >= MIN_QUERY_COVERAGE)
         ]
         if not vector_hits:
             return keyword_hits[:limit]
@@ -40,6 +42,11 @@ class HybridRetriever:
         for hits in (keyword_hits, vector_hits):
             for rank, hit in enumerate(hits):
                 scores[hit.id] = scores.get(hit.id, 0.0) + 1.0 / (RRF_K + rank)
+        # Exact field labels add an independent lexical signal. This keeps
+        # a short field competitive when its vector rank is low or absent.
+        for rank, hit in enumerate(keyword_hits):
+            if hit.id in exact_fields:
+                scores[hit.id] += 1.0 / (RRF_K + rank)
         vector_rank = {hit.id: rank for rank, hit in enumerate(vector_hits)}
         # RRF 完全平局（如 BM25 只剩虚词噪声时）按向量名次决胜；展示取向量侧命中，分数更有语义。
         ordered = sorted(

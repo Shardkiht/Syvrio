@@ -100,7 +100,7 @@ class VectorRetriever:
         fresh: list[Entry] = []
         for entry in entries:
             index = known.get(entry.id)
-            if index is not None and hashes[index] == text_hash(entry.index_text):
+            if index is not None and hashes[index] == text_hash(entry.embedding_text):
                 keep.append(index)
             else:
                 fresh.append(entry)
@@ -112,7 +112,7 @@ class VectorRetriever:
             for start in range(0, len(fresh), self.batch_size):
                 batch = fresh[start : start + self.batch_size]
                 vectors = np.array(
-                    self.embedder.embed([entry.index_text for entry in batch]), dtype=np.float32
+                    self.embedder.embed([entry.embedding_text for entry in batch]), dtype=np.float32
                 )
                 if vectors.ndim != 2 or vectors.shape[0] != len(batch):
                     raise ValueError("embedding 返回形状或数量与输入不一致")
@@ -216,7 +216,7 @@ class VectorRetriever:
                     handle,
                     model=np.array(self.embedder.model_id),
                     ids=np.array([entry.id for entry in entries]),
-                    hashes=np.array([text_hash(entry.index_text) for entry in entries]),
+                    hashes=np.array([text_hash(entry.embedding_text) for entry in entries]),
                     vectors=matrix,
                 )
             os.replace(tmp, self.cache_path)

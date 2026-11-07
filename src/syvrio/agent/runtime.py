@@ -534,7 +534,10 @@ class AgentRuntime:
         limit = self.config.auto_recall
         if recall.cue:
             limit = max(limit, 8)
-        hits = self.service.recall(recall.text, limit)
+        if recall.original and recall.original != recall.text:
+            hits = self.service.recall(recall.text, limit, original_query=recall.original)
+        else:
+            hits = self.service.recall(recall.text, limit)
         text = memory_references(hits, max_tokens=min(2400, self.config.context_window // 8))
         try:
             profile = self.service.reflection.context({hit.id for hit in hits})

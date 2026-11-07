@@ -352,9 +352,9 @@ def test_auto_recall_uses_recent_context_for_followup(tmp_path, monkeypatch):
     queries = []
     recall = service.recall
 
-    def capture(query, limit=10):
+    def capture(query, limit=10, **kwargs):
         queries.append(query)
-        return recall(query, limit)
+        return recall(query, limit, **kwargs)
 
     monkeypatch.setattr(service, "recall", capture)
 
@@ -395,6 +395,45 @@ def test_attribute_question_rewrites_with_synonyms(tmp_path, monkeypatch):
     store.append("devices", "使用便携键盘")
     hits = KeywordRetriever(store).search(query.text)
     assert hits and hits[0].topic == "memories/general/01-identity.md"
+
+
+def test_original_short_field_reaches_model_via_prefetch_and_recall_tool(tmp_path, monkeypatch):
+    from syvrio.agent.recall import RecallQuery
+    from syvrio.retrieval import HybridRetriever, KeywordRetriever, SearchHit
+
+    target = "虚构人物甲"
+
+    class SemanticNoise:
+        def search(self, query, limit):
+            return [SearchHit(id=age.id, text=age.text, topic=age.topic)]
+
+    class Model:
+        def chat(self, messages, tools):
+            if not any(message["role"] == "tool" for message in messages):
+                assert any(
+                    name.raw_markdown in message["content"]
+                    and "<long_term_memory>" in message["content"]
+                    for message in messages if message["role"] == "user"
+                )
+                return AssistantTurn(tool_calls=[
+                    ToolCall(id="check", name="recall", arguments={
+                        "query": "姓名 名字 称呼", "limit": 1,
+                    })
+                ])
+            result = next(message["content"] for message in messages if message["role"] == "tool")
+            assert name.raw_markdown in result
+            return AssistantTurn(content=result.split("姓名：", 1)[1].splitlines()[0])
+
+    runtime, service = build_runtime(tmp_path, Model())
+    name = service.note(f"姓名：{target}", topic="identity")
+    age = service.note("年龄：41 岁", topic="identity")
+    service.retriever = HybridRetriever(KeywordRetriever(service.store), SemanticNoise())
+    runtime.config.auto_recall = 1
+    monkeypatch.setattr(
+        runtime.recall_queries, "build",
+        lambda text, recent: RecallQuery("年龄", rewritten=True, original=text),
+    )
+    assert runtime.ask("我指的是姓名").content == target
 
 
 def test_memory_cue_increases_auto_recall_limit(tmp_path, monkeypatch):

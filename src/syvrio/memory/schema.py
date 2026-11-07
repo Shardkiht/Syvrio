@@ -116,7 +116,10 @@ def parse_document(raw: str, source_path: str, topic: str) -> Document:
 
     records = []
     ids = set()
-    for block in SyntaxTreeNode(_MARKDOWN.parse(raw)).children:
+    blocks = SyntaxTreeNode(_MARKDOWN.parse(raw)).children
+    title = next((b.children[0].content.strip() for b in blocks
+                  if b.type == "heading" and b.tag == "h1"), "")
+    for block in blocks:
         if block.type != "bullet_list":
             continue
         for item in block.children:
@@ -175,7 +178,8 @@ def parse_document(raw: str, source_path: str, topic: str) -> Document:
             entry = Entry(id=core.id, topic=topic, text=text, timestamp=metadata.pop("recorded_at", ""),
                           status=core.status, supersedes=metadata.pop("supersedes", None), metadata=metadata,
                           raw_markdown=record_raw, source_path=source_path, line=start + 1, end_line=end,
-                          context_fields=context, extension_fields=extensions, confidence=core.confidence)
+                          context_fields=context, extension_fields=extensions, confidence=core.confidence,
+                          topic_title=title)
             records.append(Record(entry, offsets[start], offsets[end], status_start, status_end, core, context, extensions))
     return Document(raw, tuple(records))
 

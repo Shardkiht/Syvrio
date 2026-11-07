@@ -538,7 +538,10 @@ class MemoryService:
     def recall(self, query: str, limit: int = 10, *, date_from: str | None = None,
                date_to: str | None = None, location: str | None = None,
                emotion: str | None = None, as_of: str | None = None,
-               view: str = "current") -> list[SearchHit]:
+               view: str = "current", original_query: str = "") -> list[SearchHit]:
+        from itertools import zip_longest
+
+        from .models import matches_short_field
         from .temporal import TemporalStore, matches_context, select_facts, validate_range
 
         validate_range(date_from, date_to)
@@ -549,7 +552,18 @@ class MemoryService:
         entries = {entry.id: entry for entry in selected}
         retriever = KeywordRetriever(TemporalStore(self.config.vault, selected)) if as_of or view == "history" else self.retriever
         # 必须先筛选再截断，不能只筛掉前 limit 条而漏掉后面的有效结果。
-        hits = retriever.search(query, max(len(all_entries), limit))
+        depth = max(len(all_entries), limit)
+        hits = retriever.search(query, depth)
+        if original_query and original_query != query:
+            original = retriever.search(original_query, depth)
+            # Keep the original field evidence ahead of contextual noise, then
+            # let both variants contribute without sharing a coverage denominator.
+            combined = {hit.id: hit for hit in original if matches_short_field(original_query, hit.text)}
+            for pair in zip_longest(hits, original):
+                for hit in pair:
+                    if hit is not None:
+                        combined.setdefault(hit.id, hit)
+            hits = list(combined.values())
         filters = any((date_from, date_to, location, emotion))
         return [hit.model_copy(update={"status": entries[hit.id].status,
             "raw_markdown": entries[hit.id].raw_markdown, "source_path": entries[hit.id].source_path,

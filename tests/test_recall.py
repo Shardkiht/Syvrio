@@ -61,6 +61,7 @@ def test_rewrite_uses_llm(monkeypatch):
 
     assert query.text == "滨江 租房 房源 预算"
     assert query.rewritten is True
+    assert query.original == "那附近便宜吗"
     assert calls
     assert "同义词" in calls[0][0][0]["content"]
 
@@ -92,6 +93,24 @@ def test_rewrite_falls_back_to_combined_text(monkeypatch):
 
     assert "滨江" in query.text
     assert query.rewritten is False
+    assert query.original == "那附近便宜吗"
+
+
+def test_identity_question_can_rewrite_on_first_turn(monkeypatch):
+    monkeypatch.setattr(LLMConfig, "api_key", lambda self: "test-key")
+    calls = []
+
+    def complete(config, messages, **kwargs):
+        calls.append(kwargs)
+        return response("姓名 个人身份")
+
+    query = RecallQueryBuilder(LLMConfig(provider="spark"), completer=complete).build(
+        "你知道我是谁吗", []
+    )
+    assert query.text == "姓名 个人身份"
+    assert query.original == "你知道我是谁吗"
+    assert query.rewritten
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize("text,recent,expected", [

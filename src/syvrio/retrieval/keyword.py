@@ -6,7 +6,7 @@ from functools import lru_cache
 
 from rank_bm25 import BM25Okapi
 
-from ..memory.models import Entry
+from ..memory.models import Entry, matches_short_field
 from ..memory.store import MemoryStore
 from .base import SearchHit
 
@@ -84,7 +84,8 @@ class KeywordRetriever:
         lowered = query.lower()
         ranked = sorted(
             (
-                (score + (2.0 if lowered in entry.index_text.lower() else 0.0), index)
+                (matches_short_field(query, entry.text),
+                 score + (2.0 if lowered in entry.index_text.lower() else 0.0), index)
                 for index, (entry, score) in enumerate(zip(entries, scores))
             ),
             reverse=True,
@@ -103,6 +104,6 @@ class KeywordRetriever:
                 timestamp=entries[index].timestamp,
                 score=round(max(float(score), 0.0), 4),
             )
-            for score, index in ranked[:limit]
-            if score > 0
+            for exact, score, index in ranked[:limit]
+            if exact or score > 0
         ]
