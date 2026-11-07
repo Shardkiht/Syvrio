@@ -336,7 +336,7 @@ def test_fetch_router_all_failed_reports_fetch_error(public_dns):
     assert "first" in caught.value.detail and "second" in caught.value.detail
 
 
-def test_fetch_router_without_provider_raises_clear_error():
+def test_fetch_router_without_provider_raises_clear_error(public_dns):
     router = FetchRouter({}, order=[])
     assert not router.supports_fetch
     with pytest.raises(ProviderError, match="没有支持网页抓取"):

@@ -13,6 +13,7 @@ from typing import Any, Callable
 
 import httpx
 
+from ... import __version__
 from .base import (
     FetchQuery,
     FetchResult,
@@ -320,7 +321,7 @@ class McpStdioTransport:
                 {
                     "protocolVersion": "2024-11-05",
                     "capabilities": {},
-                    "clientInfo": {"name": "syvrio", "version": "0.3.3"},
+                    "clientInfo": {"name": "syvrio", "version": __version__},
                 },
                 deadline,
             )

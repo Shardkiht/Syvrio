@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tomllib
 from importlib import metadata
 from pathlib import Path
 
@@ -27,7 +28,8 @@ def test_only_syvrio_console_script():
 
 
 def test_version_and_assistant_branding():
-    assert syvrio.__version__ == "0.3.3"
+    project = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
+    assert syvrio.__version__ == project["project"]["version"]
     assert ASSISTANT_NAME == "Syvrio"
 
 

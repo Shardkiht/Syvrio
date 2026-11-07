@@ -7,7 +7,7 @@
 Turn everyday conversations into long-term Markdown memories you can inspect, trace, and roll back. Use the terminal chat or connect an MCP client.
 
 [![test](https://github.com/Shardkiht/syvrio/actions/workflows/test.yml/badge.svg)](https://github.com/Shardkiht/syvrio/actions/workflows/test.yml)
-![PyPI status](https://img.shields.io/badge/PyPI-0.3.3-blue)
+[![PyPI](https://img.shields.io/pypi/v/syvrio)](https://pypi.org/project/syvrio/)
 ![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
@@ -21,13 +21,13 @@ Stop repeating your preferences and plans every time you start a chat. Tell it â
 
 The demo operates the actual Textual UI with synthetic data and scripted model replies. Memory writes and cross-session retrieval run through the real implementation, with no paid model requests. [View the still screenshot](docs/assets/syvrio-demo.png).
 
-Stable showcase: `main` was frozen after PR #15; `portfolio-2026-11-01` (`316a030`) identifies the showcase source. PR #16 updated the release version to `0.3.3` (`v0.3.3`, `22217c2`), with a published GitHub Release. This evolution branch has now inherited PR #16's version and lockfile changes via a one-way `main` â†’ `feature-memory-evolution` merge, and its source package version is also `0.3.3`. Routine work remains on `feature-memory-evolution`; evolution features must not be merged back into frozen `main`.
+The `feature-memory-evolution` source version is `0.4.0`. It includes Vault v2 and the new web fetch providers. The `main` branch maintains the stable version separately. Install the evolution branch from source.
 
 ## Quick start
 
 Requires Python 3.12+, uv, and git.
 
-**Publication status (2026-11-04):** `syvrio` is published on PyPI (`0.3.3`). Install it directly, or run from source as described below.
+The following commands install the published version from PyPI. To use this branch, follow the source installation instructions below.
 
 ```bash
 uv tool install syvrio
