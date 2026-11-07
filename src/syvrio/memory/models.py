@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 _SHORT_FIELD = re.compile(
     r"(?P<label>[\u3400-\u4dbf\u4e00-\u9fffA-Za-z][\u3400-\u4dbf\u4e00-\u9fffA-Za-z0-9 _-]{1,17})"
-    r"\s*[:：]\s*(?P<value>[^\n\r。！？]{1,64})"
+    r"\s*[:：]\s*(?P<value>[^\n\r。！？]{1,64})。?"
 )
 
 
@@ -21,17 +21,6 @@ def short_field(text: str) -> tuple[str, str] | None:
     if match and (value := match["value"].strip()):
         return match["label"].strip(), value
     return None
-
-
-def matches_short_field(query: str, text: str) -> bool:
-    field = short_field(text)
-    if field is None:
-        return False
-    label = field[0].casefold()
-    query = query.casefold()
-    if re.search(r"[\u3400-\u4dbf\u4e00-\u9fff]", label):
-        return label in query
-    return bool(re.search(rf"(?<![a-z0-9]){re.escape(label)}(?![a-z0-9])", query))
 
 
 class MemoryContext(BaseModel):
@@ -301,7 +290,8 @@ class Entry(BaseModel):
     def embedding_text(self) -> str:
         indexed = self.index_text
         field = short_field(self.text)
-        if field is None:
+        if field is None or self.text.rstrip().endswith("。"):
+            # A field whose value already forms a sentence needs no vector rewrite.
             return indexed
         label, value = field
         if not re.search(r"[\u3400-\u4dbf\u4e00-\u9fff]", label):

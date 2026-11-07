@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Protocol
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SearchHit(BaseModel):
@@ -20,6 +20,7 @@ class SearchHit(BaseModel):
     score: float = 0.0
     status: str = "active"
     context: dict[str, str] | None = None
+    matched_field: str = Field(default="", exclude=True)
 
 
 class Retriever(Protocol):

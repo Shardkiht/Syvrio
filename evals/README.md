@@ -24,6 +24,7 @@ uv run python evals/retrieval_eval.py               # 全部三路
 uv run python evals/retrieval_eval.py --keyword     # 只跑 BM25（离线）
 uv run python evals/retrieval_eval.py --failures    # 打印未过 @3 的用例
 uv run python -m evals.short_facts_eval --details  # 大规模短字段回归
+uv run python -m evals.field_lookup_eval           # 完整标签与重叠标签回归
 ```
 
 ## 方法
@@ -33,6 +34,8 @@ uv run python -m evals.short_facts_eval --details  # 大规模短字段回归
 - **指标**：脚本将任一可接受目标的命中率标为 Recall@3、Recall@5，更准确地说是 Hit@K，并非对所有相关条目的完整召回率；MRR@10 为前十条内首个匹配目标的倒数排名。
 
 短字段评测在原有合成数据上加入字段式姓名、年龄、家乡、职业、设备型号，以及同领域和带数字的干扰项。它通过 `MemoryService.recall` 跑混合检索，分别报告原题、短字段和整体的 Hit@1/3/5、MRR@10、预热查询中位耗时，以及冷建索引耗时。该评测直测检索层，未调用 LLM 改写或自动召回。
+
+字段匹配评测使用另一组固定合成语料，覆盖重叠标签、同名字段的上下文区分、英文标签和普通文本。除 Hit@1/3 外，还单独统计较短标签错误排到第一的次数。
 
 ## 最新重跑（2026-10-30）
 

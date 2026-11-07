@@ -241,6 +241,48 @@ def test_short_field_coverage_keeps_exact_hit_without_restoring_noise(tmp_path):
     assert (hits[0].source_path, hits[0].line) == (name.source_path, name.line)
 
 
+def test_field_index_respects_token_boundaries_and_longest_labels(tmp_path):
+    store = MemoryStore(tmp_path)
+    short = store.append("devices", "卷标：HARBOR")
+    long = store.append("devices", "备份卷标：TIDE-12")
+    latin = store.append("devices", "PIN: TEST-PIN")
+    keyword = KeywordRetriever(store)
+
+    assert [hit.id for hit in keyword.search("我的备份卷标是什么") if hit.matched_field] == [long.id]
+    assert {hit.id for hit in keyword.search("卷标和备份卷标") if hit.matched_field} == {short.id, long.id}
+    assert not any(hit.matched_field for hit in keyword.search("SPINNING"))
+    assert keyword.search("Find my pin")[0].id == latin.id
+
+    store.set_status(long.id, "deleted")
+    assert not any(hit.id == long.id for hit in keyword.search("备份卷标"))
+
+
+def test_same_field_uses_context_to_choose_between_records(tmp_path):
+    store = MemoryStore(tmp_path)
+    first = store.append("devices", "运行模式：预览节点使用隔离模式")
+    second = store.append("devices", "运行模式：批处理节点使用常规模式")
+    keyword = KeywordRetriever(store)
+    embedder = FakeEmbedder({
+        "preview": ["预览", "隔离"], "batch": ["批处理", "常规"],
+    })
+    hybrid = HybridRetriever(keyword, VectorRetriever(store, embedder))
+
+    for query, expected in (("预览节点的运行模式", first), ("批处理节点的运行模式", second)):
+        hit = hybrid.search(query, 1)[0]
+        assert hit.id == expected.id and hit.matched_field == "运行模式"
+        assert "matched_field" not in hit.model_dump()
+
+
+def test_field_index_accepts_a_terminal_period_but_not_multiple_sentences(tmp_path):
+    store = MemoryStore(tmp_path)
+    fact = store.append("work", "复核规则：使用校准过的量具。")
+    note = store.append("work", "复核规则：使用过期样例。这个旧流程已废弃。")
+    hits = KeywordRetriever(store).search("我的复核规则")
+    assert [hit.id for hit in hits if hit.matched_field] == [fact.id]
+    assert note.id in {hit.id for hit in hits}
+    assert fact.embedding_text == fact.index_text
+
+
 def test_embedding_cache_rebuilds_changed_short_fact_only(tmp_path):
     from syvrio.retrieval.vector import text_hash
 

@@ -541,7 +541,6 @@ class MemoryService:
                view: str = "current", original_query: str = "") -> list[SearchHit]:
         from itertools import zip_longest
 
-        from .models import matches_short_field
         from .temporal import TemporalStore, matches_context, select_facts, validate_range
 
         validate_range(date_from, date_to)
@@ -558,7 +557,7 @@ class MemoryService:
             original = retriever.search(original_query, depth)
             # Keep the original field evidence ahead of contextual noise, then
             # let both variants contribute without sharing a coverage denominator.
-            combined = {hit.id: hit for hit in original if matches_short_field(original_query, hit.text)}
+            combined = {hit.id: hit for hit in original if hit.matched_field}
             for pair in zip_longest(hits, original):
                 for hit in pair:
                     if hit is not None:
