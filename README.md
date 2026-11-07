@@ -21,13 +21,13 @@
 
 演示操作实际 Textual 界面，使用合成数据与固定模型回复回放；记忆写入和跨会话检索走真实代码，不产生模型费用。[查看静态截图](docs/assets/syvrio-demo.png)。
 
-稳定展示：`main` 在最终验收后冻结，使用 `portfolio-2026-11-01` 标识本轮源码快照。当前源码版本为 `0.3.4`；历史稳定发行标记 `v0.3.3`，较早的 `v0.3.2` Release 属于其他快照。后续常规开发仅在 `feature-memory-evolution` 进行。
+稳定展示：`main` 在最终验收后冻结，使用 `portfolio-2026-11-01` 标识本轮源码快照。当前源码与发行版本为 `0.3.4`（PyPI 与 GitHub Release `v0.3.4` 均已发布）；较早的 `v0.3.3`、`v0.3.2` Release 属于其他快照。后续常规开发仅在 `feature-memory-evolution` 进行。
 
 ## 快速开始
 
 需要 Python 3.12+、uv、git。
 
-**发布状态：** `syvrio` 的实际最新 PyPI 版本以 [项目页面](https://pypi.org/project/syvrio/) 为准；当前源码已准备 `0.3.4` 更名清理发行。可直接安装；从源码开发见下文。
+**发布状态：** `syvrio` 最新发行版为 `0.3.4`（[PyPI](https://pypi.org/project/syvrio/0.3.4/) / [GitHub Release](https://github.com/Shardkiht/syvrio/releases/tag/v0.3.4)），实际最新版本以 [项目页面](https://pypi.org/project/syvrio/) 为准。可直接安装；从源码开发见下文。
 
 ```bash
 uv tool install syvrio
