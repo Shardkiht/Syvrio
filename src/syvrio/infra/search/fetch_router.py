@@ -29,6 +29,11 @@ _EXTERNAL_FETCH_PROVIDERS: dict[str, tuple[str, str]] = {
     "you": ("you.py:YouFetchProvider", "YDC_API_KEY"),
     "volcengine": ("volcengine.py:VolcengineFetchProvider", "VOLCENGINE_SEARCH_API_KEY"),
 }
+_OPTIONAL_FETCH_KEY_PROVIDERS = {
+    "anysearch": "ANYSEARCH_API_KEY",
+    "parallel_mcp": "PARALLEL_API_KEY",
+}
+FETCH_PROVIDERS = {"open_websearch", *_EXTERNAL_FETCH_PROVIDERS, *_OPTIONAL_FETCH_KEY_PROVIDERS}
 
 
 class FetchProvider(Protocol):
@@ -91,7 +96,7 @@ class FetchRouter:
                 failures.append(SearchFailure(name, "unavailable", str(exc)))
                 continue
             if result.final_url and result.final_url != text:
-                # 上游已逐跳校验；这里对最终地址再拦一次私网回落。
+                # 外部服务未必披露跳转链；拒绝已知的非公网最终地址。
                 assert_public_fetch_url(result.final_url, "重定向后的抓取地址")
             return result
         if failures:
@@ -115,12 +120,12 @@ def build_fetch_registry(
                 engines=search_config.engines,
                 fetch_timeout=search_config.fetch_timeout,
             )
-        elif name in _EXTERNAL_FETCH_PROVIDERS:
-            env_name = _EXTERNAL_FETCH_PROVIDERS[name][1]
+        elif name in FETCH_PROVIDERS:
+            env_name = _OPTIONAL_FETCH_KEY_PROVIDERS.get(name)
             from ..config import read_api_key
 
-            api_key = read_api_key(env_name)
-            if not api_key:
+            api_key = read_api_key(env_name or _EXTERNAL_FETCH_PROVIDERS[name][1])
+            if not api_key and env_name is None:
                 # 未配置 Key 的厂商直接跳过：不参与尝试，也不报错。
                 continue
             registry[name] = _build_external_fetch_provider(name, api_key, search_config.fetch_timeout)
@@ -130,7 +135,14 @@ def build_fetch_registry(
 def _build_external_fetch_provider(
     name: str, api_key: str, timeout: float
 ) -> FetchProvider:
-    # 延迟导入：未配置 Key 时不必加载这些模块。
+    if name == "anysearch":
+        from .anysearch import AnySearchFetchProvider
+
+        return AnySearchFetchProvider(api_key, timeout=timeout)
+    if name == "parallel_mcp":
+        from .parallel_mcp import ParallelMcpFetchProvider
+
+        return ParallelMcpFetchProvider(api_key, timeout=timeout)
     if name == "tavily":
         from .tavily import TavilyFetchProvider
 

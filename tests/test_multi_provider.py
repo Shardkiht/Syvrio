@@ -179,3 +179,35 @@ def test_smoke_script_live_requires_single_provider(tmp_path, capsys):
     exit_code = module.main(["--live"], config=config)
     assert exit_code == 2
     assert "--provider" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("name,key_env", [
+    ("anysearch", "ANYSEARCH_API_KEY"), ("parallel_mcp", "PARALLEL_API_KEY"),
+])
+def test_fetch_smoke_dry_optional_key_and_one_live_call(
+    monkeypatch, tmp_path, capsys, name, key_env,
+):
+    module = _load_smoke_module()
+    _install_keys_and_empty_keyring(monkeypatch)
+    monkeypatch.delenv(key_env, raising=False)
+    config = Config(vault=tmp_path, fetch=FetchConfig(providers=[name]))
+    args = ["--provider", name, "--operation", "fetch"]
+    assert module.main(args, config=config) == 0
+    row, = json.loads(capsys.readouterr().out)["rows"]
+    assert row["operation"] == "fetch" and row["provider"] == name
+    assert row["key_present"] is False and row["would_register"] is True
+
+    calls = []
+
+    def fetch(query):
+        calls.append(query.url)
+        return FetchResult(query.url, query.url, "Title", "Body")
+
+    monkeypatch.setattr(module, "build_fetch_registry", lambda *_: {
+        name: types.SimpleNamespace(fetch=fetch),
+    })
+    monkeypatch.setattr(module, "assert_public_fetch_url", lambda url: None)
+    assert module.main([*args, "--live", "--max-requests", "3"], config=config) == 0
+    row, = json.loads(capsys.readouterr().out)["reports"]
+    assert row["ok"] and row["requests"] == 1
+    assert calls == ["https://example.com"]

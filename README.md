@@ -381,19 +381,27 @@ npx -y open-websearch@latest serve
 
 ### AnySearch 与 Parallel MCP
 
-除 open-websearch 外，`search.providers` 还可以加入两个无需预先注册的搜索源：
+AnySearch 和 Parallel MCP 都支持 Search 和 Fetch，可分别加入 `[search].providers` 或 `[fetch].providers`。两类操作共用同一个 Key，未配置 Key 时使用匿名模式：
 
 - `anysearch`：调用 AnySearch REST 搜索（`https://api.anysearch.com/v1/search`）。未配置 Key 时不发送 `Authorization`；配置 `ANYSEARCH_API_KEY` 后自动改用 Bearer Token。`zone` 与 `language` 取 `[search]` 的 `anysearch_zone` / `anysearch_language`，默认 `cn` / `zh-CN`。查询原文不会被改写。
-- `parallel_mcp`：通过 Streamable HTTP MCP 调用固定服务 `https://search.parallel.ai/mcp` 的 `web_search` 工具。匿名和认证模式使用同一地址与同一工具调用；配置 `PARALLEL_API_KEY` 后只增加 Bearer 认证。优先读取 `structuredContent.results`，也兼容 `content[].text` 中的 JSON；重复 URL 会合并，过长摘录会截断，无法验证的发布时间保留为空。
+- `parallel_mcp`：Search 继续通过现有的独立 Search MCP（`https://search.parallel.ai/mcp`）调用 `web_search`；该端点由官方保留用于兼容。匿名和认证模式使用相同的接口；配置 `PARALLEL_API_KEY` 后只增加 Bearer 认证。优先读取 `structuredContent.results`，也兼容 `content[].text` 中的 JSON；重复 URL 会合并，过长摘录会截断，无法验证的发布时间保留为空。
 
 示例（默认顺序不变，只有显式加入才会启用）：
 
 ```toml
 [search]
 providers = ["parallel_mcp", "anysearch", "open_websearch"]
+
+[fetch]
+providers = ["anysearch", "parallel_mcp", "open_websearch"]
 ```
 
-两个 Provider 都参与同一套质量门控、回退、请求预算、缓存和 `UsageLimiter`；`anysearch` 与 `parallel_mcp` 默认各有每日 20 次本地保护上限，可用 `[search.usage_limits.<provider>]` 调整，0 表示不限制。该数字只是本机请求保护，不代表服务商免费额度或账单上限；配置 Key 后可能产生服务商侧费用。认证失败（401/403）会明确报告并回退下一 Provider，不会自动去掉 Key 重试匿名模式。AnySearch 与 Parallel MCP 目前只接入搜索，未实现 `web_fetch`。
+Search 参与现有的质量门控、回退、请求预算、缓存和 `UsageLimiter`；`anysearch` 与 `parallel_mcp` 默认各有每日 20 次本地保护上限，可用 `[search.usage_limits.<provider>]` 调整，0 表示不限制。该数字只是本机请求保护，不代表服务商免费额度或账单上限；配置 Key 后可能产生服务商侧费用。认证失败（401/403）会明确报告并回退下一 Provider，不会自动去掉 Key 重试匿名模式。同一厂商的 Search 与 Fetch 共用计数，官方额度耗尽会暂停该厂商并按 Fetch 顺序回退。
+
+- **AnySearch Fetch**：向 [Extract API](https://www.anysearch.com/docs/api-endpoints/v1-extract) 发送 `POST https://api.anysearch.com/v1/extract`，请求体只包含 `url`；从 `data.content` 提取正文并清理 HTML。
+- **Parallel Fetch**：通过 [Parallel MCP 2.0](https://docs.parallel.ai/integrations/mcp/quickstart) 的 `https://mcp.parallel.ai/mcp` 调用 `web_fetch`，传单个 URL 并请求 Markdown 正文，正文缺失时使用有效摘录。
+
+两家仅在上游返回实际跳转地址时使用该地址；否则保留请求 URL，不另发请求探测跳转。Fetch 仍校验输入和上游提供的最终地址，并按 `max_chars` 截断。OpenWebSearch（HTTP）、Tavily、Exa、You.com 和火山引擎继续支持 Fetch；百度千帆和 SearXNG 仅支持 Search。
 
 匿名接口在当前中国大陆网络曾由用户用无代理 curl 验证可用，但这只代表当时网络环境；不同运营商、时间和地区仍需实际验证，代码不依赖 VPN 或额外代理。`syvrio setup` 可在不填写 Key 的情况下启用任一匿名 Provider。
 

@@ -135,4 +135,6 @@ fetch_timeout = 45.0
 [fetch]
 # 网页抓取的 provider 顺序，与搜索的 providers 相互独立。
 # 官方厂商（tavily / exa / you / volcengine）配置 Key 并加入此列表后才启用抓取。
+# anysearch / parallel_mcp 加入此列表即可匿名使用，配置对应 Key 后改用 Bearer。
+# 两者与 Search 共用同一 Key 和本地额度；默认不启用。
 providers = ["open_websearch"]

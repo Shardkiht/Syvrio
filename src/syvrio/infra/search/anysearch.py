@@ -5,7 +5,10 @@ from typing import Any, Callable
 
 import httpx
 
-from .base import ProviderError, ProviderErrorKind, SearchQuery, SearchResult
+from .base import (
+    FetchQuery, FetchResult, ProviderError, ProviderErrorKind, SearchQuery, SearchResult,
+)
+from .fetch_content import extract_text, extracted_result
 from .http_client import JsonApiClient
 
 NAME = "anysearch"
@@ -70,6 +73,45 @@ class AnySearchProvider:
             )
         mapped = [_map_result(item) for item in results]
         return [item for item in mapped if item is not None]
+
+
+class AnySearchFetchProvider:
+    name = NAME
+    capabilities = {"fetch"}
+
+    def __init__(
+        self,
+        api_key: str = "",
+        timeout: float = 45.0,
+        base_url: str = DEFAULT_BASE_URL,
+        client_factory: Callable[[], httpx.Client] | None = None,
+    ):
+        self._client = JsonApiClient(NAME, base_url, timeout, client_factory)
+        self._api_key = api_key.strip()
+
+    def fetch(self, query: FetchQuery) -> FetchResult:
+        headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
+        try:
+            response = self._client.post_json("/extract", {"url": query.url}, headers)
+        except ProviderError as exc:
+            # A 402 can carry generated credentials in the response message.
+            # Do not propagate the server's text or error-code fields.
+            parts = exc.detail.split(maxsplit=2)
+            detail = "抓取 API 请求失败"
+            if len(parts) >= 2 and parts[0] == "HTTP":
+                code = parts[1]
+                if code.isascii() and code.isdecimal() and len(code) == 3:
+                    detail = f"HTTP {code}"
+            pause = "official_quota_exhausted" if exc.kind == ProviderErrorKind.QUOTA else ""
+            raise ProviderError(NAME, exc.kind, detail, pause_reason=pause) from None
+        payload = self._client.parse_json(response)
+        data = payload.get("data")
+        if payload.get("code") != 0 or not isinstance(data, dict):
+            raise ProviderError(NAME, ProviderErrorKind.BAD_RESPONSE, "Extract 响应结构异常")
+        return extracted_result(
+            NAME, query, url=data.get("final_url") or data.get("url"),
+            title=data.get("title"), content=extract_text(data.get("content")),
+        )
 
 
 def _map_result(item: Any) -> SearchResult | None:

@@ -10,6 +10,8 @@ from typing import Any, Callable
 import httpx
 
 from .base import (
+    FetchQuery,
+    FetchResult,
     ProviderError,
     ProviderErrorKind,
     SearchQuery,
@@ -17,9 +19,11 @@ from .base import (
     normalize_url,
     parse_published_date,
 )
+from .fetch_content import extract_text, extracted_result
 
 NAME = "parallel_mcp"
 MCP_URL = "https://search.parallel.ai/mcp"
+FETCH_MCP_URL = "https://mcp.parallel.ai/mcp"
 MAX_SNIPPET_CHARS = 600
 MAX_TITLE_CHARS = 300
 MAX_RESULTS = 20
@@ -76,16 +80,98 @@ class ParallelMcpProvider:
     async def _call(
         self, arguments: dict[str, Any], headers: dict[str, str], timeout: float
     ) -> Any:
-        async with self._client_factory(dict(headers), timeout) as client:
-            return await client.call_tool("web_search", arguments, timeout=timeout)
+        return await _call_tool(self._client_factory, headers, timeout, "web_search", arguments)
 
 
-def _default_client(headers: dict[str, str], timeout: float):
+class ParallelMcpFetchProvider:
+    name = NAME
+    capabilities = {"fetch"}
+
+    def __init__(
+        self, api_key: str = "", timeout: float = 45.0, client_factory: ClientFactory | None = None,
+    ):
+        self._api_key = api_key.strip()
+        self._timeout = max(0.05, timeout)
+        self._client_factory = client_factory or _fetch_client
+
+    def fetch(self, query: FetchQuery) -> FetchResult:
+        headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
+        try:
+            result = _run_async(
+                lambda: _call_tool(
+                    self._client_factory, headers, self._timeout, "web_fetch",
+                    {"urls": [query.url], "full_content": True}, raise_on_error=False,
+                )
+            )
+        except ProviderError:
+            raise
+        except Exception as exc:
+            raise _fetch_error(exc) from None
+        if getattr(result, "is_error", False):
+            # Tool errors may be sent in an HTTP 200 response. Classify known
+            # upstream errors without including arbitrary tool text in diagnostics.
+            for item in getattr(result, "content", None) or ():
+                text = getattr(item, "text", "")
+                if not isinstance(text, str):
+                    continue
+                error = _fetch_error(RuntimeError(text))
+                if error.kind in (ProviderErrorKind.AUTH, ProviderErrorKind.QUOTA,
+                                  ProviderErrorKind.RATE_LIMIT, ProviderErrorKind.UNAVAILABLE):
+                    raise error
+            raise ProviderError(NAME, ProviderErrorKind.BAD_RESPONSE, "MCP web_fetch 工具返回错误")
+        items = _extract_results(result)
+        if items is None:
+            raise ProviderError(NAME, ProviderErrorKind.BAD_RESPONSE, "无法解析 MCP 抓取响应")
+        # Only one URL was requested. Per-URL errors (including target-site
+        # 401/429) are not account errors and must not pause this provider.
+        if len(items) != 1 or not isinstance(items[0], dict):
+            raise ProviderError(NAME, ProviderErrorKind.BAD_RESPONSE, "MCP 响应没有单一网页结果")
+        item = items[0]
+        content = extract_text(item.get("full_content"))
+        excerpts = item.get("excerpts")
+        if not content and isinstance(excerpts, list):
+            content = "\n\n".join(filter(None, map(extract_text, excerpts)))
+        return extracted_result(
+            NAME, query, url=item.get("final_url") or item.get("url"),
+            title=item.get("title"), content=content,
+        )
+
+
+async def _call_tool(factory, headers, timeout, tool, arguments, **kwargs):
+    async with factory(dict(headers), timeout) as client:
+        return await client.call_tool(tool, arguments, timeout=timeout, **kwargs)
+
+
+def _default_client(headers: dict[str, str], timeout: float, url: str = MCP_URL):
     from fastmcp import Client
     from fastmcp.client.transports import StreamableHttpTransport
 
-    transport = StreamableHttpTransport(MCP_URL, headers=headers or None)
+    transport = StreamableHttpTransport(url, headers=headers or None)
     return Client(transport, timeout=timeout, init_timeout=timeout)
+
+
+def _fetch_client(headers: dict[str, str], timeout: float):
+    return _default_client(headers, timeout, FETCH_MCP_URL)
+
+
+def _fetch_error(exc: Exception) -> ProviderError:
+    error = _translate_error(exc)
+    # FastMCP can wrap transport errors during negotiation. Inspect the cause
+    # and the SDK's JSON-RPC error code without forwarding its message.
+    if error.kind == ProviderErrorKind.NETWORK:
+        cause = exc.__cause__
+        if isinstance(cause, Exception):
+            inner = _fetch_error(cause)
+            if inner.kind != ProviderErrorKind.NETWORK:
+                return inner
+        code = getattr(exc, "code", getattr(getattr(exc, "error", None), "code", None))
+        if code == -32001 or "timed out" in str(exc).lower():
+            return ProviderError(NAME, ProviderErrorKind.TIMEOUT, "MCP 请求超时")
+        if code in (-32600, -32601, -32602, -32603, -32700):
+            return ProviderError(NAME, ProviderErrorKind.BAD_RESPONSE, "MCP web_fetch RPC 响应错误")
+    if error.kind == ProviderErrorKind.QUOTA:
+        return ProviderError(NAME, error.kind, error.detail, pause_reason="official_quota_exhausted")
+    return error
 
 
 def _run_async(coroutine_factory: Callable[[], Any]) -> Any:

@@ -416,7 +416,7 @@ def run_setup(config_path: Path | None = None, vault: Path | None = None) -> dic
 SEARCH_PROVIDER_LABELS = {
     "open_websearch": "open-websearch（免费，无需 Key）",
     "anysearch": "AnySearch（匿名可用，可选 Key）",
-    "parallel_mcp": "Parallel Search MCP（匿名可用，可选 Key）",
+    "parallel_mcp": "Parallel MCP（匿名可用，可选 Key）",
     "searxng": "自托管 SearXNG（无需 Key）",
     "baidu_search": "百度千帆 AI 搜索",
     "tavily": "Tavily",
@@ -538,6 +538,8 @@ def _provider_state(config: Config, name: str) -> str:
 
 
 def _configure_search_provider(config: Config, messages: list[str]) -> None:
+    from .search.fetch_router import FETCH_PROVIDERS
+
     choices = [
         questionary.Choice(f"{label}{_provider_state(config, name)}", value=name)
         for name, label in SEARCH_PROVIDER_LABELS.items()
@@ -600,7 +602,7 @@ def _configure_search_provider(config: Config, messages: list[str]) -> None:
                 ),
                 *([questionary.Choice(
                     f"{'禁用' if fetch_on else '启用'} Fetch", value="fetch"
-                )] if name in {"open_websearch", "exa", "tavily", "you", "volcengine"} else []),
+                )] if name in FETCH_PROVIDERS else []),
                 *([questionary.Choice("清除 API Key（恢复匿名）", value="clear_key")]
                   if env_name and name in ANONYMOUS_SEARCH_PROVIDERS
                   and read_api_key(env_name) else []),

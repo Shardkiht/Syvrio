@@ -1,5 +1,11 @@
 # 开发交接
 
+## AnySearch 与 Parallel MCP 网页抓取
+
+- `[fetch].providers` 可独立加入 `anysearch` 和 `parallel_mcp`。两者无 Key 时可匿名使用，设置对应环境变量后发 Bearer；与 Search 共用原有额度池，默认每日 20 次。未启用的现有配置不受影响。
+- AnySearch 使用 REST `/v1/extract`；Parallel 使用统一 MCP 2.0 `web_fetch`，原有独立 Search MCP 保留。两者沿用公网 URL 校验、按序回退和正文截断；上游未披露跳转地址时保留请求地址。
+- 在隔离测试 Vault 中使用真实终端和 Spark `spark-x2.6` 分别验收：搜索返回公开页面，Fetch 请求到达对应新服务，抓取正文随工具结果回到模型，模型回答后可继续输入并正常退出。两家 Fetch 均完成带 Key 的真实冒烟。
+
 ## Memory Schema v2 / Vault Layout v2
 
 - 当前存储、配置、迁移和回滚契约见 [v2 规范](vault-v2.md)。以下历史章节的 v1 路径只作为当时记录。

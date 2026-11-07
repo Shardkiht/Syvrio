@@ -381,19 +381,27 @@ Search results contain only titles, snippets, and links; `fetch_web` opens one o
 
 ### AnySearch and Parallel MCP
 
-`search.providers` can also include two sources that need no prior registration:
+AnySearch and Parallel MCP both support Search and Fetch. Enable them independently in `[search].providers` or `[fetch].providers`. Both operations use the same optional API key:
 
 - `anysearch`: calls AnySearch REST search (`https://api.anysearch.com/v1/search`). It sends no `Authorization` header without a key; setting `ANYSEARCH_API_KEY` switches to Bearer authentication. `zone` and `language` come from `anysearch_zone` / `anysearch_language` under `[search]`, defaulting to `cn` / `zh-CN`. The original query is never rewritten.
-- `parallel_mcp`: calls the `web_search` tool of the fixed Streamable HTTP MCP service `https://search.parallel.ai/mcp`. Anonymous and authenticated modes use the same URL and tool call; setting `PARALLEL_API_KEY` only adds Bearer authentication. It prefers `structuredContent.results` and also accepts JSON in `content[].text`; duplicate URLs are merged, long excerpts are truncated, and unverifiable publish dates remain empty.
+- `parallel_mcp`: Search keeps `web_search` on the standalone Search MCP (`https://search.parallel.ai/mcp`), which Parallel still supports for compatibility. Setting `PARALLEL_API_KEY` adds Bearer authentication to both Search and Fetch. Search prefers `structuredContent.results` and also accepts JSON in `content[].text`; duplicate URLs are merged, long excerpts are truncated, and unverifiable publish dates remain empty.
 
 Example (the default order is unchanged; a provider is enabled only when explicitly listed):
 
 ```toml
 [search]
 providers = ["parallel_mcp", "anysearch", "open_websearch"]
+
+[fetch]
+providers = ["anysearch", "parallel_mcp", "open_websearch"]
 ```
 
-Both providers use the same quality gate, fallback chain, request budget, cache and `UsageLimiter`. Each has a local default protection cap of 20 requests per day, adjustable through `[search.usage_limits.<provider>]`; 0 means unlimited. These values are local request protection, not vendor free-tier entitlements or billing caps, and a configured key may incur vendor-side charges. Authentication failures (401/403) are reported explicitly and fall back to the next provider; the key is never silently dropped to retry anonymously. AnySearch and Parallel MCP currently implement search only; `web_fetch` is not implemented.
+Search uses the existing quality gate, fallback chain, request budget, cache and `UsageLimiter`. Each has a local default protection cap of 20 requests per day, adjustable through `[search.usage_limits.<provider>]`; 0 means unlimited. These values are local request protection, not vendor free-tier entitlements or billing caps, and a configured key may incur vendor-side charges. Authentication failures (401/403) are reported explicitly and fall back to the next provider; the key is never silently dropped to retry anonymously. Search and Fetch share the vendor counter. When the vendor reports exhausted quota, Syvrio pauses it and tries the next configured Fetch provider.
+
+- **AnySearch Fetch** posts the URL to the [Extract API](https://www.anysearch.com/docs/api-endpoints/v1-extract) at `https://api.anysearch.com/v1/extract`, extracts `data.content`, and strips HTML.
+- **Parallel Fetch** calls `web_fetch` through [Parallel MCP 2.0](https://docs.parallel.ai/integrations/mcp/quickstart) at `https://mcp.parallel.ai/mcp`. It requests Markdown for one URL and uses excerpts if full text is unavailable.
+
+The adapters use the redirect destination when the service reports it, otherwise they keep the requested URL without probing for redirects. Fetch validates the input and any reported destination and truncates at `max_chars`. OpenWebSearch (HTTP), Tavily, Exa, You.com, and Volcengine continue to support Fetch; Baidu Qianfan and SearXNG are search-only.
 
 The user previously verified both anonymous endpoints from the current mainland-China network with proxy-free curl, but that only reflects that network at that time. Availability across carriers, times and regions still requires live verification; the code does not require a VPN or extra proxy. `syvrio setup` can enable either anonymous provider without entering a key.
 
