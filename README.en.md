@@ -21,7 +21,7 @@ Stop repeating your preferences and plans every time you start a chat. Tell it â
 
 The demo operates the actual Textual UI with synthetic data and scripted model replies. Memory writes and cross-session retrieval run through the real implementation, with no paid model requests. [View the still screenshot](docs/assets/syvrio-demo.png).
 
-The `feature-memory-evolution` source version is `0.4.0`. It includes Vault v2 and the new web fetch providers. The `main` branch maintains the stable version separately. Install the evolution branch from source.
+Install `feature-memory-evolution` from source to use the `0.4.0.dev0` development build, which includes Vault v2 and the new web fetch providers. Development builds use a `.devN` suffix. The `main` branch maintains stable versions separately.
 
 ## Quick start
 
