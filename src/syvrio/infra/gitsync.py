@@ -1,6 +1,6 @@
 """Vault Git 同步：Commit/Push 解耦、每日调度判断与本地执行状态。
 
-状态写入 `.syvrio/git-sync-state.json`，只记录本机实际执行结果；
+状态写入 `runtime/state/git-sync.json`，只记录本机实际执行结果；
 Git 不保存 Push 时间，因此“最近成功 Push”只来自这里的成功记录。
 """
 from __future__ import annotations
@@ -24,34 +24,7 @@ STAGE_PUSH = "Pushing to remote"
 STAGE_REFRESH = "Refreshing status"
 STAGES = (STAGE_CHECK, STAGE_COMMIT, STAGE_PUSH, STAGE_REFRESH)
 
-RUNTIME_IGNORE = (
-    ".syvrio/vectors.npz",
-    ".syvrio/search-cache.json",
-    ".syvrio/profile-summary.json",
-    ".syvrio/profile-fingerprints.json",
-    ".syvrio/reflection-state.json",
-    ".syvrio/git-sync-state.json",
-    ".syvrio/*.lock",
-)
-
 RETRYABLE = frozenset({"network", "timeout", "busy", "vault_busy"})
-
-
-def ensure_runtime_gitignore(vault: Path) -> None:
-    """补齐 Syvrio 运行时文件的忽略规则；派生缓存与同步状态不应进入历史。"""
-    gitignore = Path(vault) / ".gitignore"
-    try:
-        existing = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
-    except OSError:
-        return
-    lines = existing.splitlines()
-    missing = [pattern for pattern in RUNTIME_IGNORE if pattern not in lines]
-    if not missing:
-        return
-    with open(gitignore, "a", encoding="utf-8") as handle:
-        if existing and not existing.endswith("\n"):
-            handle.write("\n")
-        handle.write("\n".join(missing) + "\n")
 
 
 def _now() -> datetime:
@@ -97,8 +70,8 @@ class GitSyncService:
         self.config = config
         self.repo = repo or GitRepo(config.vault)
         self._running = threading.Lock()
-        self._git_lock = git_operation_lock(config.vault)
-        self._vault_lock = vault_write_lock(config.vault)
+        self._git_lock = git_operation_lock(config.paths())
+        self._vault_lock = vault_write_lock(config.paths())
 
     # ---------- 状态 ----------
 
@@ -108,7 +81,7 @@ class GitSyncService:
 
     @property
     def state_path(self) -> Path:
-        return Path(self.config.vault) / ".syvrio" / "git-sync-state.json"
+        return self.config.paths().state_dir / "git-sync.json"
 
     def _read_state(self) -> dict:
         try:
@@ -293,7 +266,6 @@ class GitSyncService:
                 self._record_state(result, now, commit_at=None)
                 return result
             try:
-                ensure_runtime_gitignore(self.config.vault)
                 modified = self.repo.modified_count()
                 sensitive = self.repo.sensitive_paths()
                 if sensitive:
@@ -474,6 +446,5 @@ __all__ = [
     "STAGE_COMMIT",
     "STAGE_PUSH",
     "STAGE_REFRESH",
-    "ensure_runtime_gitignore",
     "RETRYABLE",
 ]

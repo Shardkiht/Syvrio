@@ -15,7 +15,7 @@ from queue import Full, Queue
 from threading import RLock, current_thread
 
 from .. import __version__
-from .config import default_config_path
+from .config import ConfigError, load_config
 
 
 _EVENTS = frozenset({
@@ -46,18 +46,20 @@ class _QuietFileHandler(RotatingFileHandler):
         pass
 
 
-def start_diagnostics() -> Path | None:
-    """Start bounded, background-only diagnostics beside the default config."""
+def start_diagnostics(config_file: Path | None = None) -> Path | None:
+    """Start bounded, background-only diagnostics inside Runtime."""
     global _listener, _handler, _queue, _path
     with _lock:
         if _listener is not None:
             return _path
-        path = default_config_path().parent / "logs" / "syvrio.log"
         try:
+            paths = load_config(config_file).paths(config_file)
+            paths.validate()
+            path = paths.log_dir / "syvrio.log"
             path.parent.mkdir(parents=True, exist_ok=True)
             handler = _QuietFileHandler(path, maxBytes=2 * 1024 * 1024,
                                         backupCount=3, encoding="utf-8")
-        except OSError:
+        except (OSError, ConfigError, ValueError):
             print("Local diagnostics unavailable: cannot open log file.", file=sys.stderr)
             return None
         handler.setFormatter(logging.Formatter("%(message)s"))

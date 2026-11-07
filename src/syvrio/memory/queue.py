@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ..infra.paths import vault_paths
+
 import json
 import os
 import tempfile
@@ -46,7 +48,7 @@ def rollback_files(paths: list[Path]) -> Iterator[None]:
 class PendingQueue:
     def __init__(self, vault: Path):
         self.vault = Path(vault)
-        self.dir = self.vault / ".syvrio"
+        self.dir = vault_paths(self.vault).records_dir
         self.pending_path = self.dir / "pending.jsonl"
         self.resolved_path = self.dir / "resolved.jsonl"
 

@@ -217,4 +217,4 @@ def test_import_text_passes_store_topics_to_extractor(tmp_path, monkeypatch):
 
     service.import_text("新内容")
 
-    assert captured["topics"] == ["preferences"]
+    assert captured["topics"] == ["memories/general/preferences.md"]

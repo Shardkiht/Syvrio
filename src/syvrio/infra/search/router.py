@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ..paths import SyvrioPaths, vault_paths
+
 import hashlib
 import time
 from collections.abc import Sequence
@@ -254,16 +256,18 @@ def build_registry(config: SearchConfig) -> dict[str, SearchProvider]:
 
 def build_search_router(
     config: SearchConfig,
-    vault: Path | None = None,
+    vault: Path | SyvrioPaths | None = None,
 ) -> "SearchRouter":
     cache = None
     limiter = None
     if vault is not None:
+        paths = vault if isinstance(vault, SyvrioPaths) else vault_paths(vault)
+        paths.validate()
         if config.cache_ttl > 0:
-            cache = SearchCache(vault / ".syvrio" / "search-cache.json", config.cache_ttl)
-        from .usage import USAGE_FILENAME, UsageLimiter
+            cache = SearchCache(paths.cache_dir / "search" / "search-cache.json", config.cache_ttl)
+        from .usage import UsageLimiter
 
-        limiter = UsageLimiter(config.usage_limits, vault / ".syvrio" / USAGE_FILENAME)
+        limiter = UsageLimiter(config.usage_limits, paths.state_dir / "usage.json")
     return SearchRouter(
         build_registry(config),
         order=config.providers,

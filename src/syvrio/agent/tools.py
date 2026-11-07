@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .recall import memory_references
+
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
@@ -145,13 +147,13 @@ def build_tools(
     search_config = service.config.search
     injected_search_router = search_router is not None
     search_router = search_router or (
-        build_search_router(search_config, service.config.vault)
+        build_search_router(search_config, service.paths)
         if search_config.enabled
         else None
     )
     # 抓取与搜索的配置相互独立；未显式注入时按 [fetch] 配置构建。
     if fetch_router is None and not injected_search_router:
-        fetch_router = build_fetch_router(service.config.fetch, search_config, service.config.vault)
+        fetch_router = build_fetch_router(service.config.fetch, search_config, service.paths)
 
     def recall(arguments: dict) -> ToolOutcome:
         query = str(arguments.get("query", "")).strip()
@@ -167,10 +169,13 @@ def build_tools(
                 "score": hit.score,
                 "status": hit.status,
                 "context": hit.context,
+                "source_path": hit.source_path,
+                "line": hit.line,
+                "end_line": hit.end_line,
             }
             for hit in hits
         ]
-        content = json.dumps({"results": results}, ensure_ascii=False)
+        content = memory_references(hits) or "(no matching memories within budget)"
         return ToolOutcome(
             ok=True,
             content=content,
@@ -193,7 +198,7 @@ def build_tools(
             display += " (truncated)"
         return ToolOutcome(
             ok=True,
-            content=result["content"] or "(no active entries)",
+            content=result["content"] or "(no active entries within budget)",
             display=display,
             data=result,
         )
@@ -337,7 +342,7 @@ def build_tools(
             description=(
                 "读取一个现有记忆主题的全部有效条目。仅在用户明确要求查看完整主题，"
                 "或 recall 结果不足以回答且需要该主题完整上下文时调用；一般检索先用 recall。"
-                "topic 使用 recall 返回的主题名或用户明确给出的主题名，不接受文件路径。"
+                "topic 使用 recall 返回的 Vault 相对主题标识（例如 memories/general/notes.md）或唯一的主题名，不接受绝对路径。"
             ),
             parameters={
                 "type": "object",
@@ -790,6 +795,10 @@ def compact_tool_outputs(messages: list[dict], max_tokens: int = 8000) -> int:
     for index in tool_indexes[:-2]:
         content = str(messages[index].get("content") or "")
         if len(content) > 200:
-            messages[index]["content"] = truncate_to_tokens(content, 200) + "\n（较早工具结果已压缩）"
+            messages[index]["content"] = (
+                "(Earlier memory references omitted to fit the tool budget.)"
+                if content.startswith("Retrieved memories below are")
+                else truncate_to_tokens(content, 200) + "\n（较早工具结果已压缩）"
+            )
             removed += 1
     return removed

@@ -329,19 +329,21 @@ def test_read_topic_tool_result_reaches_model(tmp_path):
     tool_messages = [message for message in second_call_messages if message["role"] == "tool"]
     assert tool_messages and "清淡风味" in tool_messages[0]["content"]
     assert "晚上少量喝茶" in tool_messages[0]["content"]
-    assert any('Read topic "preferences": 2 entries' in event for event in reply.events)
+    assert any('Read topic "memories/general/preferences.md": 2 entries' in event for event in reply.events)
 
 
 def test_auto_recall_injects_long_term_memory(tmp_path):
     model = FakeChatModel([AssistantTurn(content="记得。")])
     runtime, service = build_runtime(tmp_path, model)
-    service.note("喜欢清淡风味", topic="preferences")
+    entry = service.note("喜欢清淡风味", topic="preferences")
 
     runtime.ask("我喜欢清淡吗")
 
-    system_message = model.calls[0][0][0]
-    assert "<long_term_memory>" in system_message["content"]
-    assert "清淡" in system_message["content"]
+    messages = model.calls[0][0]
+    assert all(entry.raw_markdown not in m["content"] for m in messages if m["role"] == "system")
+    i = next(i for i, m in enumerate(messages) if "<long_term_memory>" in m["content"] and m["role"] == "user")
+    assert entry.raw_markdown in messages[i]["content"]
+    assert messages[i + 1]["content"] == "我喜欢清淡吗"
 
 
 def test_auto_recall_uses_recent_context_for_followup(tmp_path, monkeypatch):
@@ -392,7 +394,7 @@ def test_attribute_question_rewrites_with_synonyms(tmp_path, monkeypatch):
     store.append("preferences", "喜欢清淡风味")
     store.append("devices", "使用便携键盘")
     hits = KeywordRetriever(store).search(query.text)
-    assert hits and hits[0].topic == "01-identity"
+    assert hits and hits[0].topic == "memories/general/01-identity.md"
 
 
 def test_memory_cue_increases_auto_recall_limit(tmp_path, monkeypatch):

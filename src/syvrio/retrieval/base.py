@@ -10,6 +10,10 @@ class SearchHit(BaseModel):
     id: str = ""
     file: str = ""
     line: int = 0
+    end_line: int = 0
+    source_path: str = ""
+    raw_markdown: str = ""
+    index_text: str = ""
     text: str
     topic: str
     timestamp: str = ""

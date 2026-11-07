@@ -11,6 +11,8 @@ import threading
 import time
 from pathlib import Path
 
+from .paths import SyvrioPaths, vault_paths
+
 if os.name == "nt":
     import msvcrt
 else:
@@ -146,15 +148,17 @@ def _shared(path: Path) -> VaultLock:
         return lock
 
 
-def _lock_path(vault: Path, name: str) -> Path:
-    return Path(vault).expanduser() / ".syvrio" / name
+def _lock_path(vault: Path | SyvrioPaths, name: str) -> Path:
+    paths = vault if isinstance(vault, SyvrioPaths) else vault_paths(vault)
+    paths.validate()
+    return paths.lock_dir / name
 
 
-def vault_write_lock(vault: Path) -> VaultLock:
+def vault_write_lock(vault: Path | SyvrioPaths) -> VaultLock:
     """保护记忆文件、会话追加与 Git 快照阶段。"""
     return _shared(_lock_path(vault, "vault.lock"))
 
 
-def git_operation_lock(vault: Path) -> VaultLock:
+def git_operation_lock(vault: Path | SyvrioPaths) -> VaultLock:
     """保护 Stage/Commit/Push 等 Git 操作之间的互斥。"""
     return _shared(_lock_path(vault, "git.lock"))

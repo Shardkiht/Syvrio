@@ -29,7 +29,7 @@ class HybridRetriever:
         keyword_hits = [
             hit
             for hit in keyword_hits
-            if not literal_gate or bigram_coverage(query, hit.text) >= MIN_QUERY_COVERAGE
+            if not literal_gate or bigram_coverage(query, hit.index_text or hit.text) >= MIN_QUERY_COVERAGE
         ]
         if not vector_hits:
             return keyword_hits[:limit]

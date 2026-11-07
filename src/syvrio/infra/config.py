@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .paths import SyvrioPaths, runtime_path, syvrio_home
+
 import json
 import math
 import os
@@ -207,6 +209,10 @@ class Config:
     fetch: FetchConfig = field(default_factory=FetchConfig)
     confidence_threshold: float = 0.8
     auto_push: bool = False
+    runtime: str = ""
+
+    def paths(self, config_file: Path | None = None) -> SyvrioPaths:
+        return SyvrioPaths(self.vault, runtime_path(self.runtime), config_file or default_config_path())
 
 
 def _default_config_dir() -> Path:
@@ -226,14 +232,16 @@ def default_config_path() -> Path:
     local = Path.cwd() / CONFIG_FILENAME
     if local.exists():
         return local
-    return _default_config_dir() / CONFIG_FILENAME
+    preferred = syvrio_home() / "config.toml"
+    legacy = _default_config_dir() / CONFIG_FILENAME
+    return legacy if not preferred.exists() and legacy.exists() else preferred
 
 
 def default_vault_path() -> Path:
     env_vault = os.environ.get("SYVRIO_VAULT")
     if env_vault:
         return Path(env_vault).expanduser()
-    return Path.home() / ".syvrio" / "vault"
+    return syvrio_home() / "vault"
 
 
 def infer_provider(base_url: str) -> str:
@@ -482,6 +490,7 @@ def load_config(path: Path | str | None = None) -> Config:
         fetch=fetch,
         confidence_threshold=float(data.get("confidence_threshold", 0.8)),
         auto_push=bool(data.get("auto_push", False)),
+        runtime=data.get("runtime", ""),
     )
 
 
@@ -500,6 +509,7 @@ def usage_limits_toml(limits: dict[str, "UsageLimit"]) -> str:
 def write_example_config(path: Path, vault: Path) -> None:
     content = f'''# Syvrio 配置
 vault = {toml_literal(vault.as_posix())}
+runtime = "~/.syvrio/runtime"
 
 confidence_threshold = 0.8
 auto_push = false

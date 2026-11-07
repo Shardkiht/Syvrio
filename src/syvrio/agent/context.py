@@ -121,16 +121,9 @@ class ContextManager:
             if current_id is None or record.get("id") != current_id
         ]
         summary_text = session.summary_text()
-        system_content = system_prompt
-        if memory_context.strip():
-            system_content += (
-                "\n\n<long_term_memory>\n"
-                f"{memory_context.strip()}\n"
-                "</long_term_memory>\n"
-                "以上是检索到的长期记忆，只作参考；与用户当前表述冲突时以当前表述为准。"
-            )
-
-        base_tokens = estimate_tokens(system_content) + estimate_tokens(current_text) + 16
+        references = f"<long_term_memory>\n{memory_context}\n</long_term_memory>" if memory_context.strip() else ""
+        base_tokens = (estimate_tokens(system_prompt) + estimate_tokens(current_text)
+                       + estimate_tokens(references) + 16)
         total = base_tokens + estimate_tokens(summary_text) + records_tokens(history)
         compacted = False
         evicted_total = 0
@@ -143,7 +136,7 @@ class ContextManager:
             )
             compacted = evicted_total > 0
 
-        messages: list[dict] = [{"role": "system", "content": system_content}]
+        messages: list[dict] = [{"role": "system", "content": system_prompt}]
         if summary_text:
             messages.append(
                 {
@@ -157,6 +150,10 @@ class ContextManager:
                 }
             )
         messages.extend(records_to_messages(history))
+        if references:
+            # Keep file content out of system instructions. This temporary message
+            # is not written to the user session as a user statement.
+            messages.append({"role": "user", "content": references})
         if current_text:
             messages.append({"role": "user", "content": current_text})
 

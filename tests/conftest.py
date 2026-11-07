@@ -89,7 +89,7 @@ def patch_questionary(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def isolate_user_config(monkeypatch, tmp_path):
+def isolate_user_config(monkeypatch, tmp_path, tmp_path_factory):
     """测试永远解析到测试自己的临时配置/记忆库，任何代码路径都碰不到本机真实配置。
 
     起因：源码回退（突变验证）等场景下，写配置可能落到 default_config_path()，
@@ -97,6 +97,7 @@ def isolate_user_config(monkeypatch, tmp_path):
     """
     monkeypatch.setenv("SYVRIO_CONFIG", str(tmp_path / "config.toml"))
     monkeypatch.setenv("SYVRIO_VAULT", str(tmp_path / "default-vault"))
+    monkeypatch.setenv("SYVRIO_RUNTIME", str(tmp_path_factory.mktemp("runtime")))
 
 
 @pytest.fixture(autouse=True)

@@ -5,6 +5,10 @@
 """
 from __future__ import annotations
 
+from pathlib import Path
+
+from ..paths import SyvrioPaths, vault_paths
+
 from typing import Any, Protocol
 
 from ..config import FetchConfig, SearchConfig
@@ -149,14 +153,16 @@ def _build_external_fetch_provider(
 def build_fetch_router(
     fetch_config: FetchConfig,
     search_config: SearchConfig,
-    vault: Any | None = None,
+    vault: Path | SyvrioPaths | None = None,
 ) -> FetchRouter:
     limiter = None
     if vault is not None:
-        from .usage import USAGE_FILENAME, UsageLimiter
+        paths = vault if isinstance(vault, SyvrioPaths) else vault_paths(vault)
+        paths.validate()
+        from .usage import UsageLimiter
 
         limiter = UsageLimiter(
-            search_config.usage_limits, vault / ".syvrio" / USAGE_FILENAME
+            search_config.usage_limits, paths.state_dir / "usage.json"
         )
     return FetchRouter(
         build_fetch_registry(fetch_config, search_config),

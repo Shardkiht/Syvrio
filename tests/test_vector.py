@@ -65,7 +65,7 @@ def test_vector_search_finds_paraphrase(tmp_path):
 
     hits = retriever.search("住的地方", limit=3)
 
-    assert hits and hits[0].topic == "housing"
+    assert hits and hits[0].topic == "memories/general/housing.md"
 
 
 def test_incremental_sync_embeds_only_new_entries(tmp_path):
@@ -137,7 +137,7 @@ def test_sync_retries_after_embedding_failure(tmp_path):
     # 冷却到期后即使记忆文件没变也要重新同步，而不是一直返回空。
     clock.now += RETRY_COOLDOWN_SECONDS
     hits = retriever.search("房子", 3)
-    assert hits and hits[0].topic == "housing"
+    assert hits and hits[0].topic == "memories/general/housing.md"
     assert retriever.degraded is False
 
 
@@ -211,7 +211,7 @@ def test_hybrid_falls_back_to_keyword_when_vector_fails(tmp_path):
 
     hits = hybrid.search("咖啡", limit=3)
 
-    assert hits and hits[0].topic == "preferences"
+    assert hits and hits[0].topic == "memories/general/preferences.md"
 
 
 def test_build_retriever_falls_back_without_fastembed(tmp_path, monkeypatch):
@@ -259,48 +259,49 @@ def test_build_retriever_api_backend(tmp_path, monkeypatch):
     assert mode == "hybrid-fallback-keyword"
 
 
-def test_init_vault_gitignores_vector_cache(tmp_path):
+def test_vector_cache_is_outside_vault_git_worktree(tmp_path):
     from syvrio.memory.service import MemoryService
 
     config = Config(vault=tmp_path / "vault", retrieval=RetrievalConfig(method="keyword"))
     service = MemoryService(config)
     service.init_vault()
+    service.note("喜欢清淡、像茶的风味")
+    service.commit(push=False)
+    retriever = VectorRetriever(service.store, FakeEmbedder(GROUPS))
+    retriever.sync()
+    assert retriever.cache_path == service.paths.runtime_dir / "indexes" / "vectors.npz"
+    assert retriever.cache_path.is_file()
+    assert not service.repo.has_changes()
+    assert not (config.vault / ".syvrio").exists()
 
-    assert "vectors.npz" in (tmp_path / "vault" / ".gitignore").read_text(encoding="utf-8")
 
-
-def test_init_vault_appends_gitignore_after_missing_newline(tmp_path):
+def test_init_vault_preserves_user_gitignore_without_final_newline(tmp_path):
     from syvrio.memory.service import MemoryService
 
     config = Config(vault=tmp_path / "vault", retrieval=RetrievalConfig(method="keyword"))
     service = MemoryService(config)
     service.store.ensure()
-    (tmp_path / "vault" / ".gitignore").write_text("*.log", encoding="utf-8")
+    gitignore = config.vault / ".gitignore"
+    gitignore.write_bytes(b"*.log")
 
     service.init_vault()
 
-    lines = (tmp_path / "vault" / ".gitignore").read_text(encoding="utf-8").splitlines()
-    assert "*.log" in lines
-    assert ".syvrio/vectors.npz" in lines
+    assert gitignore.read_bytes() == b"*.log"
 
 
-def test_sync_dedupes_duplicate_entry_ids(tmp_path):
+def test_sync_refuses_duplicate_entry_ids_across_topics(tmp_path):
+    import pytest
+    from syvrio.memory.schema import Core, SchemaError, render_record
+
     store = MemoryStore(tmp_path)
-    # append 已有查重，重复 ID 只可能来自历史数据：手写文件模拟。
     store.append("food", "喜欢清淡、像茶的风味", entry_id="mem-dup")
-    housing = tmp_path / "housing.md"
-    housing.write_text(
-        "---\ntopic: housing\n---\n\n# 住房\n\n"
-        "- 2026-10-24T12:00:00 — 在找市区的房子  `id=mem-dup` `status=active`\n",
-        encoding="utf-8",
-    )
+    housing = store.topic_path("housing")
+    housing.write_text(render_record("在找市区的房子",
+        Core(id="mem-dup", status="active", source="chat", confidence=1.0)), encoding="utf-8")
     retriever = VectorRetriever(store, FakeEmbedder(GROUPS))
 
-    retriever.sync()
-
-    assert len(retriever._entries) == 1
-    hits = retriever.search("房子", 3)
-    assert len({hit.id for hit in hits}) == len(hits)
+    with pytest.raises(SchemaError, match="duplicate memory id across topics"):
+        retriever.sync()
 
 
 def test_malformed_cache_ids_rebuild_instead_of_crashing(tmp_path):

@@ -1,5 +1,14 @@
 # 开发交接
 
+## Memory Schema v2 / Vault Layout v2
+
+- 当前存储、配置、迁移和回滚契约见 [v2 规范](vault-v2.md)。以下历史章节的 v1 路径只作为当时记录。
+- CommonMark 块树负责识别记忆及附属段落；源位置用于局部修改。检索使用正文和扩展信息，模型收到带来源的完整原始片段。
+- `SyvrioPaths` 解析独立的 Vault 和 Runtime，持久化记忆记录进入 `records/memory`，缓存、运行状态、进度与锁保留在 Runtime。
+- 验收使用隔离的迁移副本核对记忆与会话 ID、原始 JSONL、Git 对象以及既有推断指纹。真实 TUI 用合成数据接通 Spark `spark-x2.6`，验证原文负载、手改后索引更新、会话重启恢复与 Runtime 隔离。
+- Spark 画像刷新需要给推理和 JSON 正文同时保留输出额度；在当前窗口预算内为该供应商预留更多完成 tokens，保留单次请求约束。
+- 回归：全量 pytest 1330 passed、6 skipped（原有条件）；工具描述复核 85 passed。真实 PTY 逐项通过 A–G，包含 Spark 画像缓存实际落盘。
+
 ## 搜索显式引擎列表配置化（2026-11-06）
 
 - 移除代码内固定的 3 引擎上限；新增 `search.max_search_engines`，默认 `0` 表示不限制，写入 `config.example.toml`、TUI 生成的配置与中英文 README。

@@ -22,7 +22,7 @@ def build_server(
     svc = service or MemoryService(config or load_config())
     search_config = svc.config.search
     search_router = search_router or (
-        build_search_router(search_config, svc.config.vault)
+        build_search_router(search_config, svc.paths)
         if search_config.enabled
         else None
     )

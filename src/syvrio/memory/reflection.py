@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Callable
 
 from ..infra.tokens import estimate_tokens, truncate_to_tokens
 from ..infra.diagnostics import record_event
-from ..infra.locking import vault_write_lock
 from ..llm.client import complete
 from .detect import contains_secret
 from .inference import source_fingerprint
@@ -106,11 +105,11 @@ class ReflectionEngine:
 
     def __init__(self, service: MemoryService) -> None:
         self.service = service
-        self.path = service.config.vault / ".syvrio" / "reflection-jobs.jsonl"
-        self.summary_path = service.config.vault / ".syvrio" / "profile-summary.json"
+        self.path = service.paths.jobs_dir / "dreaming" / "jobs.jsonl"
+        self.summary_path = service.paths.cache_dir / "profile" / "profile-summary.json"
         self._running = threading.Lock()
         self._cancel = threading.Event()
-        self._vault_lock = vault_write_lock(service.config.vault)
+        self._vault_lock = service.write_lock
         self.schedule = ReflectionSchedule(self)
 
     def cancel(self) -> None:
@@ -129,7 +128,7 @@ class ReflectionEngine:
                                and item.status in {"hypothesis", "confirmed"} for source in item.source_ids}
             result = [ProfileItem(id=item.id, text=item.text, kind="fact", source_ids=[item.id],
                                   status="active", updated_at=item.timestamp)
-                      for item in facts.values() if item.topic.casefold() in PROFILE_TOPICS or item.id in profile_sources]
+                      for item in facts.values() if Path(item.topic).stem.casefold() in PROFILE_TOPICS or item.id in profile_sources]
             result.extend(ProfileItem(id=item.id, text=item.text, kind="inference", source_ids=item.source_ids,
                                       status=item.status, updated_at=item.updated_at)
                           for item in inferences if item.kind == "profile"
@@ -249,6 +248,12 @@ class ReflectionEngine:
             data["facts_signature"] = facts_signature
             self._write_cache(data)
 
+    def _summary_output_budget(self, window: int, target: int) -> int:
+        # Spark counts reasoning against max_completion_tokens. A small profile
+        # needs room for reasoning and its JSON response, even with few facts.
+        minimum = 2048 if self.service.config.llm.provider.strip().lower() == "spark" else 256
+        return min(PROFILE_SUMMARY_MAX_TOKENS, max(minimum, int(target * 1.2)), window // 3)
+
     def _summary_draft(self, entries: list[Entry], inferences: list[Inference]) -> _SummaryDraft:
         groups: dict[str, list[Entry]] = {}
         seen: set[str] = set()
@@ -266,8 +271,7 @@ class ReflectionEngine:
         if window < PROFILE_SUMMARY_MIN_WINDOW:
             raise ValueError(
                 f"画像摘要需要至少 {PROFILE_SUMMARY_MIN_WINDOW} tokens 的上下文窗口。")
-        output_tokens = min(
-            PROFILE_SUMMARY_MAX_TOKENS, max(256, int(high * 1.2)), max(256, window // 3))
+        output_tokens = self._summary_output_budget(window, high)
         available = (
             window - output_tokens
             - estimate_tokens(PROFILE_SUMMARY_PROMPT)
@@ -397,7 +401,7 @@ class ReflectionEngine:
         if llm.requires_api_key() and not llm.api_key():
             raise ValueError("未配置模型凭据。")
         target = int(payload["target_chars"][1])
-        max_tokens = min(PROFILE_SUMMARY_MAX_TOKENS, max(256, int(target * 1.2)), max(256, window // 3))
+        max_tokens = self._summary_output_budget(window, target)
         # 模型调用前再次核验完整输入预算，避免构造后又被其他字段撑爆窗口。
         input_tokens = estimate_tokens(PROFILE_SUMMARY_PROMPT) + estimate_tokens(
             json.dumps(payload, ensure_ascii=False))

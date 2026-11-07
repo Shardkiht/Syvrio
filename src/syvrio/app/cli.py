@@ -148,7 +148,7 @@ def list_sessions(
 ) -> None:
     """列出历史会话。"""
     service = _service(config, vault)
-    print_sessions(SessionStore(service.config.vault).list(limit))
+    print_sessions(SessionStore(service.paths).list(limit))
 
 
 @app.command()
@@ -556,7 +556,16 @@ def main() -> None:
         for stream in (sys.stdout, sys.stderr):
             if not stream.isatty() and hasattr(stream, "reconfigure"):
                 stream.reconfigure(encoding="utf-8")
-    start_diagnostics()
+    config_file = None
+    arguments = sys.argv[1:]
+    for index, argument in enumerate(arguments):
+        if argument == "--":
+            break
+        if argument in {"--config", "-c"} and index + 1 < len(arguments):
+            config_file = Path(arguments[index + 1])
+        elif argument.startswith("--config="):
+            config_file = Path(argument.split("=", 1)[1])
+    start_diagnostics(config_file)
     try:
         app()
     except Exception as exc:

@@ -16,7 +16,7 @@ def run_chat(service: MemoryService, resume: str | None = None) -> None:
         )
     if not (service.config.vault / ".git").exists():
         service.init_vault()
-    sessions = SessionStore(service.config.vault)
+    sessions = SessionStore(service.paths)
     runtime = AgentRuntime(service, LiteLLMChatModel(service.config.llm), sessions)
     if resume:
         try:

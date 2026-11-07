@@ -119,7 +119,7 @@ def test_approve_writes_entry_and_clears_pending(tmp_path):
     audit = json.loads(service.audit.path.read_text(encoding="utf-8"))
     assert audit.pop("at")
     assert audit == {"action": "approve", "item": item.id, "entry": entry.id, "supersedes": ""}
-    assert "人工确认" in (tmp_path / "vault" / "memories" / "preferences.md").read_text(encoding="utf-8")
+    assert "人工确认" in (tmp_path / "vault" / "memories" / "general" / "preferences.md").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("original", ["可能喜欢浅烘", "API key: demo-placeholder"])
@@ -317,10 +317,10 @@ def test_recall_and_topics(tmp_path):
     service.note("喜欢清淡风味", topic="preferences", title="偏好")
     service.note("找后端工作", topic="career")
 
-    assert service.recall("清淡")[0].topic == "preferences"
+    assert service.recall("清淡")[0].topic == "memories/general/preferences.md"
     topics = {item["topic"]: item for item in service.topics()}
-    assert topics["preferences"]["title"] == "偏好"
-    assert topics["preferences"]["entries"] == 1
+    assert topics["memories/general/preferences.md"]["title"] == "偏好"
+    assert topics["memories/general/preferences.md"]["entries"] == 1
 
 
 def test_read_topic_returns_only_active_entries_for_known_topic(tmp_path):
@@ -331,8 +331,9 @@ def test_read_topic_returns_only_active_entries_for_known_topic(tmp_path):
 
     result = service.read_topic("偏好")
 
-    assert result["topic"] == "preferences"
-    assert result["content"] == "- 保留的有效条目"
+    assert result["topic"] == "memories/general/preferences.md"
+    assert "* 保留的有效条目\n\n  **Core**" in result["content"]
+    assert "已删除的旧条目" not in result["content"]
     assert result["entries"] == 1
     assert result["truncated"] is False
     with pytest.raises(KeyError):

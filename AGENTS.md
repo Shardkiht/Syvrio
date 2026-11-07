@@ -8,7 +8,7 @@ README 必须与当前代码架构保持一致；目录结构、依赖方向、C
 
 ## 命名规范
 
-正式品牌、Python 包、CLI、MCP Server、Keyring 服务名与缓存/日志前缀统一为 `syvrio`；不保留旧品牌别名或兼容入口。配置文件为 `syvrio.toml`，用户配置目录为 `~/.config/syvrio/`（Windows 为 `%APPDATA%\syvrio\`），默认数据目录与 Vault 为 `~/.syvrio/vault/`，Vault 元数据目录为 `.syvrio/`，环境变量统一使用 `SYVRIO_` 前缀。PyPI 发布必须由用户明确操作。
+正式品牌、Python 包、CLI、MCP Server、Keyring 服务名与缓存/日志前缀统一为 `syvrio`；不保留旧品牌别名或兼容入口。默认配置文件为 `~/.syvrio/config.toml`，保留既有平台路径读取兼容；Vault 与 Runtime 默认分别位于 `~/.syvrio/vault` 与 `~/.syvrio/runtime`。环境变量使用 `SYVRIO_` 前缀。PyPI 发布必须由用户明确操作。
 
 ## 快速命令
 
@@ -62,26 +62,24 @@ memory/agent → llm → infra
 
 ## 记忆与存储不变量
 
-- `memories/<topic>.md` 是长期记忆的唯一事实来源。
-- 文件头 front matter 只存文件级元数据：`topic`、`title`、`created`、`updated`。
-- 条目是 Markdown bullet 行加行尾反引号标签；条目 ID 必须稳定。
-- 标签值含反引号、换行或转义前缀本身时，以 `~syvrio-escaped~` 加百分号编码写入，读取时还原；普通值不变。
+- `memories/<category>/<topic>.md` 是长期记忆的唯一事实来源。文件递归扫描，Vault 相对路径唯一标识主题。
+- 每个顶层无序列表项包含 Content、必填 Core、可选 Context 和 Extensions。解析保留源码位置，编辑仅替换必要字段；原文整体作为非可信数据交给模型。详见 [v2 规范](docs/vault-v2.md)。
 - 更正采用“新条目 + `supersedes`”，旧条目置为 `superseded`；删除是软删除 `deleted`，不物理移除。
 - 已发生的状态演化使用 `change_kind=evolution` 与明确的 `context.valid_from`，区别于纠错；历史视图只恢复无歧义的演化链，不能复活纠错/删除内容。当前召回排除已过期/尚未生效条目，不猜测未知日期。
 - 新推断保存来源内容指纹；来源修改或到期时失效。画像是事实与独立推断的可重建视图，只有已确认且来源相关的画像推断可限量注入聊天，仍须标注非事实。
-- Dreaming/画像刷新支持默认启用的 TUI 空闲自动调度与手动触发，默认每次最多一次请求，禁用任务级重试和候补模型；只以有效事实为证据，结果待审查。自动任务低频且彼此独立：Dreaming 默认每 24 小时最多一次，Profile 默认每 7 天最多一次；普通新增只记待处理变更，达到阈值或重要变化（目标/偏好/职业方向等）才允许在冷却后提前更新。无变化时只做文件指纹检查。周期、冷却与失败退避持久化到 `.syvrio/reflection-state.json`，画像来源指纹基线在 `.syvrio/profile-fingerprints.json`，摘要缓存在 `.syvrio/profile-summary.json`；三者均为派生状态，可删除重建且不进入 Git 历史。进度追加 `.syvrio/reflection-jobs.jsonl`，取消、失败或重启不删除已有记录；网络等待不持有记忆写锁，发布前重新核验证据。
-- 待确认候选写 `.syvrio/pending.jsonl`，处理结果追加到 `resolved.jsonl`；更正、删除等操作写 `audit.jsonl`。
-- 可选事实上下文以行尾 `context` JSON 标签保存；日期精度由 YYYY / YYYY-MM / YYYY-MM-DD 保留，不以写入时间补猜事实时间。改写后确认与手动更正不继承旧上下文。
-- 推断单独追加到 `.syvrio/inferences.jsonl`，不参与事实检索；新假设只接受有效事实来源 ID，来源去重，重复证据不提升可信度。用户确认仍保持推断与事实分离；状态变更追加 revision 快照事件，更正在同一事件保存新旧状态。来源失效后不可重新启用旧推断；损坏日志不得静默忽略或覆盖；显式尾行恢复仅追加 recovery 标记（ignored_line 为 1 起始物理行号），中间损坏仍报错。
-- `.syvrio/vectors.npz` 是向量检索的派生缓存（含 `model_id`，换模型自动失效），vault 内 gitignore，可删除重建，不进 Git 历史。
-- Vault 写入（记忆、会话追加、审计/推断/回顾日志）与 Git 快照共享 `.syvrio/vault.lock`；Stage/Commit/Push 使用 `.syvrio/git.lock`。两把锁跨进程互斥，固定顺序 Git → Vault；Push 网络等待只持 Git 锁。同步状态 `.syvrio/git-sync-state.json` 与锁文件在 vault 内 gitignore。
-- `.syvrio/search-cache.json` 是联网搜索的派生缓存（按 TTL 过期），vault 内 gitignore，可删除重建，不进 Git 历史。
-- `.syvrio/profile-summary.json`、`.syvrio/profile-fingerprints.json`、`.syvrio/reflection-state.json` 分别是画像摘要、来源指纹基线与自动回顾调度状态，均为派生数据，vault 内 gitignore，可删除重建，不进 Git 历史。
-- `sessions/<id>.jsonl` 是追加写的事件流，不重写旧行；上下文压缩只追加 `summary` 记录，不删除原文。
+- Dreaming/画像刷新支持默认启用的 TUI 空闲自动调度与手动触发，默认每次最多一次请求，禁用任务级重试和候补模型；只以有效事实为证据，结果待审查。自动任务低频且彼此独立：Dreaming 默认每 24 小时最多一次，Profile 默认每 7 天最多一次；普通新增只记待处理变更，达到阈值或重要变化（目标/偏好/职业方向等）才允许在冷却后提前更新。无变化时只做文件指纹检查。周期、冷却与失败退避持久化到 `runtime/state/reflection.json`，画像来源指纹基线在 `runtime/state/fingerprints.json`，摘要缓存在 `runtime/cache/profile/profile-summary.json`；三者均为派生状态，可删除重建且不进入 Git 历史。进度追加 `runtime/jobs/dreaming/jobs.jsonl`，取消、失败或重启不删除已有记录；网络等待不持有记忆写锁，发布前重新核验证据。
+- 待确认候选写 `records/memory/pending.jsonl`，处理结果追加到 `resolved.jsonl`；更正、删除等操作写 `audit.jsonl`。
+- 可选事实上下文以开放的 Context 字段保存；日期精度由 YYYY / YYYY-MM / YYYY-MM-DD 保留，不以写入时间补猜事实时间。改写后确认与手动更正不继承旧上下文。
+- 推断单独追加到 `records/memory/inferences.jsonl`，不参与事实检索；新假设只接受有效事实来源 ID，来源去重，重复证据不提升可信度。用户确认仍保持推断与事实分离；状态变更追加 revision 快照事件，更正在同一事件保存新旧状态。来源失效后不可重新启用旧推断；损坏日志不得静默忽略或覆盖；显式尾行恢复仅追加 recovery 标记（ignored_line 为 1 起始物理行号），中间损坏仍报错。
+- `runtime/indexes/vectors.npz` 是向量检索的派生缓存（含 `model_id`，换模型自动失效），独立于 Vault，可删除重建，不进 Git 历史。
+- Vault 写入（记忆、会话追加、审计/推断/回顾日志）与 Git 快照共享 `runtime/locks/vault.lock`；Stage/Commit/Push 使用 `runtime/locks/git.lock`。两把锁跨进程互斥，固定顺序 Git → Vault；Push 网络等待只持 Git 锁。同步状态 `runtime/state/git-sync.json` 与锁文件位于 Vault 外。
+- `runtime/cache/search/search-cache.json` 是联网搜索的派生缓存（按 TTL 过期），独立于 Vault，可删除重建，不进 Git 历史。
+- `runtime/cache/profile/profile-summary.json`、`runtime/state/fingerprints.json`、`runtime/state/reflection.json` 分别是画像摘要、来源指纹基线与自动回顾调度状态，均为派生数据，独立于 Vault，可删除重建，不进 Git 历史。
+- `sessions/YYYY/MM/<id>.jsonl` 是追加写的事件流，不重写旧行；上下文压缩只追加 `summary` 记录，不删除原文。
 - 会话追加前递归隐藏已识别凭据；损坏尾行只读恢复，续写追加 `recovery` 标记记录 `ignored_line`（1 起始物理行号），保留原始字节；未标记的中间行损坏不能静默忽略。
 - `vault/SOUL.md` 是可选自定义人设：存在时替换系统提示词的人设段，机制规则固定拼接在后不可覆盖；它是指令不是记忆，不参与抽取与检索。
 - 密钥、验证码、API Key 在写入前拦截；不把密钥写入 vault、配置示例或测试。
-- 迁移 vault 存量数据用一次性脚本（放 `scripts/`，不随包发布）：**默认 dry-run** 出前后对照报告，`--apply` 才落盘；条目 ID 与行尾标签必须逐字节保留；落盘后自动验证（ID 集合一致、条数不变、无空正文）并提交 vault git 作为回滚点；向量缓存依赖哈希自动增量重建，不手动处理。
+- 旧 Vault 使用 `scripts/migrate_vault_v2.py` 显式迁移：先校验备份和恢复，再以 `--dry-run` 检查、`--apply` 复制到新目录、`--verify` 校验。启动时拒绝 v1 布局，不自动迁移。
 - `syvrio.toml`、`vault/`、`sessions/`、`.env`、密钥文件都不提交。
 
 ## 测试

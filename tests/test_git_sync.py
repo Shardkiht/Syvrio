@@ -952,7 +952,7 @@ def test_session_jsonl_integrity_during_concurrent_sync(tmp_path):
     assert result.status == "success"
     worktree = [json.loads(line) for line in session.path.read_text(encoding="utf-8").splitlines()]
     committed_raw = _git(
-        "show", f"HEAD:sessions/{session.id}.jsonl", cwd=service.config.vault
+        "show", f"HEAD:{session.path.relative_to(service.config.vault).as_posix()}", cwd=service.config.vault
     ).stdout
     committed = [json.loads(line) for line in committed_raw.splitlines()]
     assert all(isinstance(record, dict) for record in worktree)

@@ -24,7 +24,7 @@ from ..memory.detect import redact_secrets
 from ..memory.service import MemoryService, load_persona
 from .context import ContextManager
 from .prompts import build_system_prompt
-from .recall import RecallQueryBuilder, should_auto_recall
+from .recall import RecallQueryBuilder, memory_references, should_auto_recall
 from .session import Session, SessionStore, new_message_id
 from .tools import ToolOutcome, build_tools, compact_tool_outputs
 
@@ -535,7 +535,7 @@ class AgentRuntime:
         if recall.cue:
             limit = max(limit, 8)
         hits = self.service.recall(recall.text, limit)
-        text = "\n".join(f"- [{hit.topic}] ({hit.timestamp}) {hit.text}" for hit in hits)
+        text = memory_references(hits, max_tokens=min(2400, self.config.context_window // 8))
         try:
             profile = self.service.reflection.context({hit.id for hit in hits})
         except (ValueError, OSError):

@@ -24,6 +24,10 @@ class MemoryContext(BaseModel):
     emotion_at: Literal["event", "expression"] | None = None
     emotion_source: Literal["explicit"] | None = None
 
+    def markdown_fields(self) -> list[tuple[str, str]]:
+        values = self.model_dump(exclude_none=True)
+        return [(key, values[name]) for key, name in _CONTEXT_KEYS.items() if name in values]
+
     @field_validator("event_time", "valid_from", "valid_to")
     @classmethod
     def validate_date(cls, value: str | None) -> str | None:
@@ -68,6 +72,14 @@ class MemoryContext(BaseModel):
             if start > date(year, month, day):
                 raise ValueError("事实生效结束时间不能早于开始时间")
         return self
+
+
+_CONTEXT_NAMESPACES = {
+    "temporal": ("event_time", "valid_from", "valid_to", "time_text"),
+    "spatial": ("location", "location_kind"),
+    "affective": ("emotion", "emotion_at", "emotion_source"),
+}
+_CONTEXT_KEYS = {f"{ns}.{key}": key for ns, keys in _CONTEXT_NAMESPACES.items() for key in keys}
 
 
 class Candidate(BaseModel):
@@ -209,6 +221,13 @@ class PendingItem(BaseModel):
         )
 
 
+class FieldNode(BaseModel):
+    key: str
+    value: str | None = None
+    children: tuple[FieldNode, ...] = ()
+    raw_markdown: str
+
+
 class Entry(BaseModel):
     id: str
     topic: str
@@ -218,10 +237,39 @@ class Entry(BaseModel):
     supersedes: str | None = None
     metadata: dict[str, str] = Field(default_factory=dict)
 
+    raw_markdown: str = ""
+    source_path: str = ""
+    line: int = 0
+    end_line: int = 0
+    confidence: float | None = None
+    context_fields: tuple[FieldNode, ...] = ()
+    extension_fields: tuple[FieldNode, ...] = ()
+
     @property
     def context(self) -> MemoryContext | None:
+        if self.context_fields:
+            values: dict[str, str] = {}
+            for node in self.context_fields:
+                name = _CONTEXT_KEYS.get(node.key)
+                if name and node.value is not None:
+                    values.setdefault(name, node.value)
+            # A manually written v2 record can omit companion fields. Project only
+            # understood scalar values without inventing type or provenance.
+            for key in ("event_time", "valid_from", "valid_to"):
+                try:
+                    MemoryContext.validate_date(values.get(key))
+                except ValueError:
+                    values.pop(key, None)
+            return MemoryContext.model_construct(**values) if values else None
         raw = self.metadata.get("context")
         return MemoryContext.model_validate_json(raw) if raw else None
+
+    @property
+    def index_text(self) -> str:
+        return "\n".join([self.text, *(f.raw_markdown for f in (*self.context_fields, *self.extension_fields)
+                                       if f.key not in {"syvrio.recorded_at", "syvrio.supersedes", "syvrio.session",
+                                                        "syvrio.message", "syvrio.change_kind",
+                                                        "migration.evidence_v1", "migration.evidence_v2"})])
 
 
 class TopicInfo(BaseModel):

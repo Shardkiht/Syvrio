@@ -12,11 +12,12 @@ from typing import Any
 from ..infra.tokens import estimate_tokens
 from ..infra.diagnostics import record_event
 from ..infra.locking import vault_write_lock
+from ..infra.paths import SyvrioPaths, vault_paths
 from ..memory.detect import redact_secrets
 
 _LOG = logging.getLogger(__name__)
 
-SESSION_ID_RE = re.compile(r"^s-\d{8}-\d{6}-[0-9a-f]{4}$")
+SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 
 
 def now_iso() -> str:
@@ -213,10 +214,11 @@ class Session:
 
 
 class SessionStore:
-    def __init__(self, vault: Path):
-        self.root = Path(vault) / "sessions"
+    def __init__(self, vault: Path | SyvrioPaths):
+        paths = vault if isinstance(vault, SyvrioPaths) else vault_paths(vault)
+        self.root = paths.sessions_dir
         # 会话追加与 Git 快照共用 Vault 写锁，避免提交到写了一半的 JSONL。
-        self._lock = vault_write_lock(vault)
+        self._lock = vault_write_lock(paths)
         self._listing_cache: dict[str, tuple[tuple[int, int], dict]] = {}
         # 补沉淀扫描只需知道文件还有多少待抽取消息，不必保留完整会话。
         self._undistilled_cache: dict[str, tuple[tuple[int, int], int]] = {}
@@ -224,11 +226,19 @@ class SessionStore:
     def create(self) -> Session:
         stamp = datetime.now()
         with self._lock:
-            self.root.mkdir(parents=True, exist_ok=True)
+            archive = self.root / f"{stamp.year:04d}" / f"{stamp.month:02d}"
+            if not archive.resolve().is_relative_to(self.root.resolve()) or self.root.is_symlink():
+                raise ValueError("session archive cannot redirect outside sessions")
+            archive.mkdir(parents=True, exist_ok=True)
             session_id = f"s-{stamp:%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
-            path = self.root / f"{session_id}.jsonl"
+            path = archive / f"{session_id}.jsonl"
+            known = {item.stem for item in self._files()}
             # Exclusive creation also protects the collision window between processes.
             while True:
+                if session_id in known:
+                    session_id = f"s-{stamp:%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
+                    path = archive / f"{session_id}.jsonl"
+                    continue
                 meta = {
                     "type": "meta", "id": session_id,
                     "started_at": stamp.isoformat(timespec="seconds"), "cwd": str(Path.cwd()),
@@ -239,7 +249,7 @@ class SessionStore:
                     break
                 except FileExistsError:
                     session_id = f"s-{stamp:%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
-                    path = self.root / f"{session_id}.jsonl"
+                    path = archive / f"{session_id}.jsonl"
 
         return Session(id=session_id, started_at=meta["started_at"], path=path, records=[meta])
 
@@ -278,9 +288,11 @@ class SessionStore:
                 damaged_tail = number
             else:
                 raise error
-        meta = records[0] if records else {"id": session_id, "started_at": ""}
+        meta = records[0] if records and records[0].get("type") == "meta" else {}
+        if meta.get("id", session_id) != session_id:
+            raise ValueError("Session ID differs from archive filename")
         return Session(
-            id=meta.get("id", session_id),
+            id=session_id,
             started_at=meta.get("started_at", ""),
             path=path,
             records=records,
@@ -314,8 +326,8 @@ class SessionStore:
         self.append(session, {"type": "title", "title": title.strip()[:80]})
 
     def delete(self, session_id: str) -> bool:
-        path = self._path(session_id)
         with self._lock:
+            path = self._path(session_id)
             if not path.exists():
                 return False
             path.unlink()
@@ -367,7 +379,7 @@ class SessionStore:
             return []
         sessions = []
         seen: set[str] = set()
-        for path in self.root.glob("*.jsonl"):
+        for path in self._files():
             row = self._listing_row(path, with_tokens)
             if row is None:
                 continue
@@ -387,7 +399,7 @@ class SessionStore:
         needed = max(1, min_new_messages)
         found: list[tuple[str, Session]] = []
         seen: set[str] = set()
-        for path in self.root.glob("*.jsonl"):
+        for path in self._files():
             if exclude and path.stem == exclude:
                 continue
             try:
@@ -423,10 +435,20 @@ class SessionStore:
         found.sort(key=lambda item: item[0], reverse=True)
         return [session for _, session in found[:limit]]
 
+    def _files(self) -> list[Path]:
+        files = sorted(self.root.rglob("*.jsonl"))
+        seen: set[str] = set()
+        for path in files:
+            if self.root.is_symlink() or path.is_symlink() or path.stem in seen:
+                raise ValueError("duplicate session ID or symlink in session archive")
+            seen.add(path.stem)
+        return files
+
     def _path(self, session_id: str) -> Path:
-        if not SESSION_ID_RE.match(session_id):
+        if not SESSION_ID_RE.fullmatch(session_id):
             raise KeyError(f"非法会话 ID：{session_id}")
-        return self.root / f"{session_id}.jsonl"
+        return next((path for path in self._files() if path.stem == session_id),
+                    self.root / "legacy" / "undated" / f"{session_id}.jsonl")
 
 
 def dated_message(record: dict) -> str:

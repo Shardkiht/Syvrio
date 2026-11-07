@@ -4259,7 +4259,7 @@ async def test_closed_marker_after_assistant_records_when_switching_mid_ask(tmp_
             if not app._navigation_busy:
                 break
         # 请求未结束时不得提前落 closed 标记
-        path = app.service.config.vault / "sessions" / f"{session_a}.jsonl"
+        path = app.sessions.load(session_a).path
         types = [json.loads(line)["type"] for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
         assert "closed" not in types
 
@@ -4603,7 +4603,7 @@ async def test_long_pending_review_actions_keep_full_text(tmp_path, action):
         if action == "reject":
             assert not entries
         else:
-            expected = "Synthetic final edited text" if action == "edit" else " ".join(text.split())
+            expected = "Synthetic final edited text" if action == "edit" else text.strip()
             assert [entry.text for entry in entries] == [expected]
 
 
@@ -5056,7 +5056,7 @@ async def test_startup_compensation_runs_missed_daily_sync(tmp_path):
     import asyncio
 
     app = build_app(tmp_path, [], git=GitConfig(auto_sync=True, sync_time="00:00"))
-    state_path = app.service.config.vault / ".syvrio" / "git-sync-state.json"
+    state_path = app.service.paths.state_dir / "git-sync.json"
     async with app.run_test(size=(120, 40)) as pilot:
         await asyncio.wait_for(app.workers.wait_for_complete(), timeout=30)
         await pilot.pause()

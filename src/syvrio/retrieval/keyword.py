@@ -48,13 +48,13 @@ class KeywordRetriever:
         self.b = b
         self._entries: list[Entry] = []
         self._bm25: BM25Okapi | None = None
-        self._fingerprint: tuple[tuple[str, int, int], ...] | None = None
+        self._fingerprint: tuple[tuple[str, str], ...] | None = None
 
     def _index(self) -> tuple[list[Entry], BM25Okapi | None]:
         fingerprint = self.store.fingerprint()
         if self._bm25 is None or fingerprint != self._fingerprint:
             self._entries = self.store.entries()
-            corpus = [list(tokenize(entry.text)) for entry in self._entries]
+            corpus = [list(tokenize(entry.index_text)) for entry in self._entries]
             self._bm25 = BM25Okapi(corpus, k1=self.k1, b=self.b) if any(corpus) else None
             if self._bm25 is not None:
                 # Okapi 的负 IDF 会让小库的相关结果全部被过滤；使用正值的平滑 IDF。
@@ -84,7 +84,7 @@ class KeywordRetriever:
         lowered = query.lower()
         ranked = sorted(
             (
-                (score + (2.0 if lowered in entry.text.lower() else 0.0), index)
+                (score + (2.0 if lowered in entry.index_text.lower() else 0.0), index)
                 for index, (entry, score) in enumerate(zip(entries, scores))
             ),
             reverse=True,
@@ -93,7 +93,11 @@ class KeywordRetriever:
             SearchHit(
                 id=entries[index].id,
                 file=str(self.store.topic_path(entries[index].topic)),
-                line=0,
+                source_path=entries[index].source_path,
+                line=entries[index].line,
+                end_line=entries[index].end_line,
+                raw_markdown=entries[index].raw_markdown,
+                index_text=entries[index].index_text,
                 text=entries[index].text,
                 topic=entries[index].topic,
                 timestamp=entries[index].timestamp,

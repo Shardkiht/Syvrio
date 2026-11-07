@@ -22,6 +22,7 @@ dependencies = [
     "jieba>=0.42",
     "keyring>=25.5",
     "litellm>=1.60",
+    "markdown-it-py>=3.0",
     "numpy>=1.26",
     "openai>=1.60",
     "prompt-toolkit>=3.0",

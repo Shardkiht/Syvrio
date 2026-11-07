@@ -66,10 +66,10 @@ class VectorRetriever:
         self.store = store
         self.embedder = embedder
         self.batch_size = batch_size
-        self.cache_path = store.vault / ".syvrio" / CACHE_FILENAME
+        self.cache_path = store.paths.index_dir / CACHE_FILENAME
         self._entries: list[Entry] = []
         self._matrix: np.ndarray | None = None
-        self._fingerprint: tuple[tuple[str, int, int], ...] | None = None
+        self._fingerprint: tuple[tuple[str, str], ...] | None = None
         self._degraded = False
         self._clock = clock
         self._retry_at = 0.0
@@ -100,7 +100,7 @@ class VectorRetriever:
         fresh: list[Entry] = []
         for entry in entries:
             index = known.get(entry.id)
-            if index is not None and hashes[index] == text_hash(entry.text):
+            if index is not None and hashes[index] == text_hash(entry.index_text):
                 keep.append(index)
             else:
                 fresh.append(entry)
@@ -112,7 +112,7 @@ class VectorRetriever:
             for start in range(0, len(fresh), self.batch_size):
                 batch = fresh[start : start + self.batch_size]
                 vectors = np.array(
-                    self.embedder.embed([entry.text for entry in batch]), dtype=np.float32
+                    self.embedder.embed([entry.index_text for entry in batch]), dtype=np.float32
                 )
                 if vectors.ndim != 2 or vectors.shape[0] != len(batch):
                     raise ValueError("embedding 返回形状或数量与输入不一致")
@@ -167,6 +167,11 @@ class VectorRetriever:
                     id=entry.id,
                     file=str(self.store.topic_path(entry.topic)),
                     text=entry.text,
+                    source_path=entry.source_path,
+                    line=entry.line,
+                    end_line=entry.end_line,
+                    raw_markdown=entry.raw_markdown,
+                    index_text=entry.index_text,
                     topic=entry.topic,
                     timestamp=entry.timestamp,
                     score=round(score, 4),
@@ -211,7 +216,7 @@ class VectorRetriever:
                     handle,
                     model=np.array(self.embedder.model_id),
                     ids=np.array([entry.id for entry in entries]),
-                    hashes=np.array([text_hash(entry.text) for entry in entries]),
+                    hashes=np.array([text_hash(entry.index_text) for entry in entries]),
                     vectors=matrix,
                 )
             os.replace(tmp, self.cache_path)

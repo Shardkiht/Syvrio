@@ -300,6 +300,7 @@ def write_config(path: Path, config: Config) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     content = f'''# Syvrio 配置（由 syvrio setup 生成）
 vault = {toml_literal(config.vault.as_posix())}
+runtime = {toml_literal(config.runtime or "~/.syvrio/runtime")}
 
 confidence_threshold = {config.confidence_threshold}
 auto_push = {str(config.auto_push).lower()}
@@ -450,10 +451,10 @@ def _ensure_usage_limit(config: Config, name: str, messages: list[str]) -> None:
 
 def _manage_usage(config: Config) -> None:
     from .config import UsageLimit, default_usage_limits
-    from .search.usage import UsageLimiter, USAGE_FILENAME
+    from .search.usage import UsageLimiter
 
     defaults = default_usage_limits()
-    limiter = UsageLimiter(config.search.usage_limits, config.vault / ".syvrio" / USAGE_FILENAME)
+    limiter = UsageLimiter(config.search.usage_limits, config.paths().state_dir / "usage.json")
     while True:
         for name, default in defaults.items():
             effective = config.search.usage_limits.get(name, default)

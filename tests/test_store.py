@@ -8,6 +8,8 @@ from datetime import datetime
 from pathlib import Path
 
 from syvrio.memory.store import MemoryStore, slugify
+from syvrio.memory.legacy import parse_legacy_line
+from syvrio.memory.schema import SchemaError
 from syvrio.memory.models import MemoryContext
 
 
@@ -26,26 +28,27 @@ def test_context_tag_roundtrip_and_status_change_preserve_id(tmp_path):
     assert loaded.text == "参加合成展览"
     raw = store.topic_path("events").read_text(encoding="utf-8")
     assert "~syvrio-escaped~" in raw
-    assert len([line for line in raw.splitlines() if line.startswith("- ")]) == 1
+    assert len([line for line in raw.splitlines() if line.startswith("* ")]) == 1
 
 
-def test_legacy_entry_and_empty_context_keep_original_format(tmp_path):
+def test_empty_context_omits_optional_section(tmp_path):
     store = MemoryStore(tmp_path)
     entry = store.append("test", "旧格式", context=MemoryContext())
     assert store.find(entry.id).context is None
-    assert "`context=" not in store.topic_path("test").read_text(encoding="utf-8")
+    assert "**Context**" not in store.topic_path("test").read_text(encoding="utf-8")
 
 
-def test_append_creates_frontmatter_and_entry(tmp_path):
+def test_append_creates_heading_and_entry(tmp_path):
     store = MemoryStore(tmp_path)
     store.ensure()
 
     entry = store.append("preferences", "喜欢清淡、像茶的风味", source="chat", confidence=0.93)
 
-    assert entry.topic == "preferences"
-    path = tmp_path / "memories" / "preferences.md"
+    assert entry.topic == "memories/general/preferences.md"
+    path = store.topic_path("preferences")
     raw = path.read_text(encoding="utf-8")
-    assert "topic: preferences" in raw
+    assert raw.startswith("# preferences\n\n")
+    assert not raw.startswith("---")
     assert "喜欢清淡、像茶的风味" in raw
 
     entries = store.entries()
@@ -55,15 +58,15 @@ def test_append_creates_frontmatter_and_entry(tmp_path):
     assert entries[0].metadata["confidence"] == "0.93"
 
 
-def test_append_appends_and_updates_frontmatter(tmp_path):
+def test_append_preserves_existing_bytes(tmp_path):
     store = MemoryStore(tmp_path)
     first = store.append("devices", "使用 手冲滤纸", when=datetime(2026, 10, 1, 9, 0, 0))
+    original = store.topic_path("devices").read_bytes()
     second = store.append("devices", "买了一个 7L 挎包", when=datetime(2026, 10, 2, 10, 0, 0))
 
     assert first.timestamp == "2026-10-01T09:00:00"
     assert second.timestamp == "2026-10-02T10:00:00"
-    raw = (tmp_path / "memories" / "devices.md").read_text(encoding="utf-8")
-    assert "updated: 2026-10-02" in raw
+    assert store.topic_path("devices").read_bytes().startswith(original)
     assert len(store.entries("devices")) == 2
 
 
@@ -84,13 +87,13 @@ def test_has_text_normalizes_whitespace(tmp_path):
     assert not store.has_text("喜欢浓郁风味")
 
 
-def test_append_flattens_multiline_text(tmp_path):
+def test_append_preserves_multiline_text(tmp_path):
     store = MemoryStore(tmp_path)
     store.append("preferences", "标题行\n正文第一行\n正文第二行")
 
     entries = store.entries()
     assert len(entries) == 1
-    assert "\n" not in entries[0].text
+    assert entries[0].text == "标题行\n正文第一行\n正文第二行"
     assert "标题行" in entries[0].text and "正文第二行" in entries[0].text
 
 
@@ -133,7 +136,7 @@ def test_metadata_literal_percent_sequences_remain_unchanged(tmp_path):
     assert store.entries() == [entry]
 
 
-def test_entry_uses_trailing_code_tags(tmp_path):
+def test_entry_uses_core_and_extensions(tmp_path):
     store = MemoryStore(tmp_path)
     entry = store.append(
         "housing",
@@ -144,12 +147,14 @@ def test_entry_uses_trailing_code_tags(tmp_path):
         when=datetime(2026, 10, 22, 18, 0, 0),
     )
 
-    raw = (tmp_path / "memories" / "housing.md").read_text(encoding="utf-8")
-    line = next(item for item in raw.splitlines() if item.startswith("- "))
-    assert line == (
-        "- 2026-10-22T18:00:00 — 在找市区的房子  "
-        f"`id={entry.id}` `status=active` `source=chat` `confidence=0.91` "
-        "`session=s-1` `message=m-2`"
+    raw = store.topic_path("housing").read_text(encoding="utf-8")
+    assert entry.raw_markdown in raw
+    assert entry.raw_markdown == (
+        "* 在找市区的房子\n\n  **Core**\n"
+        f"  * `id`: `{entry.id}`\n"
+        "  * `status`: `active`\n  * `source`: `chat`\n  * `confidence`: `0.91`\n\n"
+        "  **Extensions**\n  * `syvrio.recorded_at`: `2026-10-22T18:00:00`\n"
+        "  * `syvrio.session`: `s-1`\n  * `syvrio.message`: `m-2`\n"
     )
 
 
@@ -158,11 +163,10 @@ def test_set_status_rewrites_tag(tmp_path):
     entry = store.append("housing", "预算 4000", when=datetime(2020, 1, 1, 12, 0, 0))
     assert store.set_status(entry.id, "superseded")
 
-    raw = (tmp_path / "memories" / "housing.md").read_text(encoding="utf-8")
-    assert "`status=superseded`" in raw
+    raw = store.topic_path("housing").read_text(encoding="utf-8")
+    assert "`status`: `superseded`" in raw
     assert store.entries("housing") == []
     assert store.find(entry.id).status == "superseded"
-    # 状态变化也是文件变更，front matter 的 updated 不能停留在旧日期。
     assert store.topics()[0].updated == datetime.now().date().isoformat()
 
 
@@ -171,7 +175,7 @@ def test_write_failure_leaves_original_file_intact(tmp_path, monkeypatch):
 
     store = MemoryStore(tmp_path)
     store.append("housing", "原始条目")
-    path = tmp_path / "memories" / "housing.md"
+    path = store.topic_path("housing")
     before = path.read_text(encoding="utf-8")
 
     def fail_replace(source, target):
@@ -204,13 +208,15 @@ def test_legacy_comment_line_still_parses(tmp_path):
     )
     store = MemoryStore(tmp_path)
 
-    entry = store.find("mem-old")
+    line = next(line for line in path.read_text(encoding="utf-8").splitlines() if line.startswith("- "))
+    entry = parse_legacy_line(line, "old")
     assert entry is not None
     assert entry.text == "旧事实"
     assert entry.metadata["confidence"] == "0.80"
 
-    assert store.set_status("mem-old", "deleted")
-    assert "status=deleted -->" in path.read_text(encoding="utf-8")
+    with pytest.raises(SchemaError, match="explicit v2 migration"):
+        store.set_status("mem-old", "deleted")
+    assert "status=active -->" in path.read_text(encoding="utf-8")
 
 
 def test_append_retries_duplicate_entry_id(tmp_path, monkeypatch):
@@ -255,9 +261,7 @@ def test_legacy_comment_without_id_has_stable_id(tmp_path):
         "- <!-- status=active --> 2026-10-01T09:00:00 — 无 ID 的旧条目\n",
         encoding="utf-8",
     )
-    store = MemoryStore(tmp_path)
-
-    first = store.entries()[0]
-    second = store.entries()[0]
-    assert first.id == second.id
-    assert store.find(first.id) is not None
+    line = path.read_text(encoding="utf-8")
+    first = parse_legacy_line(line, "old")
+    second = parse_legacy_line(line, "old")
+    assert first.id == second.id and first.id.startswith("mem-legacy-")

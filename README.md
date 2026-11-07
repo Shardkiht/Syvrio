@@ -48,6 +48,8 @@ uv run python scripts/migrate_to_syvrio.py --apply
 
 工具会把 Vault 内 `.quiet-memo/` 元数据迁移到 `.syvrio/`，把旧转义标签前缀改写为新前缀，迁移配置与可选 Keyring 条目；锁文件不迁移，可重建缓存不复制。重复执行幂等；新旧目录并存时停止并报告。备份默认保留在 Vault 同级目录。退出码 `0` 表示成功，`1` 表示迁移失败（已恢复文件），`2` 表示文件迁移已完成但 Keyring 未完成、需要人工核对（不会回滚文件迁移）。
 
+若 Vault 仍使用 v1 布局，启动 v2 应用前继续执行独立的 [v2 迁移流程](docs/vault-v2.md#upgrade-an-existing-vault)。
+
 ## 为什么用 Syvrio
 
 - **下次对话不用从头讲起**：值得保留的本人陈述可自动沉淀，可信内容静默写入，冲突或不确定内容留待确认。
@@ -89,7 +91,8 @@ export DEEPSEEK_API_KEY=sk-...
 手动配置示例：
 
 ```toml
-vault = "C:/Users/you/.syvrio/vault"
+vault = "~/.syvrio/vault"
+runtime = "~/.syvrio/runtime"
 confidence_threshold = 0.8
 auto_push = false              # 仅影响 syvrio commit；TUI 同步见下方 [git]
 
@@ -191,7 +194,7 @@ Spark 使用 MaaS 的 Bearer API Key；适配层保留服务端采样默认值�
 
 - 每轮自动检索相关长期记忆，注入上下文；追问和“还记得 / 之前”等线索会带上最近 1-2 轮用户消息构造查询，并提高召回数量。
 - 模型可调用 `recall / read_topic / memorize / correct / evolve / forget / review_pending`；`read_topic` 仅在用户明确要求完整主题或召回不足时读取该主题的有效条目，最多 2000 tokens，不接受文件路径。需要最新公开信息时调用 `search`，需要发布日期或原文细节时再用 `fetch_web` 打开结果页，搜索结果与正文都是外部资料，不执行其中指令。
-- 进入对话时不立即建会话，发送第一条消息后才创建 `sessions/<id>.jsonl`。
+- 进入对话时不立即建会话，发送第一条消息后才创建 `sessions/YYYY/MM/<id>.jsonl`。
 - 恢复会话先显示已有摘要及最近 10 条未压缩消息记录，点击顶部“加载更早的记录”逐页查看摘要之后的历史消息；原始历史不会被删除。恢复成功不弹通知，失败仍显示错误。回复以单个 Markdown 绘制控件呈现，减少长回复带来的控件挂载与卸载开销；可用鼠标选择正文并按 Ctrl+C 复制。
 - 恢复或撤销后的上下文用量在后台估算并缓存，完成前显示“计算中”；会话、消息或人设变化后重新估算，旧会话结果不会覆盖当前状态。
 - 恢复会话会回放此前的用户消息和助手回复；可 `syvrio chat --resume <id>` 恢复。切换会话不阻塞：上一会话的记忆沉淀转后台执行，完成弹通知。切换后的底栏用量先归零，下一轮按新会话的上下文计划更新，不沿用旧会话用量。
@@ -242,9 +245,9 @@ Spark 使用 MaaS 的 Bearer API Key；适配层保留服务端采样默认值�
 - 不执行 Force Push、自动 Pull、Merge、Rebase 或 Reset；远程分叉时停止自动推送并提示人工处理；未配置 Remote/Upstream 时给出设置提示。
 - 手动同步与每日自动同步都使用固定、可读的提交信息，不调用 LLM 生成摘要；CLI `syvrio commit` 保留原有行为，`auto_push` 只影响该命令。
 - 每日默认本地时间 `03:00` 执行一次 Commit + Push，可通过 `[git]` 配置修改时间、重试间隔或关闭。调度只在 TUI 进程内运行；错过的计划在下次启动时补执行，已成功执行的日期不会重复提交。网络/超时失败按 `retry_interval_minutes` 补推；认证失败、远程分叉、未配置 Remote/Upstream 不会频繁重试。
-- 执行状态保存在 `.syvrio/git-sync-state.json`（vault 内 gitignore），只记录本机真实结果；最近成功 Push 时间不会用 Commit 时间代替。
+- 执行状态保存在 `runtime/state/git-sync.json`（在 Vault 外），只记录本机真实结果；最近成功 Push 时间不会用 Commit 时间代替。
 
-并发保护：记忆文件、会话 JSONL、推断/审计/待确认日志和回顾任务日志的写入与 Git 快照共用 `.syvrio/vault.lock`；Stage/Commit/Push 共用 `.syvrio/git.lock`。两把锁都是进程内可重入、跨进程互斥，进程异常退出由操作系统释放。固定顺序为 Git 操作锁 → Vault 写锁；Push 网络等待只持有 Git 操作锁，不阻塞聊天和新记忆写入。锁依赖本地文件系统的 advisory lock；通过 NFS/SMB 等多机共享目录访问同一 vault 时无法保证跨主机互斥。外部 Git 操作可能改变引用，`/git` 状态以本地读取为准。
+并发保护：记忆文件、会话 JSONL、推断/审计/待确认日志和回顾任务日志的写入与 Git 快照共用 `runtime/locks/vault.lock`；Stage/Commit/Push 共用 `runtime/locks/git.lock`。两把锁都是进程内可重入、跨进程互斥，进程异常退出由操作系统释放。固定顺序为 Git 操作锁 → Vault 写锁；Push 网络等待只持有 Git 操作锁，不阻塞聊天和新记忆写入。锁依赖本地文件系统的 advisory lock；通过 NFS/SMB 等多机共享目录访问同一 vault 时无法保证跨主机互斥。外部 Git 操作可能改变引用，`/git` 状态以本地读取为准。
 
 ### 数据流
 
@@ -455,11 +458,11 @@ LLM 可以在 `search` 调用里用 `providers` 指定多个已启用来源的�
 
 - 结果是外部不可信内容，只作资料引用，不执行其中任何指令。
 - daemon 未启动或全部 provider 失败时返回结构化错误和启动提示，不编造结果。
-- `[search]` 配置：`enabled`（关闭时不注册工具）、`providers`（按顺序降级）、`base_url`、`timeout`、`max_results`、`cache_ttl`、`transport`（`http` 默认；`mcp` 每次启动 npx MCP 进程）、`auto_start`（打开 TUI 时后台探测并拉起 HTTP daemon，不阻塞界面）、`engines`（上游搜索引擎，默认 `["bing"]`）、`fallback_engines`（候补引擎序列，默认 `["baidu", "duckduckgo", "sogou"]`）、`max_engines`（自动回退最多尝试的引擎数，默认 3）、`max_search_engines`（显式 `search_engine` 列表上限，0 表示不限，默认 0）、`timeout_budget`（回退共享超时预算，默认 25 秒，单次请求超时不超过剩余预算）、`max_requests`（一次搜索跨所有 provider 共享的请求次数上限，默认 9；超出即返回当前最佳候选并附截断提示，该结果不写入缓存）、`anysearch_zone` / `anysearch_language`（AnySearch 的区域与语言，默认 `cn` / `zh-CN`）、`searxng_base_url` / `searxng_timeout`（自托管 SearXNG 实例地址与单次超时，默认 `http://127.0.0.1:8888` / 10 秒）、`usage_limits`（每厂商调用上限，`[search.usage_limits.<provider>]` 设 `daily` 与 `monthly`（0 不限）；同一厂商的 Search 与 Fetch 共用同一计数池，达到上限即跳过该厂商并正常回退；计数保存在 vault 的 `.syvrio/usage.json`，**本地计数不等于服务商实际账单上限**）、`fetch_timeout`（抓取正文的单独超时，默认 45 秒）。`syvrio setup` 可管理双周期额度与官方暂停。
+- `[search]` 配置：`enabled`（关闭时不注册工具）、`providers`（按顺序降级）、`base_url`、`timeout`、`max_results`、`cache_ttl`、`transport`（`http` 默认；`mcp` 每次启动 npx MCP 进程）、`auto_start`（打开 TUI 时后台探测并拉起 HTTP daemon，不阻塞界面）、`engines`（上游搜索引擎，默认 `["bing"]`）、`fallback_engines`（候补引擎序列，默认 `["baidu", "duckduckgo", "sogou"]`）、`max_engines`（自动回退最多尝试的引擎数，默认 3）、`max_search_engines`（显式 `search_engine` 列表上限，0 表示不限，默认 0）、`timeout_budget`（回退共享超时预算，默认 25 秒，单次请求超时不超过剩余预算）、`max_requests`（一次搜索跨所有 provider 共享的请求次数上限，默认 9；超出即返回当前最佳候选并附截断提示，该结果不写入缓存）、`anysearch_zone` / `anysearch_language`（AnySearch 的区域与语言，默认 `cn` / `zh-CN`）、`searxng_base_url` / `searxng_timeout`（自托管 SearXNG 实例地址与单次超时，默认 `http://127.0.0.1:8888` / 10 秒）、`usage_limits`（每厂商调用上限，`[search.usage_limits.<provider>]` 设 `daily` 与 `monthly`（0 不限）；同一厂商的 Search 与 Fetch 共用同一计数池，达到上限即跳过该厂商并正常回退；计数保存在 vault 的 `runtime/state/usage.json`，**本地计数不等于服务商实际账单上限**）、`fetch_timeout`（抓取正文的单独超时，默认 45 秒）。`syvrio setup` 可管理双周期额度与官方暂停。
 
 受控真实冒烟：`scripts/smoke_search_apis.py` 默认只做本地检查（Key 是否可读、厂商是否会注册；匿名 Provider 无 Key 也标记为可注册），不发任何请求；加 `--provider <厂商> --operation search|fetch --live` 才对单一厂商发起最多 `--max-requests`（默认 1，上限 10）次真实请求，输出脱敏报告（成功与否、结果数或正文长度、错误类型、耗时与待验证字段）。Key 只从环境变量或系统凭据读取，不回显。网页抓取由独立的 `[fetch]` 配置控制：`providers` 是抓取正文用的 provider 顺序（默认 `["open_websearch"]`），与搜索的 provider 顺序相互独立；配置了 Key 的官方厂商（tavily / exa / you / volcengine）加入该列表后才参与抓取。
 - `auto_start` 启动的 daemon 在 Windows 下隐藏控制台窗口；退出 TUI 后继续常驻，下次直接复用。
-- 搜索结果缓存为 `.syvrio/search-cache.json`，属于派生数据，可删除。普通成功结果缓存 24 小时（`cache_ttl`）；「今天/最新/latest」等时效性查询与空结果只短缓存（10/5 分钟），上游失败一律不入缓存。
+- 搜索结果缓存为 `runtime/cache/search/search-cache.json`，属于派生数据，可删除。普通成功结果缓存 24 小时（`cache_ttl`）；「今天/最新/latest」等时效性查询与空结果只短缓存（10/5 分钟），上游失败一律不入缓存。
 
 
 抓取按 `[fetch].providers` 独立选择厂商；官方抓取与 open-websearch 抓取均使用 `search.fetch_timeout`，搜索仍使用 `search.timeout`。open-websearch 抓取要求 HTTP transport，其他已配置的官方抓取不受其 transport 限制。
@@ -475,17 +478,11 @@ LLM 可以在 `search` 调用里用 `providers` 指定多个已启用来源的�
 | 密码、验证码、API Key | 直接拦截，不落盘 |
 | 文本完全重复 | 跳过 |
 
-记忆按主题存为 `memories/<topic>.md`，条目带稳定 ID、状态、时间戳、来源和置信度：
+记忆采用 [Schema v2 和 Vault Layout v2](docs/vault-v2.md)。每个顶层 Markdown 列表项包含正文、必填 Core 和可选的 Context、Extensions。召回时，选中的原始 Markdown 作为非可信引用交给模型。旧 Vault 必须按指南显式迁移。
 
-```markdown
-- 2026-10-22T19:42:50 — 在找市区的房子  `id=mem-20261022-194250-8f1e` `status=active` `source=session:s-...` `confidence=0.95` `session=s-...` `message=m-...`
-```
+更正会追加新条目，以 `syvrio.supersedes` 关联旧条目，并将旧状态置为 `superseded`；删除使用 `deleted`。审计记录写入 `records/memory/audit.jsonl`。
 
-更正采用“新条目 + `supersedes`”，旧条目状态改为 `superseded`；删除是软删除 `deleted`，操作写入 `.syvrio/audit.jsonl`，Git 可回滚。
-
-来源等行尾标签值含反引号或换行时，以 `~syvrio-escaped~` 前缀加百分号编码存储，读取时还原；普通标签格式不变，条目 ID 保持稳定。
-
-抽取与导入支持可选的 `context` JSON 行尾标签。无依据时字段缺省，旧 Markdown 无需迁移：
+可选上下文字段包括：
 
 | 字段 | 含义 |
 | --- | --- |
@@ -497,7 +494,7 @@ LLM 可以在 `search` 调用里用 `providers` 指定多个已启用来源的�
 
 事实日期只接受 `YYYY`、`YYYY-MM`、`YYYY-MM-DD`，保留原有精度，不补猜月日或转换时区。地点不从设备采集，语气推断、反讽和模糊情绪不作为情绪事实写入。正文仍保留这些限定，事件日期、地点和显式情绪可用于召回筛选；默认只检索当前有效事实（保留未标日期的有效旧条目）。上下文与正文一起检查凭据，正常确认会保留上下文；改写后确认或手动更正不会沿用可能已过期的旧上下文，原候选仍可审计。
 
-推断基础接口 `MemoryService.propose_inference(text, source_ids, kind)` 将假设单独追加到 `.syvrio/inferences.jsonl`，类型为 `profile`、`emotion` 或 `reflection`，新记录始终为 `hypothesis`。只接受当前有效的事实条目 ID，来源去重；同类型、同规范化文本、同一组证据且来源内容指纹未变时，重复提交返回原记录，不增加置信度或重复追加。推断 ID、已删除或已被更正的来源不能作为新证据。
+推断基础接口 `MemoryService.propose_inference(text, source_ids, kind)` 将假设单独追加到 `records/memory/inferences.jsonl`，类型为 `profile`、`emotion` 或 `reflection`，新记录始终为 `hypothesis`。只接受当前有效的事实条目 ID，来源去重；同类型、同规范化文本、同一组证据且来源内容指纹未变时，重复提交返回原记录，不增加置信度或重复追加。推断 ID、已删除或已被更正的来源不能作为新证据。
 
 `syvrio inferences` 与 TUI `/inferences` 提供查看、确认、拒绝与纠正入口；确认后的推断仍独立于事实库。来源更正、删除后关联推断失效，审查时也核验来源。状态变更追加记录；损坏日志停止写入并保留原始字节；`syvrio inferences --recover-tail` 可显式恢复截断尾行，追加恢复标记，中间损坏仍报错。推断不会进入事实检索；只有用户确认且来源与本轮召回相关的画像推断才进入聊天上下文，最多 300 tokens。
 
@@ -537,9 +534,9 @@ src/syvrio/
 
 README 的界面演示与截图保存在 `docs/assets/`，不包含个人记忆库数据。
 
-`syvrio` 启动时默认开启本地诊断日志，保存在默认配置文件旁的 `logs/syvrio.log`（默认配置位置遵循 `SYVRIO_CONFIG`）。每行是 JSON，包含时间、版本、进程、系统、异常原因和调用堆栈；同时记录生成起止、阅读跟随/拖选状态与滚动位置，帮助排查界面问题。文件通过后台线程写入，单文件 2 MiB、最多保留 3 个轮转备份；日志不可写时提示但不阻止使用。日志不上传、不整段复制聊天或记忆、不采集局部变量，识别到的凭据会脱敏；异常原文仍可能带有本机路径或业务内容，分享前请检查。日志不属于 Vault 或会话历史，可在退出应用后删除，不影响记忆。
+`syvrio` 启动时默认开启本地诊断日志，保存在 Runtime 下的 `logs/syvrio.log`（默认配置位置遵循 `SYVRIO_CONFIG`）。每行是 JSON，包含时间、版本、进程、系统、异常原因和调用堆栈；同时记录生成起止、阅读跟随/拖选状态与滚动位置，帮助排查界面问题。文件通过后台线程写入，单文件 2 MiB、最多保留 3 个轮转备份；日志不可写时提示但不阻止使用。日志不上传、不整段复制聊天或记忆、不采集局部变量，识别到的凭据会脱敏；异常原文仍可能带有本机路径或业务内容，分享前请检查。日志不属于 Vault 或会话历史，可在退出应用后删除，不影响记忆。
 
-- 检索默认 hybrid：jieba + rank-bm25 与向量余弦两路结果做 RRF 融合；向量由 fastembed 本地推理（可选 extra）或 embedding API 计算，缓存为 `.syvrio/vectors.npz` 派生数据（vault 内已 gitignore，删除后自动重建；换 embedding 模型自动失效）。向量后端不可用时回退纯 BM25，`/status` 和 `syvrio status` 显示当前检索模式。
+- 检索默认 hybrid：jieba + rank-bm25 与向量余弦两路结果做 RRF 融合；向量由 fastembed 本地推理（可选 extra）或 embedding API 计算，缓存为 `runtime/indexes/vectors.npz` 派生数据（vault 内已 gitignore，删除后自动重建；换 embedding 模型自动失效）。向量后端不可用时回退纯 BM25，`/status` 和 `syvrio status` 显示当前检索模式。
 - token 预算用 tiktoken 估算，离线失败时回退字符估算。
 - 会话压缩、记忆裁决、来源链是自研核心；模型适配交给 LiteLLM，供应商选择与密码输入用 questionary，Key 用 keyring。
 
@@ -621,7 +618,7 @@ uv run python evals/retrieval_eval.py
 
 ## 推断审查与上下文检索
 
-`syvrio inferences` 查看独立推断；`syvrio inferences <id> --action confirm` 确认，`--action reject` 拒绝，`--action correct --text "新的假设"` 更正。确认仍保留在推断库，不自动转成事实；更正产生新假设。来源更正、删除或失效后，关联推断失效。状态快照追加到 `.syvrio/inferences.jsonl`，更正的旧/新状态在同一事件内保存；损坏日志报错并保留原始字节；用 `syvrio inferences --recover-tail` 显式恢复截断尾行，追加 recovery 标记后可继续审查。中间损坏不能跳过。
+`syvrio inferences` 查看独立推断；`syvrio inferences <id> --action confirm` 确认，`--action reject` 拒绝，`--action correct --text "新的假设"` 更正。确认仍保留在推断库，不自动转成事实；更正产生新假设。来源更正、删除或失效后，关联推断失效。状态快照追加到 `records/memory/inferences.jsonl`，更正的旧/新状态在同一事件内保存；损坏日志报错并保留原始字节；用 `syvrio inferences --recover-tail` 显式恢复截断尾行，追加 recovery 标记后可继续审查。中间损坏不能跳过。
 
 新会话消息记录带时区时间。退出、补沉淀和压缩前抽取保留每条原始消息的时间锚点；旧记录缺少时区时不按当前时间补猜。相对日期沿用原始时区日历，年/月精度保留；模糊表达保留原话。导入材料只使用材料自身可靠的时间，不能套用导入当天。
 
@@ -636,13 +633,13 @@ MCP `memorize` 可选 `observed_at` 接受带时区的原始消息时间。未�
 
 普通召回和主题读取排除已过期或尚未生效的事实；无日期的有效旧条目仍可召回。`recall --as-of YYYY-MM-DD` 查询指定日期，`--view history` 展示可追溯的演化历史；Agent/MCP 对应参数为 `as_of`、`view`。历史查询使用关键词检索，不改写向量缓存；缺少生效起点的条目不能断言在某天成立。纠错、删除和有歧义的替代链不会把旧内容重新当作事实；原始记录与审计仍保留。明确不重叠的有效期不再互判冲突，日期不明或区间重叠仍遵循现有裁决。
 
-`syvrio profile` 与 MCP `profile` 保留来源可追溯的事实/推断明细视图，不发模型请求。TUI `/profile` 改为快速查看已生成的画像摘要：只读 `.syvrio/profile-summary.json`，不遍历全部记忆，也不调用模型；无摘要时提示先执行 `/profile refresh`，来源变化后明确标注 Outdated，旧内容不会冒充最新画像。摘要从当前有效事实出发，按去重后的有效信息量自适应长度，跨主题概括长期特征、稳定偏好、思考与行为方式、当前状态及有证据的变化；内部保留来源引用，但默认不展示大量来源 ID，也不回写成事实或第二套数据库。
+`syvrio profile` 与 MCP `profile` 保留来源可追溯的事实/推断明细视图，不发模型请求。TUI `/profile` 改为快速查看已生成的画像摘要：只读 `runtime/cache/profile/profile-summary.json`，不遍历全部记忆，也不调用模型；无摘要时提示先执行 `/profile refresh`，来源变化后明确标注 Outdated，旧内容不会冒充最新画像。摘要从当前有效事实出发，按去重后的有效信息量自适应长度，跨主题概括长期特征、稳定偏好、思考与行为方式、当前状态及有证据的变化；内部保留来源引用，但默认不展示大量来源 ID，也不回写成事实或第二套数据库。
 
 `/profile refresh [n]` 或 `syvrio profile --refresh` 生成/更新摘要并继续提炼画像推断。摘要缺失或来源变化时，刷新先把最多 1 次请求分配给摘要，其余 n-1 次用于推断批次；n=0 不发请求，n=1 最多一次请求，手动刷新也不会隐式增加请求。事实未变化时跳过摘要生成。摘要失败或取消时保留旧摘要并标记过期，不发布未完成结果。`syvrio dream --requests 1` 或 `/dream 1` 仍用于跨事实回顾，寻找可审查的联系和假设；回顾在后台工作，可以继续聊天、切换会话。`/dream status` 查看运行态与下次计划，`/dream cancel` 请求取消（两种模式共用任务）；已发送请求无法撤销计费，返回后停止发布未完成候选。已保存候选和全部会话仍保留。
 
 每次任务默认最多一次模型请求，可设 0–20；关闭该任务的底层重试与候补模型，单请求超时最多 60 秒，要求配置的上下文窗口至少 2048 tokens。只处理新增/变化的事实，有限引用已处理事实作为背景；重启 TUI 后空闲自动调度会接续，也可执行同一命令立即接续。预算 0 不发请求，仅可恢复已经校验的本地结果。Dreaming 不直接扫描原始会话，先由既有沉淀流程将会话转成事实；不承诺穷举整库所有跨条目关系。
 
-进度追加在 `.syvrio/reflection-jobs.jsonl`，保存批次摘要、已校验候选及完成状态；截断尾行通过追加恢复标记保留原字节，中间损坏停止处理。加载摘要与调度状态分别使用 `.syvrio/profile-summary.json`、`.syvrio/reflection-state.json` 和 `.syvrio/profile-fingerprints.json`，均可删除重建且不进入 Git 历史。候选仅写独立推断日志，不直接改写 Markdown 事实。新推断携带来源内容指纹，来源到期、更正、删除或手动改变后失效；旧推断没有指纹时只能检查来源 ID 和有效状态，无法追溯旧文本编辑。当前任务互斥限于同一服务实例，请勿同时用多个进程向同一库启动回顾。
+进度追加在 `runtime/jobs/dreaming/jobs.jsonl`，保存批次摘要、已校验候选及完成状态；截断尾行通过追加恢复标记保留原字节，中间损坏停止处理。加载摘要与调度状态分别使用 `runtime/cache/profile/profile-summary.json`、`runtime/state/reflection.json` 和 `runtime/state/fingerprints.json`，均可删除重建且不进入 Git 历史。候选仅写独立推断日志，不直接改写 Markdown 事实。新推断携带来源内容指纹，来源到期、更正、删除或手动改变后失效；旧推断没有指纹时只能检查来源 ID 和有效状态，无法追溯旧文本编辑。当前任务互斥限于同一服务实例，请勿同时用多个进程向同一库启动回顾。
 
 代码职责：时间演化写入由记忆服务统一编排，时间模块仅负责日期与视图计算；后台回顾通过公开服务接口访问推断。待确认项先追加处理日志再移出队列，写入失败保留候选；极端失败重试可能留下重复处理日志。损坏的向量缓存按未命中重建，回顾响应缺少 proposals 字段按失败处理并保留进度。
 
@@ -680,7 +677,7 @@ Windows 交互终端输入框使用原生细竖线光标，以配合中文输入
 | searxng | 0 | 0 |
 | open_websearch | 0 | 0 |
 
-0 表示该周期不限。配置以 `[search.usage_limits.<provider>]` 的 `daily`、`monthly` 覆盖默认值，显式 0 会保留；两周期任意一项耗尽即跳过。Search/Fetch 共池，缓存命中不计数，已发出的失败请求保守计数。按运行机器本地时区的自然日/月重置；状态保存在 `.syvrio/usage.json`，同进程检查与记账互斥，跨进程不保证严格上限。
+0 表示该周期不限。配置以 `[search.usage_limits.<provider>]` 的 `daily`、`monthly` 覆盖默认值，显式 0 会保留；两周期任意一项耗尽即跳过。Search/Fetch 共池，缓存命中不计数，已发出的失败请求保守计数。按运行机器本地时区的自然日/月重置；状态保存在 `runtime/state/usage.json`，同进程检查与记账互斥，跨进程不保证严格上限。
 
 ```toml
 [search.usage_limits.tavily]

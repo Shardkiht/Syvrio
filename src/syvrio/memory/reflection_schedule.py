@@ -8,6 +8,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .detect import contains_secret
@@ -42,8 +43,8 @@ class ReflectionSchedule:
     def __init__(self, engine: ReflectionEngine) -> None:
         self.engine = engine
         self.service = engine.service
-        self.path = engine.service.config.vault / ".syvrio" / "reflection-state.json"
-        self.fingerprints_path = engine.service.config.vault / ".syvrio" / "profile-fingerprints.json"
+        self.path = self.service.paths.state_dir / "reflection.json"
+        self.fingerprints_path = self.service.paths.state_dir / "fingerprints.json"
         self._vault_lock = engine._vault_lock
 
     def default_state(self) -> dict:
@@ -154,7 +155,7 @@ class ReflectionSchedule:
 
     @staticmethod
     def important_entry(entry: Entry) -> bool:
-        if entry.topic.casefold() in PROFILE_IMPORTANT_TOPICS:
+        if Path(entry.topic).stem.casefold() in PROFILE_IMPORTANT_TOPICS:
             return True
         text = entry.text.casefold()
         return any(keyword in text for keyword in PROFILE_IMPORTANT_KEYWORDS)

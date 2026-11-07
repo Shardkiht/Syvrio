@@ -870,7 +870,7 @@ def test_usage_menu_zero_reset_and_resume(tmp_path, monkeypatch, capsys):
     from syvrio.infra.config import Config, UsageLimit, load_config
     from syvrio.infra.search.usage import UsageLimiter
     config = Config(vault=tmp_path / "vault")
-    limiter = UsageLimiter(config.search.usage_limits, config.vault / ".syvrio/usage.json")
+    limiter = UsageLimiter(config.search.usage_limits, config.paths().state_dir / "usage.json")
     limiter.record("exa")
     limiter.pause("exa", "NO_MORE_CREDITS")
     path = tmp_path / "config.toml"
@@ -880,7 +880,7 @@ def test_usage_menu_zero_reset_and_resume(tmp_path, monkeypatch, capsys):
     loaded = load_config(path)
     assert loaded.search.usage_limits["exa"].monthly == 0
     assert (loaded.search.usage_limits["tavily"].daily, loaded.search.usage_limits["tavily"].monthly) == (0, 800)
-    state = UsageLimiter(loaded.search.usage_limits, config.vault / ".syvrio/usage.json").status("exa")
+    state = UsageLimiter(loaded.search.usage_limits, config.paths().state_dir / "usage.json").status("exa")
     assert not state["paused"] and state["monthly"]["used"] == 1
     output = capsys.readouterr().out
     assert "NO_MORE_CREDITS" in output and "不限" in output

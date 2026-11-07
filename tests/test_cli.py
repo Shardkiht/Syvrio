@@ -218,12 +218,12 @@ def test_import_dry_run_then_apply(tmp_path, monkeypatch, suffix):
     assert result.exit_code == 0, result.output
     assert "dry-run" in result.output
     assert "直写 1" in result.output
-    assert not (vault / "memories" / "preferences.md").exists()
+    assert not (vault / "memories" / "general" / "preferences.md").exists()
 
     result = invoke(["import", str(source), "--apply", "--config", str(config)])
     assert result.exit_code == 0, result.output
     assert "已写入" in result.output
-    assert (vault / "memories" / "preferences.md").exists()
+    assert (vault / "memories" / "general" / "preferences.md").exists()
 
 
 def test_cli_correct_and_forget(tmp_path):

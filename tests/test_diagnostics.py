@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from syvrio.infra import diagnostics
+from syvrio.infra.paths import runtime_path
 
 pytestmark = pytest.mark.config
 
@@ -25,7 +26,7 @@ def read_events(path: Path) -> list[dict]:
 def test_chained_error_retains_traceback_and_reason_without_credentials(tmp_path, monkeypatch):
     monkeypatch.setenv("EXAMPLE_API_KEY", "synthetic-credential-123")
     path = diagnostics.start_diagnostics()
-    assert path == tmp_path / "logs" / "syvrio.log"
+    assert path == runtime_path() / "logs" / "syvrio.log"
     assert diagnostics.start_diagnostics() == path
     try:
         try:
@@ -123,7 +124,7 @@ def test_cli_entrypoint_logs_unhandled_error(monkeypatch):
     monkeypatch.setattr(cli, "app", fail)
     with pytest.raises(RuntimeError, match="synthetic command failure"):
         cli.main()
-    path = diagnostics.default_config_path().parent / "logs" / "syvrio.log"
+    path = runtime_path() / "logs" / "syvrio.log"
     events = read_events(path)
     assert [event["event"] for event in events] == ["app.start", "cli.failed", "app.stop"]
     assert "synthetic command failure" in events[1]["traceback"]

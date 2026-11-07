@@ -249,6 +249,30 @@ def test_reflection_model_disables_retries_and_limits_output(service, monkeypatc
     assert captured["max_tokens"] <= 1800
 
 
+def test_spark_profile_reserves_space_for_reasoning_and_json(service, monkeypatch):
+    from types import SimpleNamespace
+    from syvrio.infra.config import LLMConfig
+    from syvrio.infra.tokens import estimate_tokens
+    from syvrio.memory import reflection as module
+
+    monkeypatch.setenv("SYVRIO_SYNTHETIC_SPARK_KEY", "synthetic-key")
+    service.config.llm = LLMConfig(provider="spark", api_key_env="SYVRIO_SYNTHETIC_SPARK_KEY")
+    service.config.chat.context_window = 8192
+    entry = service.note("合成偏好")
+    captured = {}
+
+    def complete(config, messages, **kwargs):
+        captured.update(max_tokens=kwargs["max_tokens"],
+                        input_tokens=sum(estimate_tokens(m["content"]) for m in messages))
+        content = '{"summary":"合成画像"}' if kwargs["max_tokens"] > 1024 else ""
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+
+    monkeypatch.setattr(module, "complete", complete)
+    draft = service.reflection._summary_draft([entry], [])
+    assert service.reflection._summary_model(draft.payload) == "合成画像"
+    assert captured["max_tokens"] + captured["input_tokens"] < 8192
+
+
 @pytest.mark.cli
 def test_profile_cli_is_read_only_and_evolve_cli_preserves_history(service, monkeypatch):
     from typer.testing import CliRunner

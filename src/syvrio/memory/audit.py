@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ..infra.paths import vault_paths
+
 import json
 from datetime import datetime
 from pathlib import Path
@@ -7,7 +9,7 @@ from pathlib import Path
 
 class AuditLog:
     def __init__(self, vault: Path):
-        self.path = Path(vault) / ".syvrio" / "audit.jsonl"
+        self.path = vault_paths(vault).records_dir / "audit.jsonl"
 
     def write(self, action: str, **fields) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

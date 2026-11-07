@@ -37,7 +37,7 @@ def test_resolve_removes_and_logs(tmp_path):
 
     assert resolved.id == "p-1"
     assert [item.id for item in queue.all()] == ["p-2"]
-    log = (tmp_path / ".syvrio" / "resolved.jsonl").read_text(encoding="utf-8")
+    log = (tmp_path / "records" / "memory" / "resolved.jsonl").read_text(encoding="utf-8")
     assert '"status": "approved"' in log
     assert "p-1" in log
 

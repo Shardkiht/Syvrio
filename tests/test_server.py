@@ -37,7 +37,7 @@ async def test_mcp_memorize_recall_pending(tmp_path):
         assert len(memorized.data["queued"]) == 1
 
         recalled = await client.call_tool("recall", {"query": "清淡"})
-        assert recalled.data[0]["topic"] == "preferences"
+        assert recalled.data[0]["topic"] == "memories/general/preferences.md"
 
         pending = await client.call_tool("review_pending", {})
         assert len(pending.data) == 1
@@ -57,10 +57,10 @@ async def test_mcp_topics_and_status(tmp_path):
         await client.call_tool("memorize", {"text": "对话"})
 
         topics = await client.call_tool("list_topics", {})
-        assert topics.data[0]["topic"] == "devices"
+        assert topics.data[0]["topic"] == "memories/general/devices.md"
 
         topic = await client.call_tool("read_topic", {"topic": "devices"})
-        assert topic.data["content"] == "- 用 手冲滤纸"
+        assert "* 用 手冲滤纸\n\n  **Core**" in topic.data["content"]
         assert topic.data["entries"] == 1
 
         status = await client.call_tool("status", {})
