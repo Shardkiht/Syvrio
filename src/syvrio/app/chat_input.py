@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
+import platform
 import sys
 
 from rich.cells import cell_len
+from rich.control import Control
 from rich.segment import Segment
 from textual.geometry import Offset
 from textual.strip import Strip
@@ -40,11 +42,16 @@ class BarInput(Input):
     @property
     def _uses_native_cursor(self) -> bool:
         driver = self.app._driver
+        if driver is None or driver.is_headless:
+            return False
+        if sys.platform == "win32":
+            return self._terminal_supports_native_cursor()
+        # Windows OpenSSH starts the remote TUI inside WSL without WT_SESSION.
+        # Its xterm-compatible frontend still anchors IME to the terminal caret.
         return (
-            sys.platform == "win32"
-            and driver is not None
-            and not driver.is_headless
-            and self._terminal_supports_native_cursor()
+            sys.platform == "linux"
+            and "microsoft" in platform.release().lower()
+            and os.environ.get("TERM", "").startswith("xterm")
         )
 
     @property
@@ -77,7 +84,11 @@ class BarInput(Input):
     def _show_native_cursor(self) -> None:
         if self._uses_native_cursor and self.has_focus and not self.disabled and not self._cursor_suspended:
             # IME preedit belongs to the terminal; a painted glyph cannot follow it.
-            self.app._driver.write("\x1b[5 q\x1b[?25h")
+            app = self.app
+            app.cursor_position = self.cursor_screen_offset
+            position = self.screen.outer_size.clamp_offset(app.cursor_position)
+            app._driver.write(Control.move_to(*position).segment.text)
+            app._driver.write("\x1b[5 q\x1b[?25h")
             self._native_cursor_active = True
 
     def _hide_native_cursor(self) -> None:

@@ -2627,11 +2627,14 @@ async def test_input_cursor_is_vertical_bar(tmp_path):
         await pilot.pause()
         widget = app.query_one("#input", Input)
         assert isinstance(widget, BarInput)
+        # Exercise the visible phase without relying on the blink timer.
+        widget._cursor_visible = True
         assert "│" in widget.render_line(0).text
         assert not widget.get_component_rich_style("input--cursor").underline
 
         widget.value = "测试"
         await pilot.pause()
+        widget._cursor_visible = True
         rendered = widget.render_line(0).text
         assert "│" in rendered
         assert "测试" in rendered
@@ -4372,6 +4375,30 @@ def test_native_cursor_requires_supported_terminal(monkeypatch):
     assert BarInput._terminal_supports_native_cursor() is True
 
 
+@pytest.mark.parametrize(
+    ("release", "term", "headless", "expected"),
+    [
+        ("6.6.87.2-microsoft-standard-WSL2", "xterm-256color", False, True),
+        ("6.6.87.2-microsoft-standard-WSL2", "dumb", False, False),
+        ("6.6.87.2-microsoft-standard-WSL2", "xterm-256color", True, False),
+        ("6.12.0-amd64", "xterm-256color", False, False),
+    ],
+)
+def test_wsl_native_cursor_without_windows_terminal_variables(
+    monkeypatch, release, term, headless, expected,
+):
+    from types import SimpleNamespace
+    from syvrio.app import chat_input
+
+    monkeypatch.setattr(chat_input.sys, "platform", "linux")
+    monkeypatch.setattr(chat_input.platform, "release", lambda: release)
+    monkeypatch.setenv("TERM", term)
+    for name in ("WT_SESSION", "WT_PROFILE_ID", "TERM_PROGRAM"):
+        monkeypatch.delenv(name, raising=False)
+    widget = SimpleNamespace(app=SimpleNamespace(_driver=SimpleNamespace(is_headless=headless)))
+    assert BarInput._uses_native_cursor.fget(widget) is expected
+
+
 async def test_native_cursor_position_refreshed_on_resize(tmp_path, monkeypatch):
     # 回归：布局变化（折叠侧栏/缩放）后 App 回放的是旧光标坐标，必须重算。
     app = build_app(tmp_path, [])
@@ -4381,7 +4408,11 @@ async def test_native_cursor_position_refreshed_on_resize(tmp_path, monkeypatch)
         widget = app.query_one("#input", BarInput)
         monkeypatch.setattr(app._driver, "write", writes.append)
         monkeypatch.setattr(BarInput, "_uses_native_cursor", property(lambda self: True))
+        app.cursor_position = Offset(0, 0)
         widget._show_native_cursor()
+        position = widget.cursor_screen_offset
+        assert app.cursor_position == position
+        assert writes[-2:] == [f"\x1b[{position.y + 1};{position.x + 1}H", "\x1b[5 q\x1b[?25h"]
         app.cursor_position = Offset(0, 0)  # 模拟布局变化后未刷新的旧坐标
         widget.on_resize()
         assert app.cursor_position == widget.cursor_screen_offset
