@@ -46,6 +46,7 @@ from .chat_widgets import (
     TranscriptView,
 )
 from .session_ui import visible_sessions
+from .command_catalog import SLASH_SUBCOMMANDS
 
 
 class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixin, App):
@@ -271,6 +272,20 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
                 return
 
     def action_focus_next(self) -> None:
+        if len(self.screen_stack) == 1:
+            widget = self.query_one("#input", Input)
+            value = widget.value
+            if (widget.has_focus and widget.cursor_at_end and widget.selection.is_empty
+                    and value.startswith("/")):
+                palette = self.query_one("#cmd-palette", CommandPalette)
+                prefix = value[1:]
+                if palette.prefix != prefix:
+                    palette.open(prefix)
+                if command := palette.current:
+                    suffix = " " if command in SLASH_SUBCOMMANDS else ""
+                    widget.value = f"/{command}{suffix}"
+                    widget.cursor_position = len(widget.value)
+                    return
         self._focus_active_input()
 
     def action_focus_previous(self) -> None:
@@ -765,10 +780,12 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
     # ---------- 输入与回合 ----------
 
     def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id != "input":
+            return
         self._reflection_activity()
         palette = self.query_one("#cmd-palette", CommandPalette)
         value = event.value
-        if value.startswith("/") and " " not in value:
+        if value.startswith("/"):
             palette.open(value[1:])
         else:
             palette.close()
@@ -786,7 +803,7 @@ class ChatApp(ChatGitMixin, ChatReflectionMixin, ChatFlowMixin, ChatCommandsMixi
             self.application.conversation.resume_after_undo()
         if line.startswith("/"):
             palette = self.query_one("#cmd-palette", CommandPalette)
-            if palette.display and palette.current and " " not in line:
+            if palette.display and palette.current and " " not in event.value:
                 self.run_command_from_palette(palette.current)
                 return
             palette.close()

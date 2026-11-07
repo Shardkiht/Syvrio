@@ -29,7 +29,7 @@ from textual.widgets import Button, Input, Label, ListView, ListItem, Static
 
 from ..agent.session import Session
 from ..infra.diagnostics import record_event
-from .command_catalog import SLASH_COMMANDS
+from .command_catalog import SLASH_COMMANDS, slash_matches
 from .chat_theme import MARKDOWN_THEME
 
 
@@ -545,6 +545,7 @@ class CommandPalette(Vertical):
         super().__init__(id="cmd-palette")
         self.matches: list[tuple[str, str, str]] = []
         self.index = 0
+        self.prefix: str | None = None
 
     def compose(self) -> ComposeResult:
         yield VerticalScroll(id="cmd-list", classes="thin-scroll")
@@ -554,17 +555,14 @@ class CommandPalette(Vertical):
         return self.query_one("#cmd-list", VerticalScroll)
 
     def open(self, prefix: str) -> None:
-        needle = prefix.lower()
-        self.matches = [
-            (command, usage, description)
-            for command, usage, description in SLASH_COMMANDS
-            if command.startswith(needle)
-        ]
+        self.prefix = prefix
+        self.matches = slash_matches(prefix)
         self.index = 0
         self.rebuild()
         self.display = bool(self.matches)
 
     def close(self) -> None:
+        self.prefix = None
         self.matches = []
         self.display = False
 

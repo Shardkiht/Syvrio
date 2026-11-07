@@ -24,3 +24,32 @@ SLASH_COMMANDS = [
     ("exit", "/exit", "Quit"),
     ("quit", "/quit", "Quit"),
 ]
+
+SLASH_SUBCOMMANDS = {
+    "model": (("refresh", "Refresh model list"),),
+    "profile": (
+        ("refresh", "Refresh profile"),
+        ("cancel", "Cancel reflection"),
+        ("resume", "Resume automatic reflection"),
+        ("status", "Show reflection status"),
+    ),
+    "dream": (
+        ("cancel", "Cancel reflection"),
+        ("resume", "Resume automatic reflection"),
+        ("status", "Show reflection status"),
+    ),
+}
+
+
+def slash_matches(prefix: str) -> list[tuple[str, str, str]]:
+    command, space, argument = prefix.lower().partition(" ")
+    if not space:
+        return [row for row in SLASH_COMMANDS if row[0].startswith(command)]
+    argument = argument.lstrip()
+    if " " in argument:
+        return []
+    return [
+        (f"{command} {name}", f"/{command} {name}", description)
+        for name, description in SLASH_SUBCOMMANDS.get(command, ())
+        if name.startswith(argument)
+    ]

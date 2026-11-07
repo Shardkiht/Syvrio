@@ -1265,6 +1265,52 @@ async def test_command_palette_escape_closes(tmp_path):
         assert not palette.display
 
 
+async def test_tab_completes_highlighted_command_without_executing(tmp_path, monkeypatch):
+    app = build_app(tmp_path, [])
+    commands = []
+    monkeypatch.setattr(app, "_command", commands.append)
+    async with app.run_test() as pilot:
+        widget = app.query_one("#input", Input)
+        await pilot.press("slash", "down", "tab")
+        assert widget.value == "/sessions"
+        assert widget.cursor_position == len(widget.value)
+        assert not commands
+        await pilot.press("enter")
+        assert commands == ["/sessions"]
+
+
+@pytest.mark.parametrize(
+    ("partial", "completed"),
+    [("/profile r", "/profile refresh"), ("/model re", "/model refresh"),
+     ("/dream ca", "/dream cancel"), ("/profile refresh 3", "/profile refresh 3"),
+     ("/import /tmp/notes", "/import /tmp/notes"), ("ordinary text", "ordinary text")],
+)
+async def test_tab_completes_subcommands_and_preserves_arguments(tmp_path, partial, completed):
+    app = build_app(tmp_path, [])
+    async with app.run_test() as pilot:
+        widget = app.query_one("#input", Input)
+        widget.value = partial
+        widget.cursor_position = len(partial)
+        await pilot.press("tab")
+        assert widget.value == completed
+        assert widget.has_focus
+
+
+async def test_tab_completes_command_then_subcommand(tmp_path, monkeypatch):
+    app = build_app(tmp_path, [])
+    commands = []
+    monkeypatch.setattr(app, "_command", commands.append)
+    async with app.run_test() as pilot:
+        widget = app.query_one("#input", Input)
+        await pilot.press("slash", "p", "r", "o", "tab")
+        assert widget.value == "/profile "
+        await pilot.press("tab")
+        assert widget.value == "/profile refresh"
+        assert not commands
+        await pilot.press("enter")
+        assert commands == ["/profile refresh"]
+
+
 @pytest.mark.parametrize("prefix", ["/", "/rename"])
 async def test_command_palette_sits_above_input(tmp_path, prefix):
     from syvrio.app.chat_app import CommandPalette
